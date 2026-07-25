@@ -24,17 +24,16 @@ A local REST proxy (`opendrived`) and CLI (`odctl`) for the [OpenDrive.com](http
 cmd/opendrived/   守护进程入口          pkg/opendrive/   Go SDK(核心)
 cmd/odctl/        CLI 入口              internal/        server / jobs / keystore / cache / config
 tools/fetch-spec/ 线上 Swagger 规格抓取  deploy/          docker / systemd / launchd / windows
-Doc/              官方 API 指引 PDF 与官方 PHP/C# 样本(参考资料,勿修改)
-docs/             Bridge OpenAPI 规格与部署手册(待生成)
+docs/             官方 API 指引 PDF 与官方样本(只读参考)+ Bridge OpenAPI 规格与部署手册(待生成)
 ```
 
 ## 参考资料 References
 
-- `Doc/OpenDrive_API_guide.pdf` — 官方 REST API Guide v1.1.7
-- `Doc/api-samples/` — 官方示例代码(MIT,© OpenDrive Inc.)
+- `docs/OpenDrive_API_guide.pdf` — 官方 REST API Guide v1.1.7
+- `docs/api-samples/` — 官方示例代码(MIT,© OpenDrive Inc.)
 - 线上 API Explorer: https://dev.opendrive.com/api/explorer/
 - 线上机器可读规格: `https://dev.opendrive.com/api/v1/resources.json`
 
 ## License
 
-MIT (仓库自研代码)。`Doc/OpenDrive_API_guide.pdf` 版权归 OpenDrive, Inc. 所有,仅作本项目内部开发参考,本仓库为私有仓库,请勿公开或转发该文件。
+MIT (仓库自研代码)。`docs/OpenDrive_API_guide.pdf` 版权归 OpenDrive, Inc. 所有,仅作本项目内部开发参考,本仓库为私有仓库,请勿公开或转发该文件。

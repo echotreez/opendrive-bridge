@@ -5,6 +5,6 @@
 3. Upstream behavior: trust the live Swagger specs (`https://dev.opendrive.com/api/v1/resources/*.json`) and real sandbox responses over the PDF. Record discrepancies in `docs/discrepancies.md`.
 4. Every gotcha in whitepaper §2.6 (14 items) must have at least one test case.
 5. Never log or persist passwords/tokens; token redaction in logs is mandatory (§9.4).
-6. `Doc/` contains official OpenDrive reference material — read-only, never modify.
+6. `docs/` contains official OpenDrive reference material — read-only, never modify.
 7. Conventional Commits; every PR includes tests; keep `main` releasable.
 8. Coverage gates: `pkg/opendrive` ≥ 85%, `internal/*` ≥ 75% (§6.3).

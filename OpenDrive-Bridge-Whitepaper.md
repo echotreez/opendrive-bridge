@@ -573,9 +573,9 @@ Upstream 要求 `access_token` 放 URL query,这会出现在各种日志里。�
 
 ### A. 官方资料清单
 
-- `Doc/OpenDrive_API_guide.pdf` — REST API Guide v1.1.7 (10/2023),15 个模块的权威参数说明。
-- `Doc/api-samples/api-samples/*.php` — 官方 PHP 样本(2016,PHP 5.3+ / cURL):session_login、folder/file CRUD、chunked upload(50MB chunk)、resumable.js 上传、账户与权限管理等 30+ 文件。
-- `Doc/api-samples/C# Upload Sample.txt` — 伪代码级 C# 上传样本,演示 open_if_exists 与 RequireHashOnly 秒传分支。
+- `docs/OpenDrive_API_guide.pdf` — REST API Guide v1.1.7 (10/2023),15 个模块的权威参数说明。
+- `docs/api-samples/api-samples/*.php` — 官方 PHP 样本(2016,PHP 5.3+ / cURL):session_login、folder/file CRUD、chunked upload(50MB chunk)、resumable.js 上传、账户与权限管理等 30+ 文件。
+- `docs/api-samples/C# Upload Sample.txt` — 伪代码级 C# 上传样本,演示 open_if_exists 与 RequireHashOnly 秒传分支。
 - 线上 Swagger 1.1 规格:`https://dev.opendrive.com/api/v1/resources.json` 及 `/resources/{module}.json`(登录后可见全量)。
 - API Explorer(交互测试):`https://dev.opendrive.com/api/explorer/`。
 
