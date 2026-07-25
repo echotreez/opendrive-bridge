@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenDrive Bridge daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/opendrived
+Restart=on-failure
+DynamicUser=yes
+StateDirectory=opendrive-bridge
+ProtectSystem=strict
+ProtectHome=read-only
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

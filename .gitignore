@@ -1,0 +1,21 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.test
+coverage.out
+coverage.html
+
+# Secrets & local state
+.env
+*.token
+config.local.yaml
+state/
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,61 @@
+string session_id = "some session id"; // current OD session id
+string folder_id = "some folder id"; // OD folder id. There new OD file will be created
+string source_file_name = "some file to be uploaded"; // path to some local file to be uploaded
+string od_file_name = "some name for new od file"; // name for new OD file
+
+int file_size = 0;
+string file_hash = "";
+
+// Before upload your file, you can tell the server the size of the file and md5 checksum in order to avoid the re-upload the same files.
+struct stat st = stat(source_file_name);
+file_size = st.st_size;
+file_hash = make_md5(source_file_name);
+
+// Step 1: Creating new file
+
+// first need to create new file on OD server. 
+// set open_if_exists=1 and the file will be overwritten if it already exists.
+// POST_JSON - some function for sending POST request with content type application/json.
+if( file_hash.empty() )
+	create_result = POST_JSON("https://dev.opendrive.com/api/v1/upload/create_file.json", '{"session_id": session_id, "folder_id": folder_id, "file_name": od_file_name, "open_if_exists": 1}');
+else
+	create_result = POST_JSON("https://dev.opendrive.com/api/v1/upload/create_file.json", '{"session_id": session_id, "folder_id": folder_id, "file_name": od_file_name, "open_if_exists": 1, "file_size": file_size, "file_hash": file_hash}');
+
+
+// Step 2: Upload file data
+
+// If the file already had been uploaded to the OD server, RequireHashOnly = 1 will be returned. In this case, you can skip the step 2.
+if( create_result["RequireHashOnly"] )
+{
+	int chunk_offset = 0;
+	file_size = 0;
+
+	// Read chunk of data from source file and send it to OD server
+	fp = fopen(source_file_name, "rb");
+	while( (chunk_size = fread(data_buffer, data_buffer_size, fp)) )
+	{
+		file_size += chunk_size;
+
+		form_data["session_id"] = session_id;
+		form_data["file_id"] = create_result["FileId"];
+		form_data["temp_location"] = create_result["TempLocation"];
+		form_data["chunk_offset"] = chunk_offset;
+		form_data["chunk_size"] = chunk_size;
+		form_data["file_data"] = data_buffer;
+
+		// POST_MULTIPART_FORM_DATA - some function for sending POST request with content type multipart/form-data.
+		chunk_result = POST_MULTIPART_FORM_DATA("https://dev.opendrive.com/api/v1/upload/upload_file_chunk.json", form_data);
+
+		chunk_offset += chunk_result["TotalWritten"];
+	}
+
+	fopen(fp);
+}
+
+
+// Step 3: Upload completion.
+st.st_mtime;
+if( file_hash.empty() )
+	close_result = POST_JSON("https://dev.opendrive.com/api/v1/upload/close_file_upload.json", '{"session_id": session_id, "file_id": create_result["FileId"], "file_size": file_size, "temp_location": create_result["TempLocation"], "file_time": st.st_mtime}');
+else
+	close_result = POST_JSON("https://dev.opendrive.com/api/v1/upload/close_file_upload.json", '{"session_id": session_id, "file_id": create_result["FileId"], "file_size": file_size, "temp_location": create_result["TempLocation"], "file_time": st.st_mtime, "file_hash": file_hash}');
