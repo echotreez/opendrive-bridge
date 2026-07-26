@@ -1386,7 +1386,7 @@ func TestRenewGateBackoffGrowsAndCaps(t *testing.T) {
 
 	prev := time.Duration(0)
 	for i := 0; i < 12; i++ {
-		g.backoff(now, err)
+		_ = g.backoff(now, err)
 		wait := g.nextAttempt.Sub(now)
 		if wait > maxRenewBackoff {
 			t.Fatalf("attempt %d waits %v, over the cap", i, wait)
@@ -1411,7 +1411,7 @@ func TestRenewGateBackoffGrowsAndCaps(t *testing.T) {
 		t.Fatalf("succeed left %+v", g)
 	}
 
-	g.terminal(StateReauthRequired, reauthError("nope"))
+	_ = g.terminal(StateReauthRequired, reauthError("nope"))
 	if g.blocked(now.Add(365*24*time.Hour)) == nil {
 		t.Fatal("a terminal state never reopens on its own")
 	}
