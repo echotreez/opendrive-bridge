@@ -1,0 +1,1884 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https://dev.opendrive.com/api",
+  "produces": [
+    "application/json"
+  ],
+  "consumes": [
+    "application/json",
+    "multipart/form-data"
+  ],
+  "apis": [
+    {
+      "path": "/v1/admin/accountusers.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveAccountUsers",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get list of account users Get list of account users&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/affiliateinfo.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveAffiliateInfo",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID or Email.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get affiliate user data Get affiliate user data&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/alluseraffiliates.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveAllUserAffiliates",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session Id.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "search_query",
+              "description": "What to search. If <strong>search_by</strong> is empty, will search by email,username,first_name,last_name, phone. If Admin, search by userid, CC last 4 digits as well. due_date - unixtime.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "order_by",
+              "description": "Sort users criteria.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "UserName",
+                  "UserFirstName",
+                  "UserEmail",
+                  "Level",
+                  "Suspended",
+                  "BwMax",
+                  "BwUsed",
+                  "MaxStorage",
+                  "StorageUsed",
+                  "Time",
+                  "LastLogin",
+                  "closed_since",
+                  "suspended",
+                  "trials",
+                  "payment_due"
+                ]
+              }
+            },
+            {
+              "name": "order",
+              "description": "Search order.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "asc",
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "asc",
+                  "desc"
+                ]
+              }
+            },
+            {
+              "name": "items_on_page",
+              "description": "items limit per page.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "10",
+                  "25",
+                  "50",
+                  "100",
+                  "1000"
+                ]
+              }
+            },
+            {
+              "name": "page",
+              "description": "Page number.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get user affiliates list Params in get request are: <br /> <pre> $_get = array( <br /> Get user affiliates list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Params in get request are: <br /> <pre> $_get = array( <br /> &nbsp;&nbsp;&nbsp;&nbsp;'page' => page number, <br /> &nbsp;&nbsp;&nbsp;&nbsp;'items_on_page' => num items on page <br /> &nbsp;&nbsp;&nbsp;&nbsp;'order_by' => array of fields to order by <br /> &nbsp;&nbsp;&nbsp;&nbsp;'search_query' => search_query <br /> );<br /> example :<br /> /admin/alluseraffiliates.json?page=1&items_on_page=40&order_by[level]=desc&order_by[email]=asc&search_query=a </pre>",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/allusers.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveAllUsers",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session Id.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "search_by",
+              "description": "Search field (CC - last CC 4 digits).",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "username",
+                  "email",
+                  "phone",
+                  "userid",
+                  "cc",
+                  "file_id",
+                  "folder_id",
+                  "due_date"
+                ]
+              }
+            },
+            {
+              "name": "search_query",
+              "description": "What to search. If <strong>search_by</strong> is empty, will search by email,username,first_name,last_name, phone. If Admin, search by userid, CC last 4 digits as well. due_date - unixtime.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "filter",
+              "description": "Status filter.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "all",
+                  "active",
+                  "suspended",
+                  "suspended_90d",
+                  "free",
+                  "premium",
+                  "monthly",
+                  "yearly",
+                  "closed",
+                  "trials"
+                ]
+              }
+            },
+            {
+              "name": "order_by",
+              "description": "Sort users criteria.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "UserName",
+                  "UserFirstName",
+                  "UserEmail",
+                  "Level",
+                  "Suspended",
+                  "BwMax",
+                  "BwUsed",
+                  "MaxStorage",
+                  "StorageUsed",
+                  "Time",
+                  "LastLogin",
+                  "closed_since",
+                  "suspended",
+                  "trials",
+                  "payment_due"
+                ]
+              }
+            },
+            {
+              "name": "order",
+              "description": "Search order.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "asc",
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "asc",
+                  "desc"
+                ]
+              }
+            },
+            {
+              "name": "items_on_page",
+              "description": "items limit per page.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "10",
+                  "25",
+                  "50",
+                  "100",
+                  "1000"
+                ]
+              }
+            },
+            {
+              "name": "page",
+              "description": "Page number.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get all users list Params in get request are: <br /> <pre> $_get = array( <br /> Get all users list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Params in get request are: <br /> <pre> $_get = array( <br /> &nbsp;&nbsp;&nbsp;&nbsp;'page' => page number, <br /> &nbsp;&nbsp;&nbsp;&nbsp;'items_on_page' => num items on page <br /> &nbsp;&nbsp;&nbsp;&nbsp;'order_by' => array of fields to order by <br /> &nbsp;&nbsp;&nbsp;&nbsp;'filter' => filter value <br /> &nbsp;&nbsp;&nbsp;&nbsp;'search_by' => search_by <br /> &nbsp;&nbsp;&nbsp;&nbsp;'search_query' => search_query <br /> );<br /> example :<br /> /admin/allusers.json?page=1&items_on_page=40&order_by[level]=desc&order_by[email]=asc&filter=active&filter=suspended&search_by=username&search_query=a </pre>",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/apipartnersettings.{format}/{session_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveApiPartnerSettings",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get API partner settings (Deprecated) Get API partner settings (Deprecated)&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/apipartnerslist.{format}/{session_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveApiPartnersList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get API partners list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/invoice.{format}/{session_id}/{transaction_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveInvoice",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "transaction_id",
+              "description": "Transaction ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get user invoice&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get user invoice",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/listpaypalsubscriptions.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveListPayPalSubscriptions",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get PayPal subscriptions&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get PayPal subscriptions",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/listpromocodes.{format}/{session_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveListPromoCodes",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "List promo codes&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "List promo codes",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/partnerstats.{format}/{session_id}/{year}/{month}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrievePartnerStats",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "year",
+              "description": "Year.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "month",
+              "description": "Month.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "partner_id",
+              "description": "Partner ID, empty - return all users stats(partner_role=9 or level 95+ is required).",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "stat_type",
+              "description": "Limit result datasets.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "summary",
+                  "monthly"
+                ]
+              }
+            }
+          ],
+          "summary": "Get Partner statistics&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/payoutamount.{format}/{session_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrievePayoutAmount",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID or Email.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "to_date",
+              "description": "Period ending date.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "from_date",
+              "description": "Period starting date.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 0,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get affiliate user data Get affiliate user data&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/planshistory.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrievePlansHistory",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get user plan history Get user plan history&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/servertransferstat.{format}/{session_id}/{server_name}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveServerTransferStat",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "server_name",
+              "description": "Server name.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get statistics of data transfer from API server to storage&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/transactionhistory.{format}/{session_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveTransactionHistory",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "start_date",
+              "description": "Start Date (Unix timestamp).",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "end_date",
+              "description": "End Date (Unix timestamp).",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "plan_id",
+              "description": "Plan.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "order",
+              "description": "Order.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "asc",
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "asc",
+                  "desc"
+                ]
+              }
+            },
+            {
+              "name": "page",
+              "description": "Page.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 1,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get user transactions Get user transactions&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/user.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveUser",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID or Email.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get user data Get user data&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/usercreditcards.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveUserCreditCards",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "mixed"
+            },
+            {
+              "name": "user_id",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "mixed"
+            },
+            {
+              "name": "active_only",
+              "description": "return only active.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": true,
+              "allowMultiple": false,
+              "dataType": "boolean"
+            },
+            {
+              "name": "full_info",
+              "description": "return all user CC and extended info.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": false,
+              "allowMultiple": false,
+              "dataType": "boolean"
+            }
+          ],
+          "summary": "List user credit cards (for OpenDrive billing only)&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "List user credit cards (for OpenDrive billing only)",
+          "errorResponses": []
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/usergroups.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveUserGroups",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get list of account groups Get list of account groups&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/userlogs.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveUserLogs",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "user_type",
+              "description": "User type.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "start_date",
+              "description": "Start date.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "end_date",
+              "description": "End date.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "log_type",
+              "description": "Log Type.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "page",
+              "description": "Log Type.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get user logs Get user logs&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/userlogscursor.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveUserLogsCursor",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "user_type",
+              "description": "User type.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "start_date",
+              "description": "Start date.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "end_date",
+              "description": "End date.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "log_type",
+              "description": "Log Type.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "cursor",
+              "description": "Pagination cursor (opaque token from a previous response's NextCursor; omit for the first/newest page).",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get user logs (cursor pagination)&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/usernotes.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveUserNotes",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "limit",
+              "description": "Notes limit.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 100,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "sort_mode",
+              "description": "Sort mode.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "asc",
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "asc",
+                  "desc"
+                ]
+              }
+            },
+            {
+              "name": "offset",
+              "description": "Notes Offset.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 0,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get user notes Get user notes&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/addpayoutrecord.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createAddPayoutRecord",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>user_id : <tag>int</tag>  <i>(required)</i> - User ID.<hr/>amount : <tag>string</tag>  <i>(required)</i> - Transaction amount.<hr/>to_date : <tag>string</tag>  <i>(required)</i> - Period ending date.<hr/>note : <tag>string</tag>  - Transaction notice.<hr/>from_date : <tag>string</tag>  - Period starting date.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"user_id\": \"\",\n    \"amount\": \"\",\n    \"to_date\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Add payout record Add payout record&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/blockuser.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createBlockUser",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>user_id : <tag>int</tag>  - User ID.<hr/>email : <tag>string</tag>  - User ID.<hr/>ip : <tag>string</tag>  - User ID.<hr/>user_email : <tag>string</tag>  - <hr/>user_registration_ip : <tag>string</tag>  - <hr/>user_last_login_ip : <tag>string</tag>  - <hr/>user_all_transactions_ip : <tag>string</tag>  - ",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Add user to blacklist Add user to blacklist.&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "If user_id was supplied, than some user data can be added to blacklist ($user_email,$user_registration_ip,$user_last_login_ip, $user_all_transactions_ip if ones are set to true)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/disable2fa.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createDisable2fa",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>user_id : <tag>int</tag>  <i>(required)</i> - User ID.<hr/>access_user_id : <tag>int</tag>  - Access User ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"user_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Disable 2fa for user Disable 2fa for user&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/refundtransaction.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createRefundTransaction",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>transaction_id : <tag>string</tag>  <i>(required)</i> - Transaction ID.<hr/>refund_amount : <tag>float</tag>  <i>(required)</i> - Refund amount.<hr/>refund_type : <tag>int</tag>  <i>(required)</i> - Refund type@choice(5,6}.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"transaction_id\": \"\",\n    \"refund_amount\": \"\",\n    \"refund_type\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Refund transaction Refund transaction&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/sendpaymentreminder.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createSendPaymentReminder",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "mixed"
+            },
+            {
+              "name": "user_id",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "mixed"
+            }
+          ],
+          "summary": "Send payment reminder&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Send payment reminder",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/sendtrialreminder.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createSendTrialReminder",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "mixed"
+            },
+            {
+              "name": "user_id",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "mixed"
+            }
+          ],
+          "summary": "Send trial reminder&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Send trial reminder",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/user.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createUser",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>username : <tag>string</tag>  <i>(required)</i> - User name (min 4)(max 100).<hr/>passwd : <tag>string</tag>  <i>(required)</i> - Password (min 5).<hr/>verify_passwd : <tag>string</tag>  <i>(required)</i> - Verify password (min 5).<hr/>email : <tag>string</tag>  <i>(required)</i> - Valid email format required (max 255).<hr/>first_name : <tag>string</tag>  <i>(required)</i> - First name (min 2)(max 50).<hr/>last_name : <tag>string</tag>  <i>(required)</i> - Last name (min 2)(max 50).<hr/>reg_ip : <tag>string</tag>  <i>(required)</i> - (IP in format 0.0.0.0).<hr/>level : <tag>int</tag>  <i>(required)</i> - Level.<hr/>company_name : <tag>string</tag>  - Company name (max 255).<hr/>phone : <tag>string</tag>  - Phone (max 20).<hr/>suspended : <tag>int</tag>  - Suspened (0,1).<hr/>lang : <tag>string</tag>  - (ISO 2 Letter Language Codes).<hr/>bw_max : <tag>int</tag>  - Max Bandwidth.<hr/>max_storage : <tag>int</tag>  - Max Storage.<hr/>account_type : <tag>int</tag>  - Account Type.<hr/>account_users : <tag>int</tag>  - Account Users (min 0)(max 999).<hr/>bw_reset_period : <tag>int</tag>  - Days (min 0)(max 999).<hr/>trial : <tag>int</tag>  - Trial (0-No trial, 1 - Trial).<hr/>next_billing : <tag>int</tag>  - Date of next billing in unix time format.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"username\": \"\",\n    \"passwd\": \"\",\n    \"verify_passwd\": \"\",\n    \"email\": \"\",\n    \"first_name\": \"\",\n    \"last_name\": \"\",\n    \"reg_ip\": \"\",\n    \"level\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create new user Create new user&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/usernote.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createUserNote",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>user_id : <tag>int</tag>  <i>(required)</i> - User ID.<hr/>note : <tag>string</tag>  <i>(required)</i> - Note text.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"user_id\": \"\",\n    \"note\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Add user note Add user note&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/verifyemail.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createVerifyEmail",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>user_id : <tag>int</tag>  <i>(required)</i> - User ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"user_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Verify an Email as admin&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Verify an Email as admin",
+          "errorResponses": []
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/apipartnersettings.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateApiPartnerSettings",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>settings : <tag>Array</tag>  <i>(required)</i> - Settings to update( array( 'domain', 'drive_name', 'email', 'help_link', 'branding_colors' ) ).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"settings\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update API partner settings Update API partner settings&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/blacklistfile.{format}/{session_id}/{user_id}/{file_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateBlacklistFile",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here",
+              "required": false,
+              "defaultValue": "{\n    \"property\" : \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Mark File as blacklisted Mark File as blacklisted&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/blockfile.{format}/{session_id}/{user_id}/{file_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateBlockFile",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here",
+              "required": false,
+              "defaultValue": "{\n    \"property\" : \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Mark File as blocked from public access Mark File as blocked from public access&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/promocodes.{format}/{session_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updatePromoCodes",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here",
+              "required": false,
+              "defaultValue": "{\n    \"property\" : \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update promo codes&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update promo codes",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/resetsecurefilespassword.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateResetSecureFilesPassword",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>user_id : <tag>int</tag>  <i>(required)</i> - User ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"user_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Reset password to \"Secure Files\" Reset password to \"Secure Files\"&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/user.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateUser",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>user_id : <tag>string</tag>  <i>(required)</i> - User ID or Email.<hr/>passwd : <tag>string</tag>  - Password (min 5).<hr/>verify_passwd : <tag>string</tag>  - Verify password (min 5).<hr/>email : <tag>string</tag>  - Valid email format required (max 255).<hr/>first_name : <tag>string</tag>  - First name (min 2)(max 50).<hr/>last_name : <tag>string</tag>  - Last name (min 2)(max 50).<hr/>level : <tag>int</tag>  - Level.<hr/>company_name : <tag>string</tag>  - Company name (max 255).<hr/>phone : <tag>string</tag>  - Phone (max 20).<hr/>suspended : <tag>int</tag>  - Suspened (0,1).<hr/>lang : <tag>string</tag>  - (ISO 2 Letter Language Codes).<hr/>acc_type : <tag>int</tag>  - Type of account (1 – personal, 2 – business).<hr/>file_versioning : <tag>int</tag>  - File Versioning (0 = off, 1=on).<hr/>file_versions : <tag>int</tag>  - File Versions (max 99).<hr/>time_zone : <tag>string</tag>  - Time Zone database version 2013.6.<hr/>storage_max : <tag>int</tag>  - Storage size in MB.<hr/>bw_max : <tag>int</tag>  - Bandwidth size in MB.<hr/>account_users : <tag>int</tag>  - Account Users (min 0)(max 999).<hr/>bw_reset_period : <tag>int</tag>  - days (min 0)(max 999).<hr/>trial : <tag>int</tag>  - Trial (0-No trial, 1 - Trial).<hr/>next_billing : <tag>int</tag>  - Date of next billing in unix time format.<hr/>web_link : <tag>string</tag>  - WebLink (Pass string ' ' to reset).<hr/>public_profiles : <tag>int</tag>  - Public Profiles.<hr/>wl_status : <tag>int</tag>  - WeblinkStatus.<hr/>close_reason : <tag>int</tag>  - Close reason id.<hr/>close_reason_text : <tag>string</tag>  - Close reason text.<hr/>address_1 : <tag>string</tag>  - Address line 1.<hr/>address_2 : <tag>string</tag>  - Address line 2.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"user_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update user data Update user data&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/userccverified.{format}/{session_id}/{user_id}/{card_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateUserCCVerified",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "card_id",
+              "description": "Card ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here",
+              "required": false,
+              "defaultValue": "{\n    \"property\" : \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Mark User CC as verified Mark User CC as verified&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/usernotes.{format}/{session_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateUserNotes",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>note_id : <tag>int</tag>  <i>(required)</i> - Note ID.<hr/>text : <tag>string</tag>  <i>(required)</i> - Note Text.",
+              "required": true,
+              "defaultValue": "{\n    \"note_id\": \"\",\n    \"text\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update user note Update user note&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/suspenduser.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeSuspendUser",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Suspend user Suspend user&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/user.{format}/{session_id}/{user_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeUser",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Delete user (close the account and suspend) Delete user (close the account and suspend)&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/admin/usercc.{format}/{session_id}/{user_id}/{card_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeUserCC",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "card_id",
+              "description": "Card ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Remove user CC Remove user CC&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "/admin",
+  "models": {}
+}

@@ -1,0 +1,945 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https://dev.opendrive.com/api",
+  "produces": [
+    "application/json"
+  ],
+  "consumes": [
+    "application/json",
+    "multipart/form-data"
+  ],
+  "apis": [
+    {
+      "path": "/v1/notes.{format}/{session_id}/{item_type}/{item_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieve",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "item_type",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "notepad",
+                  "notelist"
+                ]
+              }
+            },
+            {
+              "name": "item_id",
+              "description": "Notepad Id or Note List Id.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get all notes in Notepad or Note List&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get all notes in Notepad or Note List (ListId or NotepadID is required)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/archived.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveArchived",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get archived note lists and notepads&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get archived note lists and notepads",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/notelists.{format}/{session_id}/{notepad_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveNoteLists",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "notepad_id",
+              "description": "Notepad ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get note lists in notepad&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get note lists in notepad",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/notepads.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveNotepads",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get notepads list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get notepads list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/search.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveSearch",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "search_query",
+              "description": "Search query.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Search in notepads and notes&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get notepads list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/trashed.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveTrashed",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get trashed note lists and notepads&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get trashed note lists and notepads",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes.{format}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "create",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>list_id : <tag>string</tag>  <i>(required)</i> - Note list ID.<hr/>text : <tag>string</tag>  <i>(required)</i> - Note text.<hr/>status : <tag>string</tag>  - Note status (default,important,done).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"list_id\": \"\",\n    \"text\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new note&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new note",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/attachfile.{format}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createAttachFile",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>note_id : <tag>string</tag>  <i>(required)</i> - Note ID.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - File ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"note_id\": \"\",\n    \"file_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Attach the file to note&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Attach the file to note",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/notelist.{format}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createNoteList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>notepad_id : <tag>string</tag>  <i>(required)</i> - Notepad ID.<hr/>name : <tag>string</tag>  <i>(required)</i> - Note list name.<hr/>order : <tag>int</tag>  - Note list order.<hr/>color : <tag>string</tag>  - List color in hex RGB.<hr/>size : <tag>int</tag>  - Number of tiles in list (1, 2, 4).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"notepad_id\": \"\",\n    \"name\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new note list in notepad&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new note list in notepad",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/notepad.{format}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createNotepad",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>name : <tag>string</tag>  <i>(required)</i> - Notepad name.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"name\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new notepad&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new notepad",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes.{format}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "update",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>note_id : <tag>string</tag>  <i>(required)</i> - Note ID.<hr/>text : <tag>string</tag>  - Note text.<hr/>status : <tag>string</tag>  - Note status (default,important,done).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"note_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update a note&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update a note",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/archivenotelist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateArchiveNoteList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "Note list ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Archive the note list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Archive the note list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/archivenotepad.{format}/{session_id}/{notepad_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateArchiveNotepad",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "notepad_id",
+              "description": "Notepad ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Archive the notepad&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Archive the notepad",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/notelist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateNoteList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "Note list ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>name : <tag>string</tag>  - Note list name.<hr/>order : <tag>int</tag>  - Note list order.<hr/>color : <tag>string</tag>  - Note list color in hex RGB.<hr/>size : <tag>int</tag>  - Number of tiles in list (1, 2, 4).",
+              "required": false,
+              "defaultValue": "{}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update note list parameters&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update note list parameters",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/notepad.{format}/{session_id}/{notepad_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateNotepad",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "notepad_id",
+              "description": "Notepad ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following property.<hr/>name : <tag>string</tag>  <i>(required)</i> - Notepad name.",
+              "required": true,
+              "defaultValue": "{\n    \"name\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update notepad name&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update notepad name",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/ordernotelists.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateOrderNoteLists",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "notelists",
+              "description": "Paste JSON object data here (required) . <br/>Note list array {notelistId1: order1, notelistId2: order2...}.",
+              "paramType": "body",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "Object",
+              "defaultValue": "{\n    \"property\" : \"\"\n}"
+            }
+          ],
+          "summary": "Update multiple note lists order&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update multiple note lists order",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/restorearchivednotelist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateRestoreArchivedNotelist",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "Notepad ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Restore notelist from archive&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Restore notelist from archive",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/restorearchivednotepad.{format}/{session_id}/{notepad_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateRestoreArchivedNotepad",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "notepad_id",
+              "description": "Notepad ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Restore notepad from archive&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Restore notepad from archive",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/restoretrashednotelist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateRestoreTrashedNotelist",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "Notelist ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Restore notelist from trash&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Restore notelist from trash",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/restoretrashednotepad.{format}/{session_id}/{notepad_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateRestoreTrashedNotepad",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "notepad_id",
+              "description": "Notepad ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Restore notepad from trash&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Restore notepad from trash",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes.{format}/{session_id}/{note_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "remove",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "note_id",
+              "description": "Note ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Delete a note and all dependent files&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Delete a note and all dependent files",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/notelist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeNoteList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "List ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Delete the note list and all dependent items(files, notes)&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Delete the note list and all dependent items(files, notes)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/notepad.{format}/{session_id}/{notepad_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeNotepad",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "notepad_id",
+              "description": "Notepad ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Delete notepad from the Trash&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Delete notepad from the Trash",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/trash.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeTrash",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Empty trash (Delete all trashed notepads and notelists)&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Empty trash (Delete all trashed notepads and notelists)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/trashnotelist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeTrashNoteList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "Note list ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Trash the note list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Trash the note list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/notes/trashnotepad.{format}/{session_id}/{notepad_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeTrashNotepad",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "notepad_id",
+              "description": "Notepad ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Trash the notepad&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Trash the notepad",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "/notes",
+  "models": {}
+}

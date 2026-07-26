@@ -45,6 +45,10 @@ import (
 const (
 	defaultBase = "https://dev.opendrive.com/api/v1"
 	userAgent   = "opendrive-bridge-fetch-spec/0.1 (+https://github.com/StormRealm/opendrive-bridge)"
+
+	// OAuthSessionMarker is the magic session_id value used with OAuth2; it is
+	// not a secret and stays readable in logs.
+	OAuthSessionMarker = "OAUTH"
 )
 
 func main() {
@@ -118,7 +122,9 @@ func run() error {
 	for _, s := range strategies {
 		a, err := fetchAll(ctx, hc, opt.base, s)
 		if err != nil {
-			fmt.Printf("strategy %-20s failed: %v\n", s.name, err)
+			// §9.4: a session id in a path segment survives URL-parameter
+			// redaction, so the whole message is scrubbed before printing.
+			fmt.Printf("strategy %-20s failed: %s\n", s.name, redactText(err.Error(), s.secretValues()))
 			continue
 		}
 		fmt.Printf("strategy %-20s -> %d resources, %d endpoints, %d operations, %d unreadable\n",
@@ -150,6 +156,21 @@ type strategy struct {
 	query      map[string]string
 	pathSuffix string   // appended as an extra path segment, e.g. /resources/file.json/{session}
 	secrets    []string // extra values to redact from archived bodies
+}
+
+// secretValues lists every credential this strategy puts on the wire. A session
+// id carried in a path segment survives URL-parameter redaction, so error text
+// has to be scrubbed against this list too (§9.4).
+func (s strategy) secretValues() []string {
+	out := []string{s.session, s.pathSuffix}
+	out = append(out, s.secrets...)
+	for k, v := range s.query {
+		if k == "session_id" && v == OAuthSessionMarker {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 // ---------------------------------------------------------------- login
@@ -325,12 +346,7 @@ func fetchAll(ctx context.Context, hc *http.Client, base string, s strategy) (*a
 		a.Operations += f.Operations
 	}
 
-	secrets := append([]string{s.session, s.pathSuffix}, s.secrets...)
-	for k, v := range s.query {
-		if k != "session_id" || v != "OAUTH" {
-			secrets = append(secrets, v)
-		}
-	}
+	secrets := s.secretValues()
 	for i := range a.Files {
 		a.Files[i].data = redactAll(a.Files[i].data, secrets)
 		sum := sha256.Sum256(a.Files[i].data)
@@ -468,6 +484,11 @@ func redactAll(body []byte, secrets []string) []byte {
 		body = bytes.ReplaceAll(body, []byte(s), []byte("REDACTED"))
 	}
 	return body
+}
+
+// redactText is redactAll for strings: log lines and error messages.
+func redactText(s string, secrets []string) string {
+	return string(redactAll([]byte(s), secrets))
 }
 
 func truncate(s string, n int) string {

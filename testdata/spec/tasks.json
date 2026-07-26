@@ -1,17 +1,17 @@
 {
   "apiVersion": "1",
   "swaggerVersion": "1.1",
-  "basePath": "https:\/\/dev.opendrive.com\/api",
+  "basePath": "https://dev.opendrive.com/api",
   "produces": [
-    "application\/json"
+    "application/json"
   ],
   "consumes": [
-    "application\/json",
-    "multipart\/form-data"
+    "application/json",
+    "multipart/form-data"
   ],
   "apis": [
     {
-      "path": "\/v1\/tasks.{format}",
+      "path": "/v1/tasks.{format}",
       "description": "Class Notes",
       "operations": [
         {
@@ -77,7 +77,7 @@
               "dataType": "boolean"
             }
           ],
-          "summary": "Get active tasks. Search for tasks (search in task names and comment text)&nbsp; <i class=\"icon-adjust icon-large\"><\/i>",
+          "summary": "Get active tasks. Search for tasks (search in task names and comment text)&nbsp; <i class=\"icon-adjust icon-large\"></i>",
           "notes": "Get active tasks. Search for tasks (search in task names and comment text)",
           "errorResponses": [
             {
@@ -89,7 +89,82 @@
       ]
     },
     {
-      "path": "\/v1\/tasks\/projectlists.{format}",
+      "path": "/v1/tasks/archiveditems.{format}/{session_id}/{item_type}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveArchivedItems",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "item_type",
+              "description": "Archived item type(project,task,task_list,project_list).",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "project",
+                  "task",
+                  "task_list",
+                  "project_list"
+                ]
+              }
+            }
+          ],
+          "summary": "Get list of archived items&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get list of archived items (projects, task lists or tasks)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/archivelist.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveArchiveList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "List Items in Archive&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "List Items in Archive",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/projectlists.{format}",
       "description": "Class Notes",
       "operations": [
         {
@@ -147,8 +222,1635 @@
               }
             }
           ],
-          "summary": "Get project lists&nbsp; <i class=\"icon-adjust icon-large\"><\/i>",
+          "summary": "Get project lists&nbsp; <i class=\"icon-adjust icon-large\"></i>",
           "notes": "Get project lists",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/projects.{format}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveProjects",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "project_id",
+              "description": "Project ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get projects&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get projects",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/search.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveSearch",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "search_query",
+              "description": "Search query.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Search for project list, project, task, comment, subcomment&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Search for project list, project, task, comment, subcomment",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/tags.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveTags",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get user tags list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get user tags list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/taskcomments.{format}/{session_id}/{task_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveTaskComments",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_id",
+              "description": "Task ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "comment_id",
+              "description": "Comment ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get task comments&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get task comments",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/tasklists.{format}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveTaskLists",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "project_id",
+              "description": "Project ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_list_id",
+              "description": "Task List ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "with_tasks",
+              "description": "Include Tasks in list.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": false,
+              "allowMultiple": false,
+              "dataType": "boolean"
+            },
+            {
+              "name": "filter",
+              "description": "Items filter.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "active",
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "archived",
+                  "trashed",
+                  "active"
+                ]
+              }
+            },
+            {
+              "name": "item_type",
+              "description": "Items type filter.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "uncompleted_task"
+                ]
+              }
+            }
+          ],
+          "summary": "Get task lists&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get task lists",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/trasheditems.{format}/{session_id}/{item_type}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveTrashedItems",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "item_type",
+              "description": "Archived item type(project,task,task_list,project_list).",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "project",
+                  "task",
+                  "task_list",
+                  "project_list"
+                ]
+              }
+            }
+          ],
+          "summary": "Get list of trashed items&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get list of trashed items (projects, task lists or tasks)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/trashlist.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveTrashList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "List Items in Trash&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "List Items in Trash",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/users.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveUsers",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "project_id",
+              "description": "Project ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get assigned users&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get assigned users",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks.{format}/{session_id}/{task_list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "create",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_list_id",
+              "description": "Task list ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>task_name : <tag>string</tag>  - Task name.<hr/>task_description : <tag>string</tag>  - Task description.<hr/>start_date : <tag>string</tag>  - Start date(YYYY-MM-DD).<hr/>email_assign_to : <tag>string</tag>  - User email which task will be assigned.<hr/>due_date : <tag>string</tag>  - Due date(YYYY-MM-DD).<hr/>private : <tag>int</tag>  - Task privacy (0 - public, 1 - private).<hr/>priority : <tag>int</tag>  - Task priority (0 - none, 1 - low, 2 - medium, 3 - high).<hr/>tag_id : <tag>int</tag>  - Tag ID to (0 - no tags is assigned to task).",
+              "required": false,
+              "defaultValue": "{}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new task&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new task",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/addprojectpermission.{format}/{session_id}/{project_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createAddProjectPermission",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "project_id",
+              "description": "Project ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>access_user_email : <tag>string</tag>  <i>(required)</i> - Invited access user e-mail.<hr/>mode : <tag>int</tag>  <i>(required)</i> - Permission mode (0 - view, 1 - edit, 2 - block).",
+              "required": true,
+              "defaultValue": "{\n    \"access_user_email\": \"\",\n    \"mode\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Add a permission for project&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Add a permission for project",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/comment.{format}/{session_id}/{task_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createComment",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_id",
+              "description": "Task ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following property.<hr/>comment_text : <tag>string</tag>  <i>(required)</i> - Comment text.",
+              "required": true,
+              "defaultValue": "{\n    \"comment_text\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new comment&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new comment",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/project.{format}/{session_id}/{project_list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createProject",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "project_list_id",
+              "description": "Project list ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>project_name : <tag>string</tag>  <i>(required)</i> - Project name.<hr/>email_assign_to : <tag>string</tag>  - User email which task will be assigned.<hr/>start_date : <tag>string</tag>  - Start date(YYYY-MM-DD).<hr/>due_date : <tag>string</tag>  - Due date(YYYY-MM-DD).<hr/>status : <tag>string</tag>  - Project status (active, completed).",
+              "required": true,
+              "defaultValue": "{\n    \"project_name\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new project&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new project",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/projectlist.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createProjectList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following property.<hr/>list_name : <tag>string</tag>  <i>(required)</i> - List name.",
+              "required": true,
+              "defaultValue": "{\n    \"list_name\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new project list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new project list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/subcomment.{format}/{session_id}/{comment_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createSubComment",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "comment_id",
+              "description": "Comment ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following property.<hr/>subcomment_text : <tag>string</tag>  <i>(required)</i> - Subcomment text.",
+              "required": true,
+              "defaultValue": "{\n    \"subcomment_text\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new subcomment&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new subcomment",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/tag.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createTag",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>name : <tag>string</tag>  <i>(required)</i> - Tag name.<hr/>color : <tag>string</tag>  <i>(required)</i> - Tag color in hex RGB.",
+              "required": true,
+              "defaultValue": "{\n    \"name\": \"\",\n    \"color\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new tag&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new tag",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/tasklist.{format}/{session_id}/{project_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createTaskList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "project_id",
+              "description": "Project ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>list_name : <tag>string</tag>  <i>(required)</i> - List name.<hr/>due_date : <tag>string</tag>  - Due date(YYYY-MM-DD).",
+              "required": true,
+              "defaultValue": "{\n    \"list_name\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new task list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new task list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks.{format}/{session_id}/{task_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "update",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_id",
+              "description": "Task ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>task_name : <tag>string</tag>  - Task name.<hr/>task_description : <tag>string</tag>  - Task description.<hr/>order_no : <tag>int</tag>  - Task order №.<hr/>task_list_id : <tag>string</tag>  - Task list ID.<hr/>access_userid_assign_to : <tag>string</tag>  - Access UserId which task will be assigned(0-for account owner,'none' for nobody).<hr/>due_date : <tag>string</tag>  - Due date(YYYY-MM-DD).<hr/>private : <tag>int</tag>  - Task privacy (0 - public, 1 - private).<hr/>priority : <tag>int</tag>  - Task priority (0 - none, 1 - low, 2 - medium, 3 - high).<hr/>tag_id : <tag>int</tag>  - Tag ID to (0 - no tags is assigned to task).<hr/>progress : <tag>int</tag>  - Task progress in %.<hr/>status : <tag>string</tag>  - Task status (active, completed).<hr/>color : <tag>string</tag>  - Task color in hex RGB.",
+              "required": false,
+              "defaultValue": "{}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update the task&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update the task",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/archive.{format}/{session_id}/{task_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateArchive",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_id",
+              "description": "Task ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Archive the task&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Archive the task",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/archiveproject.{format}/{session_id}/{project_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateArchiveProject",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "project_id",
+              "description": "Project ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Archive the project and all dependent items(task lists, tasks)&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Archive the project and all dependent items(task lists, tasks)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/archiveprojectlist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateArchiveProjectList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "List ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Archive the project list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Archive the project list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/archivetasklist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateArchiveTaskList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "Task list ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Archive the task list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Archive the task list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/comment.{format}/{session_id}/{comment_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateComment",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "comment_id",
+              "description": "Comment ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>comment_text : <tag>string</tag>  - Comment text.<hr/>tag_id : <tag>int</tag>  - Comment Tag ID.",
+              "required": false,
+              "defaultValue": "{}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update the task comment&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update the task comment",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/move.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateMove",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>task_id : <tag>string</tag>  <i>(required)</i> - Task ID.<hr/>insert_after_taskid : <tag>string</tag>  - Insert the task after specified task in task list.<hr/>task_list_id : <tag>string</tag>  - Task list ID.<hr/>project_id : <tag>string</tag>  - Project ID.<hr/>item_type : <tag>string</tag>  - Items type filter.",
+              "required": true,
+              "defaultValue": "{\n    \"task_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Move the task to another task list or project&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Move the task to another task list or project",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/project.{format}/{session_id}/{project_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateProject",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "project_id",
+              "description": "Project ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>project_name : <tag>string</tag>  - Project name.<hr/>email_assign_to : <tag>string</tag>  - User email which task will be assigned.<hr/>start_date : <tag>string</tag>  - Start date(YYYY-MM-DD).<hr/>due_date : <tag>string</tag>  - Due date(YYYY-MM-DD).<hr/>status : <tag>string</tag>  - Project status (active, completed).",
+              "required": false,
+              "defaultValue": "{}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update the project&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update the project",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/projectlist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateProjectList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "List ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following property.<hr/>list_name : <tag>string</tag>  <i>(required)</i> - List name.",
+              "required": true,
+              "defaultValue": "{\n    \"list_name\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update the project list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update the project list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/restore.{format}/{session_id}/{task_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateRestore",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_id",
+              "description": "Task ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Restore the task from archive or trash&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Restore the task from archive or trash",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/restoretasklist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateRestoreTaskList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "Task list ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Restore the task list from archive or trash&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Restore the task list from archive or trash",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/subcomment.{format}/{session_id}/{subcomment_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateSubComment",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "subcomment_id",
+              "description": "Subcomment ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following property.<hr/>subcomment_text : <tag>string</tag>  <i>(required)</i> - Subcomment text.",
+              "required": true,
+              "defaultValue": "{\n    \"subcomment_text\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update the task subcomment&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update the task subcomment",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/tag.{format}/{session_id}/{tag_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateTag",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "tag_id",
+              "description": "Tag ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>name : <tag>string</tag>  - Tag name.<hr/>color : <tag>string</tag>  - Tag color in hex RGB.",
+              "required": false,
+              "defaultValue": "{}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update the tag&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update the tag",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/tasklist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateTaskList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "Task list ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>list_name : <tag>string</tag>  - List name.<hr/>due_date : <tag>string</tag>  - Due date(YYYY-MM-DD).<hr/>complete_all_tasks : <tag>boolean</tag>  - Mark all tasks in the tasklist as completed or uncompleted.",
+              "required": false,
+              "defaultValue": "{}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update the task list&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update the task list",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/attachedfile.{format}/{session_id}/{item_type}/{item_id}/{file_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeAttachedFile",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "item_type",
+              "description": "Item type.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "task",
+                  "comment"
+                ]
+              }
+            },
+            {
+              "name": "item_id",
+              "description": "Task or Comment ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Delete the file from comment&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Delete the file from comment",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/emptytrash.{format}/{session_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeEmptyTrash",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Empty trash&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Empty trash",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/tag.{format}/{session_id}/{tag_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeTag",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "tag_id",
+              "description": "Tag ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Delete the tag&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Delete the tag",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/trash.{format}/{session_id}/{task_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeTrash",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_id",
+              "description": "Task ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Trash the task&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Trash the task",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/trashcomment.{format}/{session_id}/{comment_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeTrashComment",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "comment_id",
+              "description": "Comment ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Trash the comment&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Trash the comment",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/trashproject.{format}/{session_id}/{project_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeTrashProject",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "project_id",
+              "description": "Project ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Trash the project and all dependent items(task lists, tasks)&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Trash the project and all dependent items(task lists, tasks)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/trashprojectlist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeTrashProjectList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "List ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Trash the project list and all dependent items(projects, task lists, tasks)&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Trash the project list and all dependent items(projects, task lists, tasks)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/trashsubcomment.{format}/{session_id}/{subcomment_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeTrashSubComment",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "subcomment_id",
+              "description": "Subcomment ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Trash the subcomment&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Trash the subcomment",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/tasks/trashtasklist.{format}/{session_id}/{list_id}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeTrashTaskList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "list_id",
+              "description": "Task list ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Trash the task list all dependent tasks&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Trash the task list all dependent tasks",
           "errorResponses": [
             {
               "reason": "RestException",
@@ -159,6 +1861,6 @@
       ]
     }
   ],
-  "resourcePath": "\/tasks",
+  "resourcePath": "/tasks",
   "models": {}
 }

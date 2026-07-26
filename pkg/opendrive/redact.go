@@ -14,7 +14,10 @@ const Redacted = "REDACTED"
 var sensitiveParams = []string{
 	"access_token", "refresh_token", "session_id", "session_key",
 	"passwd", "password", "new_password", "old_password", "temp_key",
-	"captcha_response", "client_secret", "api_key",
+	"temp_auth", "captcha_response", "client_secret", "api_key",
+	// users/info.json returns a PrivateKey field; it must not reach a log
+	// either, even at debug level.
+	"PrivateKey", "private_key",
 }
 
 // RedactURL returns raw with every credential-bearing query parameter masked.

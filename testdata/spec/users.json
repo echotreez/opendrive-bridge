@@ -11,6 +11,243 @@
   ],
   "apis": [
     {
+      "path": "/v1/users/info.{format}/{session_id}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveInfo",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "apply_bw",
+              "description": "Apply BW.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 0,
+              "allowMultiple": false,
+              "dataType": "int",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "0",
+                  "1"
+                ]
+              }
+            },
+            {
+              "name": "branding",
+              "description": "Include user branding.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 0,
+              "allowMultiple": false,
+              "dataType": "int",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "0",
+                  "1"
+                ]
+              }
+            }
+          ],
+          "summary": "Get user info&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get user info",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users/userlogs.{format}/{session_id}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveUserLogs",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "access_user_id",
+              "description": "Access user id (0 for account owner, '' empty for all).",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "start_date",
+              "description": "Start date (Unix timestamp).",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 0,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "end_date",
+              "description": "End date (Unix timestamp).",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 0,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "log_type",
+              "description": "Log Type ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "page",
+              "description": "Page (from 0).",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 0,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get user logs&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get user logs",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users/userlogscursor.{format}/{session_id}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveUserLogsCursor",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "access_user_id",
+              "description": "Access user id (0 for account owner, '' empty for all).",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "start_date",
+              "description": "Start date (Unix timestamp).",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 0,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "end_date",
+              "description": "End date (Unix timestamp).",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 0,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "log_type",
+              "description": "Log Type ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "cursor",
+              "description": "Pagination cursor (opaque token from a previous response's NextCursor; omit for the first/newest page).",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get user activity logs (cursor pagination)&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Returns one page of activity logs, newest-first, using keyset (cursor) pagination. Pass the previous response's NextCursor to fetch the next page; omit for the first page. Response: { Logs, NextCursor (null on last page), NumResults }.",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users/affiliatesetting.{format}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createAffiliateSetting",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>enabled : <tag>int</tag>  <i>(required)</i> - ",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"enabled\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update user's affiliate setting&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update user's affiliate setting.",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
       "path": "/v1/users/confirmpasswordreset.{format}",
       "description": "Users API",
       "operations": [
@@ -71,6 +308,36 @@
       ]
     },
     {
+      "path": "/v1/users/verifyemail.{format}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createVerifyEmail",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>ver_code : <tag>string</tag>  <i>(required)</i> - verification code (max 32).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"ver_code\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Verify an Email&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Verify an email",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
       "path": "/v1/users/verifyemailsignup.{format}",
       "description": "Users API",
       "operations": [
@@ -91,6 +358,214 @@
           ],
           "summary": "Verify an Email after signup&nbsp; <i class=\"icon-unlock-alt icon-large\"></i>",
           "notes": "Verify an email after signup",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users/verifytwofactorauth.{format}/{session_id}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createVerifyTwoFactorAuth",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following property.<hr/>token : <tag>string</tag>  <i>(required)</i> - Two-factor authentication token from code generator app or SMS.",
+              "required": true,
+              "defaultValue": "{\n    \"token\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Verify 2FA authentication token&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Verify 2FA authentication token",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users/email.{format}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateEmail",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>email : <tag>string</tag>  <i>(required)</i> - Valid email format required (max 255).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"email\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update an Email&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update an email. Email updated with verification code",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users/info.{format}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateInfo",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>first_name : <tag>string</tag>  - First Name (min 2) (max 50).<hr/>last_name : <tag>string</tag>  - Last Name (min 2) (max 50).<hr/>company_name : <tag>string</tag>  - Company Name (max 255).<hr/>phone : <tag>string</tag>  - Phone (max 20).<hr/>time_zone : <tag>string</tag>  - Time Zone database version 2013.6.<hr/>file_versioning : <tag>int</tag>  - File Versioning (0 = off, 1=on).<hr/>file_versions : <tag>int</tag>  - File Versions (max 99).<hr/>lang : <tag>string</tag>  - (ISO 2 Letter Language Codes).<hr/>daily_stat : <tag>int</tag>  - Daily Stats (0 = off, 1=on).<hr/>invoice_address : <tag>string</tag>  - Default file permission in root folder(0=Private, 1=Public, 2=Hidden).<hr/>default_file_permission : <tag>string</tag>  - Address line 1.<hr/>address_1 : <tag>string</tag>  - Address line 2.<hr/>address_2 : <tag>string</tag>  - ",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update user info&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update user info",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users/password.{format}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updatePassword",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>newpassword : <tag>string</tag>  <i>(required)</i> - New password (min 5).<hr/>oldpassword : <tag>string</tag>  <i>(required)</i> - Old password (min 5).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"newpassword\": \"\",\n    \"oldpassword\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update a password&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update a password",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users/username.{format}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateUsername",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>username : <tag>string</tag>  <i>(required)</i> - Username (min 4) (max 100).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"username\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update a username&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update a username.",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users.{format}/{session_id}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "remove",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "password",
+              "description": "Password.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "deletion_reason",
+              "description": "Reason code of account deletion.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int",
+              "allowableValues": {
+                "valueType": "RANGE",
+                "min": "1",
+                "max": "9"
+              }
+            }
+          ],
+          "summary": "Schedule a user for deletion&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Schedule a user for deletion",
           "errorResponses": [
             {
               "reason": "RestException",

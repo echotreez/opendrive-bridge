@@ -1,0 +1,200 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https:\/\/dev.opendrive.com\/api",
+  "produces": [
+    "application\/json"
+  ],
+  "consumes": [
+    "application\/json",
+    "multipart\/form-data"
+  ],
+  "apis": [
+    {
+      "path": "\/v1\/stats\/allstats.{format}\/{session_id}\/{month}\/{year}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveAllStats",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "month",
+              "description": "Start date month (unixtime).",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int",
+              "allowableValues": {
+                "valueType": "RANGE",
+                "min": "1",
+                "max": "12"
+              }
+            },
+            {
+              "name": "year",
+              "description": "Start date year (unixtime).",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get all stats&nbsp; <i class=\"icon-lock icon-large\"><\/i>",
+          "notes": "Get all stats",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "\/v1\/stats\/bandwidth.{format}\/{session_id}\/{month}\/{year}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveBandwidth",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "month",
+              "description": "Start date month (unixtime).",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int",
+              "allowableValues": {
+                "valueType": "RANGE",
+                "min": "1",
+                "max": "12"
+              }
+            },
+            {
+              "name": "year",
+              "description": "Start date year (unixtime).",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get user bandwidth stats and dl\/up count&nbsp; <i class=\"icon-lock icon-large\"><\/i>",
+          "notes": "Get user bandwidth stats and dl\/up count. Dates returned in PST",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "\/v1\/stats\/toplist.{format}\/{session_id}\/{year}\/{month}\/{day}\/{stat_type}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveTopList",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "year",
+              "description": "Start date year.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "month",
+              "description": "Start date month.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int",
+              "allowableValues": {
+                "valueType": "RANGE",
+                "min": "1",
+                "max": "12"
+              }
+            },
+            {
+              "name": "day",
+              "description": "Start date day.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int",
+              "allowableValues": {
+                "valueType": "RANGE",
+                "min": "1",
+                "max": "31"
+              }
+            },
+            {
+              "name": "stat_type",
+              "description": "Stat type.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "top_daily_dl_bw",
+                  "top_monthly_dl_bw",
+                  "top_daily_up_bw",
+                  "top_monthly_up_bw",
+                  "top_monthly_file_uploads",
+                  "top_monthly_file_downloads",
+                  "top_daily_file_downloads",
+                  "top_daily_file_uploads"
+                ]
+              }
+            }
+          ],
+          "summary": "Get users stats&nbsp; <i class=\"icon-lock icon-large\"><\/i>",
+          "notes": "Get users stats",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "\/stats",
+  "models": {}
+}

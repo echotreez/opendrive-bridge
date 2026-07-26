@@ -5,13 +5,14 @@ Per `CLAUDE.md` rule 3 and whitepaper §2.6/§12.2, the live Swagger specificati
 take precedence over `docs/OpenDrive_API_guide.pdf`. Every divergence found while
 implementing the Bridge is recorded here.
 
-**Baseline:** `testdata/spec/`, produced by `tools/fetch-spec`.
-See `testdata/spec/manifest.json` for the fetch timestamp, the auth strategy used
-and per-file SHA256 checksums.
+**Baseline:** `testdata/spec/`, produced by `tools/fetch-spec` with the test
+account: 17 modules, 220 endpoints, 220 operations. See
+`testdata/spec/manifest.json` for the fetch timestamp, the auth strategy used and
+per-file SHA256 checksums.
 
 | ID | Status | Area |
 |----|--------|------|
-| [D1](#d1) | live spec wins, implemented | `download/all.json` session parameter |
+| [D1](#d1) | confirmed, implemented | `download/all.json` uses `session_id`, not `session_key` |
 | [D2](#d2) | confirmed, implemented | `session/captcharequired.json` missing from the PDF |
 | [D3](#d3) | confirmed, implemented | `/v1` appears in both base path and endpoint paths |
 | [D4](#d4) | open, P3 | undocumented `download/file.json` parameters |
@@ -20,8 +21,18 @@ and per-file SHA256 checksums.
 | [D7](#d7) | confirmed, implemented | listing pagination parameters |
 | [D8](#d8) | open, out of scope | public `users/*` endpoints absent from the PDF |
 | [D9](#d9) | open, P2 | captcha applies beyond login |
-| [D10](#d10) | open | no `sharing` module in the resource listing |
-| [D11](#d11) | blocked | archive currently covers the public subset only |
+| [D10](#d10) | resolved | the `sharing` module is invisible to anonymous callers |
+| [D11](#d11) | resolved | only the OAuth2 token unlocks the full explorer spec |
+| [D12](#d12) | **PDF is wrong**, implemented | the breadcrumb endpoint is spelled correctly upstream |
+| [D13](#d13) | new endpoint, P3 | `upload/has_ddref.json` is a dedupe probe |
+| [D14](#d14) | **PDF is wrong**, implemented | the file resource is `/file.json`, not `/file/file.json` |
+| [D15](#d15) | **PDF is wrong**, implemented | three endpoints use a different verb than documented |
+| [D16](#d16) | confirmed, implemented | `move` and `overwrite_if_exists` are required strings |
+| [D17](#d17) | open, P2 | `folder/list.json` has three undocumented parameters |
+| [D18](#d18) | confirmed, implemented | expiring links pass everything as path segments |
+| [D19](#d19) | confirmed, implemented | the same field is a string in one response and a number in another |
+| [D20](#d20) | implemented | `users/info.json` returns a `PrivateKey` |
+| [D21](#d21) | informational | six modules beyond the v1.0 scope are live |
 
 ---
 
@@ -30,158 +41,303 @@ and per-file SHA256 checksums.
 *Whitepaper §2.6 #2 (from the PDF)* states that `POST /download/all.json` is the
 one endpoint that names the session parameter `session_key`.
 
-*Live spec* (`testdata/spec/download.json`, `POST /v1/download/all.{format}`)
-documents the request body as:
+*Live spec* (`testdata/spec/download.json`) documents the request body as
+`files`, `folders` and **`session_id`** — in both the anonymous and the
+authenticated fetch.
 
-> `files` : string — Comma-separated files Ids.
-> `folders` : string — Comma-separated folder IDs.
-> **`session_id`** : string — Session ID.
+**Resolution:** follow the live spec; the SDK sends `session_id` by default.
+`Request.SessionParam` still allows a per-endpoint override, so if the sandbox
+turns out to accept only `session_key` the fix is one field on one call.
 
-**Resolution:** follow the live spec — the SDK sends `session_id` by default.
-`Request.SessionParam` exists precisely so a single endpoint can override the
-name without a special case in the client, so if the sandbox turns out to accept
-only `session_key`, the fix is one field on one call.
-
-**Follow-up:** exercise the real endpoint during P3 (download pipeline) and
-record the sandbox's actual behaviour here.
+**Follow-up:** exercise the real endpoint during P3 (download pipeline).
 
 Covered by `TestArchivedSpecDocumentsTheDownloadAllSessionParameter`,
 `TestSessionParamOverride`.
 
 ## D2 — `session/captcharequired.json` exists online but not in the PDF {#d2}
 
-*Live spec* (`testdata/spec/session.json`):
-`GET /v1/session/captcharequired.{format}`, one optional query parameter
-`username`, described as:
+`GET /v1/session/captcharequired.{format}`, one optional `username` query
+parameter:
 
 > Lets the login page render the captcha on first load when the client's IP is
 > already throttled, instead of only after a failed submission.
 
-This is the concrete instance of whitepaper §2.6 #1 (the PDF, self-described as
-v1.1.7, lags the live surface).
+The concrete instance of whitepaper §2.6 #1.
 
 **Resolution:** implemented as `opendrive.CaptchaRequired(ctx, client, username)`
-with the `CaptchaStatus` model. Covered by `TestCaptchaRequiredEndpoint` and
-`TestArchivedSpecHasEndpointsThePDFOmits`.
+with the `CaptchaStatus` model.
 
 ## D3 — `basePath` stops at `/api` while every declaration path starts with `/v1` {#d3}
 
-*Live spec:* every module declares `"basePath": "https://dev.opendrive.com/api"`
-and paths such as `/v1/session/login.{format}`. The whitepaper's base URL
-(§2.1) is `https://dev.opendrive.com/api/v1`, so naively concatenating a path
-taken from the spec (or from the PDF's expiring-link section, §2.6 #12) produces
-`/api/v1/v1/...`.
+Every module declares `"basePath": "https://dev.opendrive.com/api"` and paths
+such as `/v1/session/login.{format}`, while the Bridge base URL is
+`https://dev.opendrive.com/api/v1`. Naive concatenation yields `/api/v1/v1/...`.
 
 **Resolution:** `joinPath` collapses a duplicated trailing base segment, so both
 `/session/login.json` and `/v1/session/login.json` resolve to the same URL.
-Covered by `TestPathJoinDeduplicatesTheVersionPrefix` and
-`TestArchivedSpecPathsCarryTheVersionPrefix`.
 
 ## D4 — `download/file.json` accepts parameters the PDF does not list {#d4}
 
 *PDF / whitepaper §2.3:* `session_id`, `offset`, `inline`, `sharing_id`, `test`,
-`backup`, `temp_key`.
-
-*Live spec* additionally documents `app` (string), `temp_auth` (string) and
+`backup`, `temp_key`. *Live spec* adds `app` (string), `temp_auth` (string) and
 `preview` (int).
 
-**Status:** open. Their semantics are unknown; `temp_auth` looks related to the
-`temp_key` flow for password-protected files, and `preview` to inline rendering.
-To be probed against the sandbox in P3 before any of them is exposed through the
-Bridge API.
+**Status:** open; semantics unknown. `temp_auth` is treated as a credential by
+the redaction list already. To be probed in P3 before any is exposed.
 
 ## D5 — `file/thumb.json` accepts `time_offset` and `temp_key` {#d5}
 
-*Live spec:* besides `file_id`, `session_id` and `sharing_id`, the endpoint takes
-`time_offset` (float — presumably the frame to grab from a video) and `temp_key`.
-Neither appears in the PDF's thumbnail section.
+`time_offset` (float — presumably the video frame to grab) and `temp_key` are not
+in the PDF's thumbnail section.
 
-**Status:** open, to be confirmed in P2 when the file module is bound.
+**Status:** open, to be confirmed in P2.
 
 ## D6 — `oauth2/grant.json` documents three grant types and a different `client_id` meaning {#d6}
 
-*Live spec:*
+> `grant_type` : authorization_code, password, refresh_token
+> `client_id` : **Partner ID**
+> `username`, `password`, `code`
 
-> `grant_type` : string (required) — authorization_code, password, refresh_token
-> `client_id` : string (required) — **Partner ID**
-> `username`, `password`, `code` : string
+1. The whitepaper (§2.2 B) covers only `password` and `refresh_token`; an
+   `authorization_code` flow exists and would need a registered partner. Out of
+   scope for v1.0.
+2. `client_id` is documented as the *partner id* while the whitepaper passes the
+   literal `"OpenDrive"`. The SDK defaults to `DefaultClientID = "OpenDrive"` and
+   accepts an override via `WithClientID`.
 
-Two notes:
-
-1. The whitepaper (§2.2 B) only covers `password` and `refresh_token`. An
-   `authorization_code` flow exists upstream and would require a registered
-   partner; out of scope for v1.0, worth revisiting for a hosted Bridge.
-2. `client_id` is documented as the *partner id*, while the whitepaper's example
-   passes the literal `"OpenDrive"`. The SDK defaults to `DefaultClientID =
-   "OpenDrive"` and allows an override via `WithClientID`, so a partner
-   deployment needs no code change.
-
-The public spec does not document the grant *response*, so the token lifetimes
+The spec does not document the grant *response*, so the token lifetimes
 (86400 s access, 30 days refresh) still come from the PDF. The SDK prefers
-`expires_in` from the response when present and falls back to those constants.
+`expires_in` when the response carries it.
 
-**Status:** open until the authenticated spec or a sandbox login confirms the
-response shape.
+**Status:** open until a sandbox grant response is recorded as a fixture.
 
 ## D7 — listing pagination pairs `offset` with `last_request_time` {#d7}
 
-*Live spec* (`folder/shared.{format}`, the public sibling of `folder/list.json`)
-documents `offset`, `last_request_time`, `with_breadcrumbs`, `order_by` and
-`order_type`, confirming whitepaper §2.6 #14: paging past the first 100 entries
-requires echoing the previous response's `DirUpdateTime`.
+`folder/list.json` documents `offset` and `last_request_time` (plus
+`search_query`, `only_subfolders`, `with_breadcrumbs`, `sharing_id`), confirming
+whitepaper §2.6 #14: paging past the first 100 entries requires echoing the
+previous response's `DirUpdateTime`. There is no `limit` parameter — the page
+size is fixed upstream.
 
-Note the spelling here is `with_breadcrumbs` (correct), whereas the standalone
-breadcrumb endpoint is `folder/breadcrump.json` (misspelled) — §2.6 #3. Both
-spellings are real and neither may be "corrected".
+Note the spelling: the list parameter is `with_breadcrumbs` and the standalone
+endpoint is `folder/breadcrumb.json`; see D12.
 
 **Resolution:** modelled by `Pagination` (`FirstPage`/`Next`/`Validate`), which
 clamps the page size to 100 and refuses a later page without `last_request_time`.
-Covered by `TestPaginationProtocol`, `TestArchivedSpecShowsThePaginationParameters`
-and `TestUpstreamSpellingConstants`.
 
 ## D8 — public `users/*` endpoints absent from the PDF's Users chapter {#d8}
 
-*Live spec* exposes `users/forgotpassword.json`, `users/confirmpasswordreset.json`
-and `users/verifyemailsignup.json` without authentication.
-
-**Status:** out of scope for v1.0 (§1.4 covers Users read-only). Recorded so the
-drift watcher does not report them as new later.
+`users/forgotpassword.json`, `users/confirmpasswordreset.json` and
+`users/verifyemailsignup.json` need no authentication. Out of scope for v1.0
+(§1.4); recorded so drift detection does not report them as new.
 
 ## D9 — captcha is not limited to login {#d9}
 
-*Live spec:* `POST /v1/file/verifypassword.json` accepts a `captcha_response`
-parameter, so password-protected file access can also be throttled behind a
-captcha, not just `session/login.json` (§2.6 #11).
+`POST /v1/file/verifypassword.json` accepts `captcha_response`, so
+password-protected file access can also be throttled behind a captcha.
 
-**Status:** open. The SDK already maps any captcha response to
-`KindCaptchaRequired`, which is never retried; the P2 file module must surface it
-on `verifypassword` too.
+**Status:** open. The SDK maps any captcha response to `KindCaptchaRequired`,
+which is never retried; the P2 file module must surface it on `verifypassword`
+too.
 
-## D10 — there is no `sharing` module in the resource listing {#d10}
+## D10 — the `sharing` module is invisible to anonymous callers {#d10}
 
-*Whitepaper §2.3* lists a Sharing module (`listsharedfolders.json`,
-`listsharedusers.json`, `listusers.json`, `sharing.json`, `setmode.json`).
+The anonymous `resources.json` advertises nine modules and no `sharing`, which
+made the whitepaper's §2.3 Sharing section look wrong. With credentials the
+listing grows to seventeen modules and `sharing` is there, with seven
+operations:
 
-*Live spec* `resources.json` advertises exactly nine modules: `branding`,
-`download`, `file`, `folder`, `session`, `tasks`, `upload`, `users`, `oauth2`.
-There is no `sharing` resource; the public `folder` module does expose
-`folder/shared.json` and `folder/sharedinfo.json`.
+```
+POST   /v1/sharing.{format}
+DELETE /v1/sharing.{format}/{session_id}/{sharing_id}
+PUT    /v1/sharing/setmode.{format}
+GET    /v1/sharing/listsharedfolders.{format}/{session_id}/{sharing_id}
+GET    /v1/sharing/listsharedusers.{format}/{session_id}
+GET    /v1/sharing/listusers.{format}/{session_id}/{folder_id}
+GET    /v1/sharing/checkaccountusersaccess.{format}
+```
 
-**Hypothesis:** the sharing endpoints live inside the `folder` and `file`
-modules and are only visible to an authenticated explorer session.
+**Resolved:** the whitepaper was right; the anonymous spec was incomplete.
+`/sharing.json` is a third multi-verb resource (POST shares, DELETE revokes),
+now covered by `TestSameResourceDifferentVerbs`.
 
-**Status:** open, resolved by the authenticated fetch (see D11).
+## D11 — only the OAuth2 access token unlocks the full explorer spec {#d11}
 
-## D11 — the committed archive is the public subset only {#d11}
+`tools/fetch-spec` tries four authenticated strategies. Measured against the live
+explorer on 2026-07-25:
 
-`testdata/spec/manifest.json` currently records `"strategy": "anonymous"`:
-10 documents, 21 endpoints, 21 operations. The authenticated explorer exposes
-considerably more (the whole `folder` module is 20 endpoints on its own).
+| strategy | modules | operations |
+|---|---|---|
+| anonymous | 10 | 21 |
+| PHP session cookie | 10 | 21 |
+| `?session_id=` | 11 | 26 (5 modules unreadable) |
+| session as a path segment | — | 404, the explorer has no such route |
+| **`?session_id=OAUTH&access_token=`** | **17** | **220** |
 
-`tools/fetch-spec` already implements four authenticated strategies (PHP session
-cookie, `session_id` query parameter, session path segment, OAuth2
-`access_token`) and keeps whichever reveals the most operations. It needs
-`ODB_SPEC_USER` / `ODB_SPEC_PASS` in the environment.
+**Resolved:** the OAuth2 token is the only way to see the whole surface, which
+matters for the weekly drift job (§12.2) — it must run with credentials, not
+anonymously, or it will report 199 operations as "removed".
 
-**Status:** blocked on test-account credentials. Until then, the contract tests
-that need authenticated modules skip rather than fail.
+## D12 — the breadcrumb endpoint is spelled correctly upstream {#d12}
+
+*Whitepaper §2.6 #3 (from the PDF):* "官方拼写就是 breadcrump" — the endpoint is
+supposedly misspelled and the misspelling must be reproduced.
+
+*Live spec:* `GET /v1/folder/breadcrumb.{format}/{session_id}/{folder_id}`.
+
+*Verified against the live API with the test account:*
+
+| request | response |
+|---|---|
+| `GET /folder/breadcrumb.json/{session}/0` | `400 {"error":{"code":400,"message":"Invalid folder IDAA"}}` — endpoint exists, argument rejected |
+| `GET /folder/breadcrump.json/{session}/0` | `404 {"error":{"code":404,"message":""}}` — no such endpoint |
+
+**Resolution:** `EndpointFolderBreadcrumb = "/folder/breadcrumb.json"`. Upstream
+evidently fixed the typo at some point after the PDF was written. The *field*
+spelling trap of §2.6 #3 still stands separately (`OwnerSuspendet` in the login
+response), and remains covered by `TestSessionLoginKeepsUpstreamFieldSpelling`.
+
+**Note for the whitepaper:** §2.6 #3 should be amended — this is the one gotcha
+whose premise is inverted by the live API.
+
+## D13 — `upload/has_ddref.json` is an undocumented dedupe probe {#d13}
+
+```
+POST /v1/upload/has_ddref.{format}
+  session_id : string (required)
+  file_size  : int    (required) - File size in bytes
+  file_hash  : string (required) - MD5 file hash (32 hex chars)
+```
+
+The PDF's upload chapter does not mention it. It looks like a direct "do you
+already hold this blob?" query, i.e. the dedupe decision of §2.4 without having
+to call `create_file` first.
+
+**Status:** to be evaluated in P3. If it behaves as it reads, the upload pipeline
+can skip a round trip on the hot dedupe path.
+
+## D14 — the file resource is `/file.json`, not `/file/file.json` {#d14}
+
+*Whitepaper §2.3* lists `/file/file.json` for both "create an empty file" (POST)
+and "permanently delete from the trash" (DELETE).
+
+*Live spec:*
+
+```
+POST   /v1/file.{format}
+DELETE /v1/file.{format}/{session_id}/{file_id}
+POST   /v1/file/remove.{format}      # permanent removal, body form
+```
+
+So the resource is one level up, the DELETE form takes its arguments as path
+segments, and there is a separate `file/remove.json` for permanent removal. The
+same shape holds for folders (`POST /v1/folder.{format}`,
+`POST /v1/folder/remove.{format}`).
+
+**Resolution:** `EndpointFile = "/file.json"`, plus `EndpointFileRemove`.
+`TestEndpointConstantsMatchTheArchivedSpec` verifies every constant against the
+archive, so this class of error cannot recur silently.
+
+## D15 — three endpoints use a different verb than the whitepaper documents {#d15}
+
+| endpoint | whitepaper §2.3 | live spec |
+|---|---|---|
+| `file/access.json` | PUT | **POST** |
+| `file/filesettings.json` | POST | **PUT** |
+| `folder/foldersettings.json` | POST | **PUT** |
+
+The first two are exactly inverted. Since §2.6 #4 makes verb selection
+load-bearing, this would have been a silent 404 or, worse, the wrong operation.
+
+**Resolution:** the verbs are recorded next to each constant and asserted by
+`TestEndpointConstantsMatchTheArchivedSpec`.
+
+## D16 — `move` and `overwrite_if_exists` are required strings {#d16}
+
+```
+POST /v1/file/move_copy.{format}
+  move                : string (required) - (true = move, false = copy)
+  overwrite_if_exists : string (required) - (true, false)
+```
+
+Confirms whitepaper §2.6 #13 and adds that both are **required**, not optional.
+
+**Resolution:** the `StringBool` type marshals to `"true"`/`"false"`; P2 must
+send both fields on every move_copy call.
+
+## D17 — `folder/list.json` has three parameters the PDF does not mention {#d17}
+
+Beyond the documented set: `encryption_supported` (int), `order_by` (string) and
+`order_type` (string). `folder/trashlist.json` additionally takes `count_only`.
+
+**Status:** open. `order_by`/`order_type` are worth surfacing on the Bridge `/v1/ls`
+endpoint in P4; `encryption_supported` probably relates to Secure Folders (v1.2).
+
+## D18 — expiring links pass every argument as a path segment {#d18}
+
+```
+GET /v1/folder/expiringlink.{format}/{session_id}/{date}/{counter}/{folder_id}/{enable}
+GET /v1/file/expiringlink.{format}/{session_id}/{date}/{counter}/{file_id}/{enable}
+```
+
+Confirms the need for per-endpoint session placement: here the session is the
+*first path segment*, whereas `folder/trash.json` takes it in the body for POST
+and as a path segment for DELETE.
+
+**Resolution:** `Request.SessionPlacement` (`SessionInBody`/`SessionInQuery`/
+`SessionInPath`/`SessionOmit`) plus `Request.PathSegments`, with escaping so a
+segment cannot forge an extra path element.
+
+## D19 — the same field is a string in one response and a number in another {#d19}
+
+Real responses from the test account:
+
+| field | `session/login.json` | `users/info.json` |
+|---|---|---|
+| `UserID` | `"2125533"` (string) | `2125533` (number) |
+| `AccType` | `"1"` (string) | — |
+| `Trial` | — | `"0"` (string boolean) |
+| `UserSince` | — | `"1785027739"` (string timestamp) |
+| `FVersioning` | `"0"` (string boolean) | — |
+| `OwnerSuspendet`, `max_file_size` | absent | absent |
+
+Live confirmation of §2.6 #5 and #6, and of why fields have to tolerate absence:
+this account's login response omits two fields the PDF documents as always
+present.
+
+**Resolution:** `FlexString`, `FlexInt`, `FlexBool` and `UnixTime` handle all of
+these; every form above is in the type tests.
+
+## D20 — `users/info.json` returns a `PrivateKey` {#d20}
+
+The account information response carries a `PrivateKey` field. It is not
+mentioned in the PDF and it is clearly credential-shaped.
+
+**Resolution:** added to the redaction list, so it cannot reach a debug log
+(§9.4).
+
+## D21 — six modules beyond the v1.0 scope are live {#d21}
+
+The authenticated listing exposes, with operation counts:
+
+| module | ops | v1.0 scope? |
+|---|---|---|
+| tasks | 43 | no (v1.3) |
+| admin | 40 | no |
+| notes | 26 | no (v1.3) |
+| folder | 24 | yes |
+| file | 20 | yes |
+| users | 14 | read-only subset |
+| accountusers | 11 | no (v1.1) |
+| branding | 8 | no |
+| sharing | 7 | yes |
+| upload | 7 | yes |
+| usergroups | 5 | no (v1.1) |
+| session | 5 | yes |
+| download | 3 | yes |
+| securefolders | 3 | no (v1.2) |
+| stats | 3 | no (v1.2) |
+| oauth2 | 1 | yes |
+
+Informational: the roadmap in §12.1 lines up with what exists, and `admin`
+(40 operations) is a module the whitepaper never mentions at all.

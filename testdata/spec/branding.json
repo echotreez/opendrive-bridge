@@ -1,17 +1,17 @@
 {
   "apiVersion": "1",
   "swaggerVersion": "1.1",
-  "basePath": "https:\/\/dev.opendrive.com\/api",
+  "basePath": "https://dev.opendrive.com/api",
   "produces": [
-    "application\/json"
+    "application/json"
   ],
   "consumes": [
-    "application\/json",
-    "multipart\/form-data"
+    "application/json",
+    "multipart/form-data"
   ],
   "apis": [
     {
-      "path": "\/v1\/branding.{format}",
+      "path": "/v1/branding.{format}",
       "description": "Branding API",
       "operations": [
         {
@@ -38,7 +38,7 @@
               "dataType": "string"
             }
           ],
-          "summary": "Get user branding info&nbsp; <i class=\"icon-adjust icon-large\"><\/i>",
+          "summary": "Get user branding info&nbsp; <i class=\"icon-adjust icon-large\"></i>",
           "notes": "Get user branding info",
           "errorResponses": [
             {
@@ -50,7 +50,49 @@
       ]
     },
     {
-      "path": "\/v1\/branding\/files.{format}",
+      "path": "/v1/branding/checkusersubdomainexists.{format}/{session_id}/{subdomain}",
+      "description": "Branding API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveCheckUserSubdomainExists",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "subdomain",
+              "description": "Subdomain.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "RANGE",
+                "min": "1",
+                "max": "32"
+              }
+            }
+          ],
+          "summary": "Check if userdomain already registered by another user&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Check if userdomain already registered by another user",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/branding/files.{format}",
       "description": "Branding API",
       "operations": [
         {
@@ -109,7 +151,7 @@
               "dataType": "string"
             }
           ],
-          "summary": "Get branding files&nbsp; <i class=\"icon-adjust icon-large\"><\/i>",
+          "summary": "Get branding files&nbsp; <i class=\"icon-adjust icon-large\"></i>",
           "notes": "Get branding files",
           "errorResponses": [
             {
@@ -121,7 +163,7 @@
       ]
     },
     {
-      "path": "\/v1\/branding\/subdomainbranding.{format}\/{partner_name}\/{subdomain}",
+      "path": "/v1/branding/subdomainbranding.{format}/{partner_name}/{subdomain}",
       "description": "Branding API",
       "operations": [
         {
@@ -151,8 +193,143 @@
               }
             }
           ],
-          "summary": "Get business user subdomain branding&nbsp; <i class=\"icon-unlock-alt icon-large\"><\/i>",
+          "summary": "Get business user subdomain branding&nbsp; <i class=\"icon-unlock-alt icon-large\"></i>",
           "notes": "Get business user subdomain branding",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/branding.{format}",
+      "description": "Branding API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "create",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>host_mapping : <tag>string</tag>  - HostMapping - Host name URL (URL format).<hr/>drive_name : <tag>string</tag>  - DriveName - Drive name (min 1)(max 35).<hr/>menu_color : <tag>string</tag>  - MenuColor - HEX (max 6).<hr/>font_color : <tag>string</tag>  - FonColor - HEX (max 6).<hr/>login_page_html : <tag>string</tag>  - LoginPageHTML - text.<hr/>white_labeled : <tag>int</tag>  - WhiteLabeled - (0 = no, 1 = yes).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create user branding&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create user branding",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/branding.{format}",
+      "description": "Branding API",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "update",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>host_mapping : <tag>string</tag>  - HostMapping - Host name URL (URL format).<hr/>drive_name : <tag>string</tag>  - DriveName - Drive name (min 1)(max 35).<hr/>menu_color : <tag>string</tag>  - MenuColor - HEX (max 6).<hr/>font_color : <tag>string</tag>  - FonColor - HEX (max 6).<hr/>login_page_html : <tag>string</tag>  - LoginPageHTML - text.<hr/>white_labeled : <tag>int</tag>  - WhiteLabeled - (0 = no, 1 = yes).<hr/>subdomain : <tag>string</tag>  - Subdomain.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update user branding info&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update user branding info",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/branding.{format}/{session_id}",
+      "description": "Branding API",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "remove",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Delete user branding info&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Delete user branding info",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/branding/userimage.{format}",
+      "description": "Branding API",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeUserImage",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "image_type",
+              "description": "Type('user', 'account_user', 'logo', 'favicon').",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "user",
+                  "account_user",
+                  "logo",
+                  "favicon"
+                ]
+              }
+            }
+          ],
+          "summary": "Delete user avatar or logo&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Delete user avatar or logo",
           "errorResponses": [
             {
               "reason": "RestException",
@@ -163,6 +340,6 @@
       ]
     }
   ],
-  "resourcePath": "\/branding",
+  "resourcePath": "/branding",
   "models": {}
 }

@@ -2,81 +2,141 @@ package opendrive
 
 // Upstream endpoint paths, relative to the API base URL.
 //
-// They are declared as constants for three reasons the whitepaper insists on:
-// upstream's own spelling is the contract, typos included (§2.6 #3); several
-// resources mean different things depending on the verb, so routing must never
-// be inferred from the path (§2.6 #4); and the contract tests compare these
-// literals against the archived Swagger spec (§6.1).
+// Every constant here was taken from the archived live Swagger specification in
+// testdata/spec/, not from the PDF (CLAUDE.md rule 3). TestEndpointConstants-
+// MatchTheArchivedSpec re-checks each one against the archive, so a rename
+// upstream fails CI instead of failing in production (§6.1, §12.2).
+//
+// Three things are deliberately explicit:
+//   - the verb, because several resources mean different things per method
+//     (§2.6 #4): POST /file.json creates an empty file while DELETE removes a
+//     trashed one, and POST /folder/trash.json trashes while DELETE empties;
+//   - where the session goes, because upstream puts it in the body, the query
+//     or the path depending on the endpoint;
+//   - the spelling, because upstream's is the contract (§2.6 #3).
 //
 // The list covers the first-release scope (§1.4). Endpoints are bound to typed
 // methods in phase P2.
 const (
-	// Session and OAuth2 (PDF §11, whitepaper §2.2).
-	EndpointSessionLogin           = "/session/login.json"  // POST
-	EndpointSessionExists          = "/session/exists.json" // POST
-	EndpointSessionInfo            = "/session/info.json"   // GET
-	EndpointSessionLogout          = "/session/logout.json" // POST
-	EndpointSessionCaptchaRequired = "/session/captcharequired.json"
-	EndpointOAuth2Grant            = "/oauth2/grant.json" // POST
+	// -------------------------------------------------- session and OAuth2
+	// PDF §11, whitepaper §2.2.
 
-	// Folder (PDF §5).
-	//
-	// EndpointFolder is POST to create a folder; EndpointFolderTrash is POST to
-	// move a folder to the trash and DELETE to empty the trash (§2.6 #4).
-	EndpointFolder           = "/folder.json"
-	EndpointFolderList       = "/folder/list.json" // GET, session in the path
-	EndpointFolderInfo       = "/folder/info.json"
-	EndpointFolderIDByPath   = "/folder/idbypath.json"
-	EndpointFolderItemByName = "/folder/itembyname.json"
-	// EndpointFolderBreadcrumb keeps upstream's misspelling: the endpoint really
-	// is "breadcrump.json" (§2.6 #3). Do not correct it.
-	EndpointFolderBreadcrumb  = "/folder/breadcrump.json"
-	EndpointFolderRename      = "/folder/rename.json"
-	EndpointFolderMoveCopy    = "/folder/move_copy.json"
-	EndpointFolderTrash       = "/folder/trash.json" // POST = trash, DELETE = empty
-	EndpointFolderTrashList   = "/folder/trashlist.json"
-	EndpointFolderRestore     = "/folder/restore.json"
-	EndpointFolderRemove      = "/folder/remove.json"
-	EndpointFolderSetAccess   = "/folder/setaccess.json"
-	EndpointFolderSettings    = "/folder/foldersettings.json"
-	EndpointFolderShared      = "/folder/shared.json"
-	EndpointFolderSharedInfo  = "/folder/sharedinfo.json"
-	EndpointFolderSendByEmail = "/folder/sendbyemail.json"
+	EndpointSessionLogin  = "/session/login.json"  // POST, no session
+	EndpointSessionExists = "/session/exists.json" // POST, session in body
+	// EndpointSessionInfo takes the session as a path segment.
+	EndpointSessionInfo   = "/session/info.json"   // GET  /{session_id}
+	EndpointSessionLogout = "/session/logout.json" // POST, session in body
+	// EndpointSessionCaptchaRequired exists online but not in the PDF
+	// (§2.6 #1, docs/discrepancies.md D2).
+	EndpointSessionCaptchaRequired = "/session/captcharequired.json" // GET, no session
 
-	// File (PDF §4).
-	//
-	// EndpointFile is POST to create an empty file and DELETE to remove a
-	// trashed file permanently (§2.6 #4).
-	EndpointFile               = "/file/file.json"
-	EndpointFileInfo           = "/file/info.json"
-	EndpointFileIDByPath       = "/file/idbypath.json"
-	EndpointFilePath           = "/file/path.json"
-	EndpointFileRename         = "/file/rename.json"
-	EndpointFileMoveCopy       = "/file/move_copy.json"
-	EndpointFileTrash          = "/file/trash.json"
-	EndpointFileRestore        = "/file/restore.json"
-	EndpointFileVersions       = "/file/fileversions.json"
-	EndpointFileRemoveVersion  = "/file/removefileversion.json"
-	EndpointFileThumb          = "/file/thumb.json"
-	EndpointFileAccess         = "/file/access.json" // PUT
-	EndpointFileSettings       = "/file/filesettings.json"
-	EndpointFileVerifyPassword = "/file/verifypassword.json"
-	EndpointFileSendByEmail    = "/file/sendbyemail.json"
+	EndpointOAuth2Grant = "/oauth2/grant.json" // POST, no session
 
-	// Upload pipeline (PDF §12, whitepaper §2.4).
-	EndpointUploadCheckFileExists = "/upload/checkfileexistsbyname.json"
-	EndpointUploadCreateFile      = "/upload/create_file.json"
-	EndpointUploadOpenFile        = "/upload/open_file_upload.json"
-	EndpointUploadChunk           = "/upload/upload_file_chunk2.json" // v2 only, §2.4
-	EndpointUploadCloseFile       = "/upload/close_file_upload.json"
+	// -------------------------------------------------- folder
+	// PDF §5.
 
-	// Download (PDF §3).
-	//
-	// EndpointDownloadAll is the one endpoint whose session parameter the PDF
-	// calls session_key; see docs/discrepancies.md (§2.6 #2).
-	EndpointDownloadFile = "/download/file.json"
-	EndpointDownloadAll  = "/download/all.json"
+	EndpointFolder = "/folder.json" // POST creates a folder, session in body
+	// EndpointFolderList is the workhorse listing endpoint: session and folder
+	// id are both path segments, paging goes through offset plus
+	// last_request_time (§2.6 #14).
+	EndpointFolderList       = "/folder/list.json"       // GET  /{session_id}/{folder_id}
+	EndpointFolderInfo       = "/folder/info.json"       // GET  /{session_id}/{folder_id}
+	EndpointFolderIDByPath   = "/folder/idbypath.json"   // POST, session in body
+	EndpointFolderItemByName = "/folder/itembyname.json" // GET /{session_id}/{folder_id}
+	// EndpointFolderBreadcrumb: the live API spells this correctly. The PDF's
+	// "breadcrump" returns 404 (docs/discrepancies.md D12).
+	EndpointFolderBreadcrumb  = "/folder/breadcrumb.json"     // GET /{session_id}/{folder_id}
+	EndpointFolderPath        = "/folder/path.json"           // GET /{session_id}/{folder_id}
+	EndpointFolderFullPath    = "/folder/folderfullpath.json" // GET /{session_id}/{folder_id}
+	EndpointFolderRename      = "/folder/rename.json"         // POST
+	EndpointFolderMoveCopy    = "/folder/move_copy.json"      // POST
+	EndpointFolderTrash       = "/folder/trash.json"          // POST trashes; DELETE /{session_id} empties
+	EndpointFolderTrashList   = "/folder/trashlist.json"      // GET  /{session_id}
+	EndpointFolderRestore     = "/folder/restore.json"        // POST
+	EndpointFolderRemove      = "/folder/remove.json"         // POST, permanent
+	EndpointFolderSetAccess   = "/folder/setaccess.json"      // POST
+	EndpointFolderSettings    = "/folder/foldersettings.json" // PUT, not POST (D15)
+	EndpointFolderUserAccess  = "/folder/useraccessmode.json" // GET  /{session_id}/{folder_id}
+	EndpointFolderSendByEmail = "/folder/sendbyemail.json"    // POST
+	EndpointFolderExportCSV   = "/folder/exportcsv.json"      // GET  /{session_id}/{folder_id}
+	EndpointFolderShared      = "/folder/shared.json"         // GET  /{folder_id}, public
+	EndpointFolderSharedInfo  = "/folder/sharedinfo.json"     // GET  /{folder_id}, public
+	// Expiring links pass every argument as a path segment, session first.
+	EndpointFolderExpiringLink  = "/folder/expiringlink.json"        // GET /{session_id}/{date}/{counter}/{folder_id}/{enable}
+	EndpointFolderExpiringLinks = "/folder/folderexpiringlinks.json" // GET /{session_id}/{folder_id}
 
-	// Users, read-only in the first release (PDF §13).
-	EndpointUsersInfo = "/users/info.json"
+	// -------------------------------------------------- file
+	// PDF §4.
+
+	// EndpointFile is the file resource itself: POST creates an empty file,
+	// DELETE removes a trashed one. Note it is /file.json, not the
+	// /file/file.json the whitepaper lists (D16).
+	EndpointFile = "/file.json" // POST; DELETE /{session_id}/{file_id}
+	// EndpointFileInfo takes the file id in the path and the session in the
+	// query string.
+	EndpointFileInfo           = "/file/info.json"              // GET  /{file_id}
+	EndpointFileIDByPath       = "/file/idbypath.json"          // POST
+	EndpointFilePath           = "/file/path.json"              // GET  /{session_id}/{file_id}
+	EndpointFileFullPath       = "/file/filefullpath.json"      // GET  /{session_id}/{file_id}
+	EndpointFileRename         = "/file/rename.json"            // POST
+	EndpointFileMoveCopy       = "/file/move_copy.json"         // POST, move/overwrite are "true"/"false" strings (§2.6 #13)
+	EndpointFileTrash          = "/file/trash.json"             // POST
+	EndpointFileRestore        = "/file/restore.json"           // POST
+	EndpointFileRemove         = "/file/remove.json"            // POST, permanent
+	EndpointFileVersions       = "/file/fileversions.json"      // GET  /{session_id}/{file_group_id}
+	EndpointFileRemoveVersion  = "/file/removefileversion.json" // DELETE /{session_id}/{file_id}
+	EndpointFileThumb          = "/file/thumb.json"             // GET  /{file_id}
+	EndpointFileAccess         = "/file/access.json"            // POST, not PUT (D15)
+	EndpointFileSettings       = "/file/filesettings.json"      // PUT, not POST (D15)
+	EndpointFileVerifyPassword = "/file/verifypassword.json"    // POST, may demand a captcha (D9)
+	EndpointFileSendByEmail    = "/file/sendbyemail.json"       // POST
+	EndpointFileExpiringLink   = "/file/expiringlink.json"      // GET /{session_id}/{date}/{counter}/{file_id}/{enable}
+	EndpointFileExpiringLinks  = "/file/fileexpiringlinks.json" // GET /{session_id}/{file_id}
+
+	// -------------------------------------------------- upload
+	// PDF §12, whitepaper §2.4.
+
+	EndpointUploadCheckFileExists = "/upload/checkfileexistsbyname.json" // POST /{folder_id}, name is an array (§2.6 #2)
+	EndpointUploadCreateFile      = "/upload/create_file.json"           // POST
+	EndpointUploadOpenFile        = "/upload/open_file_upload.json"      // POST
+	// EndpointUploadChunk is the v2 chunk endpoint the official samples
+	// mandate; session and file id are path segments, temp_location,
+	// chunk_offset and chunk_size are query parameters, the bytes go in a
+	// multipart file_data field (§2.4).
+	EndpointUploadChunk = "/upload/upload_file_chunk2.json" // POST /{session_id}/{file_id}
+	// EndpointUploadChunkV1 still exists upstream but is unreliable under
+	// speed limits; kept only so drift detection does not flag it as new.
+	EndpointUploadChunkV1   = "/upload/upload_file_chunk.json" // POST, do not use
+	EndpointUploadCloseFile = "/upload/close_file_upload.json" // POST
+	// EndpointUploadHasDedupeRef is undocumented in the PDF: it answers
+	// whether the server already holds a blob with this size and MD5, which is
+	// the dedupe probe the upload pipeline wants (D13).
+	EndpointUploadHasDedupeRef = "/upload/has_ddref.json" // POST
+
+	// -------------------------------------------------- download
+	// PDF §3.
+
+	EndpointDownloadFile = "/download/file.json" // GET  /{file_id}, supports offset resume
+	// EndpointDownloadAll takes session_id in the body per the live spec, not
+	// the session_key the PDF specifies (D1).
+	EndpointDownloadAll      = "/download/all.json"                       // POST
+	EndpointDownloadRedirect = "/download/redirecttocustomapiserver.json" // GET
+
+	// -------------------------------------------------- sharing
+	// PDF §9. The module is invisible to anonymous callers, which is why the
+	// public archive appeared to lack it (D10).
+
+	// EndpointSharing is another multi-verb resource: POST shares, DELETE
+	// revokes (§2.6 #4).
+	EndpointSharing                = "/sharing.json"                         // POST; DELETE /{session_id}/{sharing_id}
+	EndpointSharingSetMode         = "/sharing/setmode.json"                 // PUT
+	EndpointSharingListFolders     = "/sharing/listsharedfolders.json"       // GET /{session_id}/{sharing_id}
+	EndpointSharingListUsers       = "/sharing/listsharedusers.json"         // GET /{session_id}
+	EndpointSharingListFolderUsers = "/sharing/listusers.json"               // GET /{session_id}/{folder_id}
+	EndpointSharingCheckAccess     = "/sharing/checkaccountusersaccess.json" // GET
+
+	// -------------------------------------------------- users
+	// PDF §13, read-only in the first release.
+
+	EndpointUsersInfo = "/users/info.json" // GET /{session_id}
 )

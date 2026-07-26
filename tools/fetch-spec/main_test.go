@@ -203,6 +203,51 @@ func TestLoginReturnsSessionID(t *testing.T) {
 	}
 }
 
+// §9.4: a session id carried in a path segment is invisible to URL-parameter
+// redaction, so the failure message has to be scrubbed against the strategy's
+// own secrets.
+func TestStrategyFailureMessagesDoNotLeakTheSession(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"code":404,"message":""}}`, http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	s := strategy{name: "path-session", session: secretSession, pathSuffix: secretSession}
+	_, err := fetchAll(context.Background(), srv.Client(), srv.URL+"/api/v1", s)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), secretSession) {
+		t.Skip("the raw error no longer carries the session; nothing to scrub")
+	}
+	if got := redactText(err.Error(), s.secretValues()); strings.Contains(got, secretSession) {
+		t.Fatalf("the printed failure still leaks the session: %s", got)
+	}
+}
+
+func TestSecretValuesKeepsTheOAuthMarkerReadable(t *testing.T) {
+	s := strategy{
+		session: secretSession,
+		query:   map[string]string{"session_id": OAuthSessionMarker, "access_token": "tok-123456789"},
+		secrets: []string{"tok-123456789"},
+	}
+	got := s.secretValues()
+	for _, v := range got {
+		if v == OAuthSessionMarker {
+			t.Fatal("the OAUTH marker must not be treated as a secret")
+		}
+	}
+	var sawToken bool
+	for _, v := range got {
+		if v == "tok-123456789" {
+			sawToken = true
+		}
+	}
+	if !sawToken {
+		t.Fatalf("the access token is missing from the redaction list: %v", got)
+	}
+}
+
 func TestRedactURL(t *testing.T) {
 	cases := []struct{ in, wantAbsent, wantPresent string }{
 		{"https://x/api/v1/file/info.json?session_id=OAUTH&access_token=tok123", "tok123", "session_id=OAUTH"},

@@ -47,6 +47,238 @@
           ]
         }
       ]
+    },
+    {
+      "path": "/v1/upload/close_file_upload.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createclose_file_upload",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - File ID.<hr/>file_size : <tag>int</tag>  <i>(required)</i> - File size in bytes.<hr/>temp_location : <tag>string</tag>  - File temp location.<hr/>file_time : <tag>int</tag>  - Time of file creation.<hr/>access_folder_id : <tag>string</tag>  - Access folder ID.<hr/>file_compressed : <tag>int</tag>  - File is compressed.<hr/>file_hash : <tag>string</tag>  - MD5 File Hash (Optional).<hr/>sharing_id : <tag>string</tag>  - Sharing ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"file_id\": \"\",\n    \"file_size\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Close file upload&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Close file upload should be called after file upload",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            },
+            {
+              "reason": "DBALException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/upload/create_file.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createCreate_file",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>folder_id : <tag>string</tag>  <i>(required)</i> - Folder ID.<hr/>file_name : <tag>string</tag>  <i>(required)</i> - File Name.<hr/>file_description : <tag>string</tag>  - File description.<hr/>access_folder_id : <tag>string</tag>  - Access folder ID.<hr/>file_size : <tag>int</tag>  - File Size in bytes (Optional).<hr/>file_hash : <tag>string</tag>  - MD5 File hash (Optional).<hr/>sharing_id : <tag>string</tag>  - Sharing ID.<hr/>open_if_exists : <tag>int</tag>  - (1) - file info will be returned if file already exists, (0) - error 409 will be returned if file already exists.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"folder_id\": \"\",\n    \"file_name\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create file&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create file should be called before file upload if file_size and file_hash present, RequireHashOnly can be returned, that means this file with same hash and size already exists in db",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/upload/has_ddref.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createHas_ddref",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>file_size : <tag>int</tag>  <i>(required)</i> - File size in bytes.<hr/>file_hash : <tag>string</tag>  <i>(required)</i> - MD5 file hash (32 hex chars).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"file_size\": \"\",\n    \"file_hash\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Check whether a (size, MD5) pair already exists in the ddref tables.&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": " Lightweight read-only probe used by clients (e.g. the WP plugin's resumable uploader) to decide whether to bypass the chunked upload and complete the file via create_file + close_file_upload with hash only. Does not create any file row or reserve storage.",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/upload/open_file_upload.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createOpen_file_upload",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - File ID.<hr/>file_size : <tag>int</tag>  <i>(required)</i> - File Size.<hr/>access_folder_id : <tag>string</tag>  - Access folder ID.<hr/>file_hash : <tag>string</tag>  - MD5 File hash.<hr/>sharing_id : <tag>string</tag>  - Sharing ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"file_id\": \"\",\n    \"file_size\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Open file upload&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Open file upload should be called before file upload",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/upload/upload_file_chunk.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createUpload_file_chunk",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here",
+              "required": true,
+              "defaultValue": "{\n    \"property\" : \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Upload file chunk&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Required format: <br /> <pre> this function expects $_POST variables:<br /> $postData = array( <br /> \"session_id\" => $session_id, <br /> \"file_id\" => $file_id, <br /> \"temp_location\" => $temp_location, <br /> \"chunk_offset\" => $chunk_offset, <br /> \"chunk_size\" => $chunk_size, <br /> );<br /> along with file sent like:<br /> $_FILES['file_data']<br /> </pre> <br />",
+          "errorResponses": [
+            {
+              "reason": "Exception",
+              "code": 500
+            },
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/upload/upload_file_chunk2.{format}/{session_id}/{file_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createUpload_file_chunk2",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "file_id",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "temp_location",
+              "description": "",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "chunk_offset",
+              "description": "",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "chunk_size",
+              "description": "",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here",
+              "required": true,
+              "defaultValue": "{\n    \"property\" : \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Upload file chunk. Second version&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "<br /> <pre> This function expects binary data in $_FILES['file_data']<br /> </pre> <br />",
+          "errorResponses": [
+            {
+              "reason": "Exception",
+              "code": 500
+            },
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
     }
   ],
   "resourcePath": "/upload",

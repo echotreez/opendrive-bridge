@@ -43,8 +43,11 @@ var gotchaCoverage = map[int]struct {
 		},
 	},
 	4: {
-		summary: "one resource name, several verbs: /file/file.json POST vs DELETE, /folder/trash.json POST vs DELETE",
-		tests:   []string{"TestSameResourceDifferentVerbs"},
+		summary: "one resource name, several verbs: /file.json, /folder/trash.json and /sharing.json all mean POST != DELETE",
+		tests: []string{
+			"TestSameResourceDifferentVerbs",
+			"TestEndpointConstantsMatchTheArchivedSpec",
+		},
 	},
 	5: {
 		summary: "booleans arrive as 0/1 integers and as True/False strings",
@@ -131,25 +134,33 @@ func TestGotchaCoverageIsComplete(t *testing.T) {
 	}
 }
 
-// §2.6 #3: the endpoint names are upstream's, typo included. Keeping them as
-// constants means a future refactor cannot quietly "fix" the spelling.
+// §2.6 #3: upstream's spelling is the contract. The PDF claims the breadcrumb
+// endpoint is misspelled "breadcrump"; the live API returns 404 for that and
+// serves the correctly spelled path instead (docs/discrepancies.md D12). The
+// live spelling is the one that ships, and the archive is what proves it.
 func TestUpstreamSpellingConstants(t *testing.T) {
-	if EndpointFolderBreadcrumb != "/folder/breadcrump.json" {
-		t.Fatalf("breadcrumb endpoint = %q; upstream spells it breadcrump", EndpointFolderBreadcrumb)
+	if EndpointFolderBreadcrumb != "/folder/breadcrumb.json" {
+		t.Fatalf("breadcrumb endpoint = %q; the live API serves /folder/breadcrumb.json", EndpointFolderBreadcrumb)
 	}
-	if !strings.Contains(EndpointFolderBreadcrumb, "breadcrump") {
-		t.Fatal("the upstream misspelling must be preserved verbatim")
+	// The wire field spelling is a separate trap and still stands: see
+	// TestSessionLoginKeepsUpstreamFieldSpelling for OwnerSuspendet.
+
+	a := loadSpecArchive(t)
+	folder := a.module(t, "folder")
+	if _, _, ok := folder.operation("breadcrump", "GET"); ok {
+		t.Fatal("the archive now has breadcrump after all; re-check D12")
+	}
+	if _, _, ok := folder.operation("breadcrumb", "GET"); !ok {
+		t.Skip("the archive has no breadcrumb endpoint (public subset?)")
 	}
 }
 
 // §2.6 #4: the same .json resource means different things per verb, so routing
 // may never be inferred from the path alone.
 func TestSameResourceDifferentVerbs(t *testing.T) {
-	if EndpointFile != "/file/file.json" || EndpointFolderTrash != "/folder/trash.json" {
-		t.Fatal("endpoint constants changed")
-	}
-	// POST /file/file.json creates an empty file, DELETE removes it from the
-	// trash; POST /folder/trash.json moves to the trash, DELETE empties it.
+	// POST /file.json creates an empty file, DELETE removes a trashed one;
+	// POST /folder/trash.json trashes a folder, DELETE empties the trash;
+	// POST /sharing.json shares, DELETE revokes.
 	cases := []struct {
 		method, path, meaning string
 	}{
@@ -157,17 +168,140 @@ func TestSameResourceDifferentVerbs(t *testing.T) {
 		{"DELETE", EndpointFile, "permanently remove a trashed file"},
 		{"POST", EndpointFolderTrash, "move a folder to the trash"},
 		{"DELETE", EndpointFolderTrash, "empty the trash"},
+		{"POST", EndpointSharing, "share"},
+		{"DELETE", EndpointSharing, "revoke a share"},
 	}
 	seen := map[string]bool{}
+	byPath := map[string]int{}
 	for _, c := range cases {
 		key := c.method + " " + c.path
 		if seen[key] {
 			t.Fatalf("duplicate route %s", key)
 		}
 		seen[key] = true
+		byPath[c.path]++
 	}
-	if len(seen) != 4 {
-		t.Fatalf("expected four distinct routes over two paths, got %d", len(seen))
+	for path, n := range byPath {
+		if n < 2 {
+			t.Errorf("%s is listed once; it is in this table because it carries several verbs", path)
+		}
+	}
+	if len(seen) != 6 {
+		t.Fatalf("expected six distinct routes over three paths, got %d", len(seen))
+	}
+}
+
+// Every endpoint constant must exist in the archived spec with the verb the
+// declaration claims. This is the drift alarm of §12.2: an upstream rename or a
+// changed method fails here rather than in production.
+func TestEndpointConstantsMatchTheArchivedSpec(t *testing.T) {
+	routes := []struct {
+		module, path, method string
+	}{
+		{"session", EndpointSessionLogin, "POST"},
+		{"session", EndpointSessionExists, "POST"},
+		{"session", EndpointSessionInfo, "GET"},
+		{"session", EndpointSessionLogout, "POST"},
+		{"session", EndpointSessionCaptchaRequired, "GET"},
+		{"oauth2", EndpointOAuth2Grant, "POST"},
+
+		{"folder", EndpointFolder, "POST"},
+		{"folder", EndpointFolderList, "GET"},
+		{"folder", EndpointFolderInfo, "GET"},
+		{"folder", EndpointFolderIDByPath, "POST"},
+		{"folder", EndpointFolderItemByName, "GET"},
+		{"folder", EndpointFolderBreadcrumb, "GET"},
+		{"folder", EndpointFolderPath, "GET"},
+		{"folder", EndpointFolderFullPath, "GET"},
+		{"folder", EndpointFolderRename, "POST"},
+		{"folder", EndpointFolderMoveCopy, "POST"},
+		{"folder", EndpointFolderTrash, "POST"},
+		{"folder", EndpointFolderTrash, "DELETE"},
+		{"folder", EndpointFolderTrashList, "GET"},
+		{"folder", EndpointFolderRestore, "POST"},
+		{"folder", EndpointFolderRemove, "POST"},
+		{"folder", EndpointFolderSetAccess, "POST"},
+		{"folder", EndpointFolderSettings, "PUT"},
+		{"folder", EndpointFolderUserAccess, "GET"},
+		{"folder", EndpointFolderSendByEmail, "POST"},
+		{"folder", EndpointFolderExportCSV, "GET"},
+		{"folder", EndpointFolderShared, "GET"},
+		{"folder", EndpointFolderSharedInfo, "GET"},
+		{"folder", EndpointFolderExpiringLink, "GET"},
+		{"folder", EndpointFolderExpiringLinks, "GET"},
+
+		{"file", EndpointFile, "POST"},
+		{"file", EndpointFile, "DELETE"},
+		{"file", EndpointFileInfo, "GET"},
+		{"file", EndpointFileIDByPath, "POST"},
+		{"file", EndpointFilePath, "GET"},
+		{"file", EndpointFileFullPath, "GET"},
+		{"file", EndpointFileRename, "POST"},
+		{"file", EndpointFileMoveCopy, "POST"},
+		{"file", EndpointFileTrash, "POST"},
+		{"file", EndpointFileRestore, "POST"},
+		{"file", EndpointFileRemove, "POST"},
+		{"file", EndpointFileVersions, "GET"},
+		{"file", EndpointFileRemoveVersion, "DELETE"},
+		{"file", EndpointFileThumb, "GET"},
+		{"file", EndpointFileAccess, "POST"},
+		{"file", EndpointFileSettings, "PUT"},
+		{"file", EndpointFileVerifyPassword, "POST"},
+		{"file", EndpointFileSendByEmail, "POST"},
+		{"file", EndpointFileExpiringLink, "GET"},
+		{"file", EndpointFileExpiringLinks, "GET"},
+
+		{"upload", EndpointUploadCheckFileExists, "POST"},
+		{"upload", EndpointUploadCreateFile, "POST"},
+		{"upload", EndpointUploadOpenFile, "POST"},
+		{"upload", EndpointUploadChunk, "POST"},
+		{"upload", EndpointUploadChunkV1, "POST"},
+		{"upload", EndpointUploadCloseFile, "POST"},
+		{"upload", EndpointUploadHasDedupeRef, "POST"},
+
+		{"download", EndpointDownloadFile, "GET"},
+		{"download", EndpointDownloadAll, "POST"},
+		{"download", EndpointDownloadRedirect, "GET"},
+
+		{"sharing", EndpointSharing, "POST"},
+		{"sharing", EndpointSharing, "DELETE"},
+		{"sharing", EndpointSharingSetMode, "PUT"},
+		{"sharing", EndpointSharingListFolders, "GET"},
+		{"sharing", EndpointSharingListUsers, "GET"},
+		{"sharing", EndpointSharingListFolderUsers, "GET"},
+		{"sharing", EndpointSharingCheckAccess, "GET"},
+
+		{"users", EndpointUsersInfo, "GET"},
+	}
+
+	a := loadSpecArchive(t)
+	if a.strategy == "anonymous" {
+		t.Skip("the archive is the public subset; run tools/fetch-spec with credentials")
+	}
+
+	modules := map[string]archivedDeclaration{}
+	for _, r := range routes {
+		if _, ok := modules[r.module]; !ok {
+			modules[r.module] = a.module(t, r.module)
+		}
+		decl := modules[r.module]
+		want := "/v1" + strings.TrimSuffix(r.path, ".json") + ".{format}"
+		found := false
+		for _, api := range decl.APIs {
+			// Trailing path parameters are part of the declaration path.
+			if api.Path != want && !strings.HasPrefix(api.Path, want+"/{") {
+				continue
+			}
+			for _, op := range api.Operations {
+				if strings.EqualFold(op.HTTPMethod, r.method) {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s %s is not in the archived %s module (looked for %q)",
+				r.method, r.path, r.module, want)
+		}
 	}
 }
 

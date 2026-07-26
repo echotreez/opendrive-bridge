@@ -41,6 +41,35 @@
       ]
     },
     {
+      "path": "/v1/session/info.{format}/{session_id}",
+      "description": "Session API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveInfo",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Session exists&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Session exists",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
       "path": "/v1/session/exists.{format}",
       "description": "Session API",
       "operations": [
@@ -91,6 +120,36 @@
           ],
           "summary": "Create a session&nbsp; <i class=\"icon-unlock-alt icon-large\"></i>",
           "notes": "Create a session",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/session/logout.{format}",
+      "description": "Session API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createLogout",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following property.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Close session&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Close session",
           "errorResponses": [
             {
               "reason": "RestException",

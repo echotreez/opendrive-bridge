@@ -1,0 +1,397 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https://dev.opendrive.com/api",
+  "produces": [
+    "application/json"
+  ],
+  "consumes": [
+    "application/json",
+    "multipart/form-data"
+  ],
+  "apis": [
+    {
+      "path": "/v1/accountusers/folderslist.{format}/{session_id}/{folder_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveFoldersList",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "folder_id",
+              "description": "Folder ID (0 for root folder).",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "access_email",
+              "description": "Email.",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "List folder content&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "List folder content",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/accountusers/info.{format}/{session_id}/{access_email}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveInfo",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "access_email",
+              "description": "Valid email format required(max 255).",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get an account user info&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get an account user info",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/accountusers/searchusers.{format}/{session_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveSearchUsers",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "search_query",
+              "description": "search query.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Search an account users in group&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Search an account users in group",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/accountusers/usersingroup.{format}/{session_id}/{group_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveUsersInGroup",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "group_id",
+              "description": "Group ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "search_query",
+              "description": "search query.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "List an account users in group&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "List an account users in group",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/accountusers.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "create",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>access_first_name : <tag>string</tag>  <i>(required)</i> - Access user first name (min 2)(max 50).<hr/>access_last_name : <tag>string</tag>  <i>(required)</i> - Access user last name (min 2)(max 50).<hr/>access_password : <tag>string</tag>  <i>(required)</i> - Access user password (min 5).<hr/>access_email : <tag>string</tag>  <i>(required)</i> - Valid email format required(max 255).<hr/>access_admin_mode : <tag>int</tag>  <i>(required)</i> - Access user admin mode mode (0 =users, 1=admin, 2=files).<hr/>access_notification : <tag>int</tag>  <i>(required)</i> - Access user notification (0 = off, 1=on).<hr/>access_max_storage : <tag>int</tag>  <i>(required)</i> - Access user max storage size in MB.<hr/>access_bw_max : <tag>int</tag>  <i>(required)</i> - Access user max bandwidth size in MB.<hr/>group_id : <tag>int</tag>  <i>(required)</i> - Group id.<hr/>access_phone : <tag>string</tag>  - Access phone.<hr/>access_password_change : <tag>int</tag>  - Allow user to change password (0 = off, 1=on).<hr/>access_position : <tag>string</tag>  - Access position.<hr/>access_send_password : <tag>int</tag>  - Send password by email(0 = off, 1=on).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"access_first_name\": \"\",\n    \"access_last_name\": \"\",\n    \"access_password\": \"\",\n    \"access_email\": \"\",\n    \"access_admin_mode\": \"\",\n    \"access_notification\": \"\",\n    \"access_max_storage\": \"\",\n    \"access_bw_max\": \"\",\n    \"group_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create an account user&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create an account user",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/accountusers/disable2fa.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createDisable2fa",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>access_email : <tag>string</tag>  <i>(required)</i> - Valid email format required(max 255).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"access_email\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Disable 2fa for account user&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Disable 2fa for account user",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/accountusers/move.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createmove",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>access_email : <tag>string</tag>  <i>(required)</i> - Valid email format required(max 255).<hr/>group_id : <tag>int</tag>  <i>(required)</i> - Group ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"access_email\": \"\",\n    \"group_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Move an account user to different group&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Move an account user to different group",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/accountusers/setaccess.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createsetAccess",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>access_email : <tag>string</tag>  <i>(required)</i> - Valid email format required(max 255).<hr/>access_active : <tag>int</tag>  <i>(required)</i> - (0 = inactive, 1=active, 2 - blocked).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"access_email\": \"\",\n    \"access_active\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Block, unblock or remove an account user&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Block, unblock or remove an account user",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/accountusers/setfolderaccess.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createSetFolderAccess",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>access_email : <tag>string</tag>  <i>(required)</i> - Valid email format required(max 255).<hr/>foldersObj : <tag>Object</tag>  <i>(required)</i> - Object of root folders and access to them.<hr/>update : <tag>int</tag>  - Keep previous permissions (0 - no, 1 - yes).<hr/>permissions : <tag>int</tag>  - Subfolder permissions unique vs inherit from parent (0 - inherit, 1 - unique).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"access_email\": \"\",\n    \"foldersObj\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Set an account user folder access&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Required format: <br /> <pre> $foldersObj = array( <br /> &nbsp;&nbsp;&nbsp;&nbsp;'folder_id' => access_mode, <br /> &nbsp;&nbsp;&nbsp;&nbsp;'folder_id' => access_mode <br /> ); </pre> access_mode - int - (0 = view, 1 = edit, 2 = cancel - disable access) <br />",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/accountusers.{format}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "update",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>access_email : <tag>string</tag>  <i>(required)</i> - Valid email format required(max 255).<hr/>new_access_email : <tag>string</tag>  - New valid email format required(max 255).<hr/>access_first_name : <tag>string</tag>  - Access user first name (min 2)(max 50).<hr/>access_last_name : <tag>string</tag>  - Access user last name (min 2)(max 50).<hr/>access_password : <tag>string</tag>  - Access user password (min 5).<hr/>access_admin_mode : <tag>int</tag>  - Access user admin mode (0 =users, 1=admin, 2=files).<hr/>access_notification : <tag>int</tag>  - Access user notification (0 = off, 1=on).<hr/>access_password_change : <tag>int</tag>  - Allow user to change password (0 = off, 1=on).<hr/>access_max_storage : <tag>int</tag>  - Access user max storage size in MB.<hr/>access_bw_max : <tag>int</tag>  - Access user max bandwidth size in MB.<hr/>access_phone : <tag>string</tag>  - Access phone.<hr/>access_position : <tag>string</tag>  - Access position.<hr/>access_admin_level : <tag>int</tag>  - Access admin level (Only for partner accounts).",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"access_email\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update an account user&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update an account user",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/accountusers.{format}/{session_id}/{access_email}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "remove",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "access_email",
+              "description": "Valid email format required(max 255).",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Delete account user&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Delete account user",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "/accountusers",
+  "models": {}
+}

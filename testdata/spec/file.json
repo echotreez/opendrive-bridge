@@ -11,6 +11,178 @@
   ],
   "apis": [
     {
+      "path": "/v1/file/expiringlink.{format}/{session_id}/{date}/{counter}/{file_id}/{enable}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveExpiringLink",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "date",
+              "description": "Date.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "counter",
+              "description": "Counter.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "enable",
+              "description": "Enable.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get a file path&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get a file path",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/fileexpiringlinks.{format}/{session_id}/{file_id}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveFileExpiringLinks",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "file_id",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get file expiring links&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get file expiring links",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/filefullpath.{format}/{session_id}/{file_id}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveFileFullPath",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "file_id",
+              "description": "",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get file full path&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get file full path",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/fileversions.{format}/{session_id}/{file_group_id}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveFileVersions",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "file_group_id",
+              "description": "File group ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "int"
+            }
+          ],
+          "summary": "Get file versions&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get file versions",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
       "path": "/v1/file/info.{format}/{file_id}",
       "description": "File API",
       "operations": [
@@ -47,6 +219,43 @@
           ],
           "summary": "File details&nbsp; <i class=\"icon-adjust icon-large\"></i>",
           "notes": "File details",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/path.{format}/{session_id}/{file_id}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrievePath",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get a file path&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get a file path",
           "errorResponses": [
             {
               "reason": "RestException",
@@ -118,6 +327,276 @@
       ]
     },
     {
+      "path": "/v1/file.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "create",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>access_folder_id : <tag>string</tag>  <i>(required)</i> - Access folder ID.<hr/>folder_id : <tag>string</tag>  <i>(required)</i> - Folder ID.<hr/>file_type : <tag>string</tag>  <i>(required)</i> - File type.<hr/>sharing_id : <tag>string</tag>  - Sharing ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"access_folder_id\": \"\",\n    \"folder_id\": \"\",\n    \"file_type\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a new file of predefined type&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Create a new file of predefined type (doc, ppt, xls, txt)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/access.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createAccess",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - File ID.<hr/>file_ispublic : <tag>int</tag>  <i>(required)</i> - (0 = private, 1 = public, 2 = hidden).<hr/>access_folder_id : <tag>int</tag>  - Access folder ID.<hr/>sharing_id : <tag>string</tag>  - Sharing ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"file_id\": \"\",\n    \"file_ispublic\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Update file access permission&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Update file access permission",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/idbypath.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createIdByPath",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>path : <tag>string</tag>  <i>(required)</i> - File Path.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"path\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Get a file ID&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Get a file ID by it's Path",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/move_copy.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createMove_copy",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>src_file_id : <tag>string</tag>  <i>(required)</i> - Source file ID.<hr/>dst_folder_id : <tag>string</tag>  <i>(required)</i> - Destination folder ID.<hr/>move : <tag>string</tag>  <i>(required)</i> - (true = move, false = copy).<hr/>overwrite_if_exists : <tag>string</tag>  <i>(required)</i> - (true, false).<hr/>src_access_folder_id : <tag>string</tag>  - Source access folder.<hr/>dst_access_folder_id : <tag>string</tag>  - Destination access folder.<hr/>src_sharing_id : <tag>string</tag>  - Source Sharing ID.<hr/>dst_sharing_id : <tag>string</tag>  - Destination Sharing ID.<hr/>new_file_name : <tag>string</tag>  - New name for destination file.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"src_file_id\": \"\",\n    \"dst_folder_id\": \"\",\n    \"move\": \"\",\n    \"overwrite_if_exists\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Copy or move a file&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Copy or move a file",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/remove.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createRemove",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - File IDs, separated by comma.<hr/>access_folder_id : <tag>string</tag>  - Access folder ID.<hr/>sharing_id : <tag>string</tag>  - Sharing ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"file_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Delete files from trash&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Permanently delete one or more files from trash in a single request.",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/rename.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createRename",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>new_file_name : <tag>string</tag>  <i>(required)</i> - New file name.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - File ID.<hr/>access_folder_id : <tag>string</tag>  - Access folder ID.<hr/>sharing_id : <tag>string</tag>  - Sharing ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"new_file_name\": \"\",\n    \"file_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Rename a file&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Rename a file",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/restore.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createRestore",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - File IDs, separated by comma.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"file_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Restore files from trash&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Restore one or more files from trash in a single request.",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/sendbyemail.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createSendByEmail",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - <hr/>recipient_emails : <tag>string</tag>  <i>(required)</i> - Emails, separated by comma.<hr/>captcha_response : <tag>string</tag>  - Captcha response.<hr/>message_subject : <tag>string</tag>  - <hr/>message_body : <tag>string</tag>  - <hr/>session_id : <tag>string</tag>  - <hr/>send_expiring_enabled : <tag>boolean</tag>  - ",
+              "required": true,
+              "defaultValue": "{\n    \"file_id\": \"\",\n    \"recipient_emails\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Send file by email&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/trash.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createTrash",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - File IDs, separated by comma.<hr/>sharing_id : <tag>string</tag>  - Sharing ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"file_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Trash a file&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Trash a file",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
       "path": "/v1/file/verifypassword.{format}",
       "description": "File API",
       "operations": [
@@ -138,6 +617,127 @@
           ],
           "summary": "Verify file password Verify file password&nbsp; <i class=\"icon-adjust icon-large\"></i>",
           "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/filesettings.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "PUT",
+          "nickname": "updateFileSettings",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - File ID.<hr/>file_price : <tag>string</tag>  - File price.<hr/>file_name : <tag>string</tag>  - File name.<hr/>file_description : <tag>string</tag>  - File description.<hr/>file_password : <tag>string</tag>  - File password.<hr/>file_dest_url : <tag>string</tag>  - File destination uri.<hr/>file_ispublic : <tag>int</tag>  - File public or no private = 0,public = 1,hidden - 2;.<hr/>file_edit_online : <tag>int</tag>  - File edit online.<hr/>file_modification_time : <tag>int</tag>  - File modification time.<hr/>sharing_id : <tag>string</tag>  - Sharing ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"file_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Edit file settings&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Edit file settings",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file.{format}/{session_id}/{file_id}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "remove",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "access_folder_id",
+              "description": "Access folder ID.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "sharing_id",
+              "description": "Sharing ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Delete a file from trash&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Delete a file from trash",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/removefileversion.{format}/{session_id}/{file_id}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "DELETE",
+          "nickname": "removeRemoveFileVersion",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Remove file version&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Remove file version",
           "errorResponses": [
             {
               "reason": "RestException",

@@ -11,6 +11,14 @@
   ],
   "apis": [
     {
+      "path": "\/resources\/accountusers.{format}",
+      "description": "All methods in this class are protected"
+    },
+    {
+      "path": "\/resources\/admin.{format}",
+      "description": "All methods in this class are protected"
+    },
+    {
       "path": "\/resources\/branding.{format}",
       "description": ""
     },
@@ -27,8 +35,24 @@
       "description": "All methods in this class are protected"
     },
     {
+      "path": "\/resources\/notes.{format}",
+      "description": "Class Notes"
+    },
+    {
+      "path": "\/resources\/securefolders.{format}",
+      "description": ""
+    },
+    {
       "path": "\/resources\/session.{format}",
       "description": ""
+    },
+    {
+      "path": "\/resources\/sharing.{format}",
+      "description": ""
+    },
+    {
+      "path": "\/resources\/stats.{format}",
+      "description": "All methods in this class are protected"
     },
     {
       "path": "\/resources\/tasks.{format}",
@@ -41,6 +65,10 @@
     {
       "path": "\/resources\/users.{format}",
       "description": ""
+    },
+    {
+      "path": "\/resources\/usergroups.{format}",
+      "description": "All methods in this class are protected"
     },
     {
       "path": "\/resources\/oauth2.{format}",

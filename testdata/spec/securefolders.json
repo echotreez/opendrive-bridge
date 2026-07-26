@@ -1,0 +1,113 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https://dev.opendrive.com/api",
+  "produces": [
+    "application/json"
+  ],
+  "consumes": [
+    "application/json",
+    "multipart/form-data"
+  ],
+  "apis": [
+    {
+      "path": "/v1/securefolders/auth.{format}/{session_id}/{folder_id}",
+      "description": "SecureFolders API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveAuth",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "folder_id",
+              "description": "Folder ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Request the data Secure Folders authorization. The first stage of Secure Folders authorization&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Request the data Secure Folders authorization. The first stage of Secure Folders authorization",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/securefolders/auth.{format}",
+      "description": "SecureFolders API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createAuth",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>folder_id : <tag>string</tag>  <i>(required)</i> - Folder ID.<hr/>hash : <tag>string</tag>  <i>(required)</i> - Hash.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"folder_id\": \"\",\n    \"hash\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Secure Folders authorization by hash. The second stage of Secure Folders authorization&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Secure Folders authorization by hash. The second stage of Secure Folders authorization",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/securefolders/init.{format}",
+      "description": "SecureFolders API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createInit",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.<hr/>folder_id : <tag>string</tag>  <i>(required)</i> - Folder ID.<hr/>data : <tag>string</tag>  <i>(required)</i> - Data for password verification.<hr/>hash : <tag>string</tag>  <i>(required)</i> - Hash for password verification.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\",\n    \"folder_id\": \"\",\n    \"data\": \"\",\n    \"hash\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Set password for secure folder&nbsp; <i class=\"icon-lock icon-large\"></i>",
+          "notes": "Set password for secure folder",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "/securefolders",
+  "models": {}
+}
