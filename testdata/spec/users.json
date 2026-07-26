@@ -1,0 +1,106 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https://dev.opendrive.com/api",
+  "produces": [
+    "application/json"
+  ],
+  "consumes": [
+    "application/json",
+    "multipart/form-data"
+  ],
+  "apis": [
+    {
+      "path": "/v1/users/confirmpasswordreset.{format}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createConfirmPasswordReset",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>user_id : <tag>int</tag>  <i>(required)</i> - <hr/>user_id_access : <tag>int</tag>  <i>(required)</i> - <hr/>reset_code : <tag>string</tag>  <i>(required)</i> - ",
+              "required": true,
+              "defaultValue": "{\n    \"user_id\": \"\",\n    \"user_id_access\": \"\",\n    \"reset_code\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Confirm password reset using the code received by mail&nbsp; <i class=\"icon-unlock-alt icon-large\"></i>",
+          "notes": "Confirm password reset using the code received by mail",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users/forgotpassword.{format}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createForgotPassword",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>username : <tag>string</tag>  <i>(required)</i> - User name or email (min 4)(max 100).<hr/>captcha_response : <tag>string</tag>  - Captcha response.",
+              "required": true,
+              "defaultValue": "{\n    \"username\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Reset a password&nbsp; <i class=\"icon-unlock-alt icon-large\"></i>",
+          "notes": "Reset a password",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/users/verifyemailsignup.{format}",
+      "description": "Users API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createVerifyEmailSignup",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>email : <tag>string</tag>  <i>(required)</i> - Email address.<hr/>ver_code : <tag>string</tag>  <i>(required)</i> - verification code (max 32).",
+              "required": true,
+              "defaultValue": "{\n    \"email\": \"\",\n    \"ver_code\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Verify an Email after signup&nbsp; <i class=\"icon-unlock-alt icon-large\"></i>",
+          "notes": "Verify an email after signup",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "/users",
+  "models": {}
+}

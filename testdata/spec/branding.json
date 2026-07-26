@@ -1,0 +1,168 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https:\/\/dev.opendrive.com\/api",
+  "produces": [
+    "application\/json"
+  ],
+  "consumes": [
+    "application\/json",
+    "multipart\/form-data"
+  ],
+  "apis": [
+    {
+      "path": "\/v1\/branding.{format}",
+      "description": "Branding API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieve",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get user branding info&nbsp; <i class=\"icon-adjust icon-large\"><\/i>",
+          "notes": "Get user branding info",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "\/v1\/branding\/files.{format}",
+      "description": "Branding API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveFiles",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "type",
+              "description": "Type('user','account_user','group', 'logo', 'favicon').",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "user",
+                  "account_user",
+                  "group",
+                  "logo",
+                  "favicon"
+                ]
+              }
+            },
+            {
+              "name": "group_id",
+              "description": "Required for type group.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "user_id",
+              "description": "User ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "access_user_id",
+              "description": "Access User ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Get branding files&nbsp; <i class=\"icon-adjust icon-large\"><\/i>",
+          "notes": "Get branding files",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "\/v1\/branding\/subdomainbranding.{format}\/{partner_name}\/{subdomain}",
+      "description": "Branding API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveSubdomainBranding",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "partner_name",
+              "description": "Partner name.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "subdomain",
+              "description": "Subdomain.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "RANGE",
+                "min": "5",
+                "max": "32"
+              }
+            }
+          ],
+          "summary": "Get business user subdomain branding&nbsp; <i class=\"icon-unlock-alt icon-large\"><\/i>",
+          "notes": "Get business user subdomain branding",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "\/branding",
+  "models": {}
+}

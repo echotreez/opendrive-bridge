@@ -1,0 +1,153 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https://dev.opendrive.com/api",
+  "produces": [
+    "application/json"
+  ],
+  "consumes": [
+    "application/json",
+    "multipart/form-data"
+  ],
+  "apis": [
+    {
+      "path": "/v1/file/info.{format}/{file_id}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveInfo",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "session_id",
+              "description": "SessionId.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "sharing_id",
+              "description": "Sharing Id.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "File details&nbsp; <i class=\"icon-adjust icon-large\"></i>",
+          "notes": "File details",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/thumb.{format}/{file_id}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveThumb",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "sharing_id",
+              "description": "Sharing ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "time_offset",
+              "description": "For videos only: extract thumbnail at this many seconds into the video. Omit to use the default (50% of duration)..",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "float"
+            },
+            {
+              "name": "temp_key",
+              "description": "Temp key issued after password verification for password-protected files.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "File thumbnail&nbsp; <i class=\"icon-adjust icon-large\"></i>",
+          "notes": "File thumbnail",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/file/verifypassword.{format}",
+      "description": "File API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createVerifyPassword",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>file_id : <tag>string</tag>  <i>(required)</i> - File Id.<hr/>password : <tag>string</tag>  <i>(required)</i> - Password.<hr/>captcha_response : <tag>string</tag>  - Captcha response.<hr/>session_id : <tag>string</tag>  - Session Id.",
+              "required": true,
+              "defaultValue": "{\n    \"file_id\": \"\",\n    \"password\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Verify file password Verify file password&nbsp; <i class=\"icon-adjust icon-large\"></i>",
+          "notes": "",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "/file",
+  "models": {}
+}

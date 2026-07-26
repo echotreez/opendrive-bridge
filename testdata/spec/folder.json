@@ -1,0 +1,134 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https:\/\/dev.opendrive.com\/api",
+  "produces": [
+    "application\/json"
+  ],
+  "consumes": [
+    "application\/json",
+    "multipart\/form-data"
+  ],
+  "apis": [
+    {
+      "path": "\/v1\/folder\/shared.{format}\/{folder_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveShared",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "folder_id",
+              "description": "Folder ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "with_breadcrumbs",
+              "description": "- include folder breadcrumbs.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": false,
+              "allowMultiple": false,
+              "dataType": "boolean"
+            },
+            {
+              "name": "last_request_time",
+              "description": "DirUpdateTime value of last getList request.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": 0,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "offset",
+              "description": "- offset for pagination.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "order_by",
+              "description": "- order by field.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "name",
+                  "extension",
+                  "modified_date",
+                  "size",
+                  "dl_count"
+                ]
+              }
+            },
+            {
+              "name": "order_type",
+              "description": "- order type.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "asc",
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "asc",
+                  "desc"
+                ]
+              }
+            }
+          ],
+          "summary": "Shared folder details&nbsp; <i class=\"icon-unlock-alt icon-large\"><\/i>",
+          "notes": "Shared folder details",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "\/v1\/folder\/sharedinfo.{format}\/{folder_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveSharedInfo",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "folder_id",
+              "description": "Folder ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Shared Folder details&nbsp; <i class=\"icon-unlock-alt icon-large\"><\/i>",
+          "notes": "Shared Folder details",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "\/folder",
+  "models": {}
+}

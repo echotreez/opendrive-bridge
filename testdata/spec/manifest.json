@@ -1,0 +1,89 @@
+{
+  "fetched_at": "2026-07-26T01:34:55.247553Z",
+  "base": "https://dev.opendrive.com/api/v1",
+  "strategy": "anonymous",
+  "endpoints": 21,
+  "operations": 21,
+  "files": [
+    {
+      "name": "branding.json",
+      "source_url": "https://dev.opendrive.com/api/v1/resources/branding.json",
+      "sha256": "725de3053d45bb88eb3bd3766cb35ba1b30328b14a0f573b079c536672076a95",
+      "bytes": 4835,
+      "endpoints": 3,
+      "operations": 3
+    },
+    {
+      "name": "download.json",
+      "source_url": "https://dev.opendrive.com/api/v1/resources/download.json",
+      "sha256": "bc070fc8b7dd6efdd2c73dcf329e2778bbc506b1ee4b800679d49b6d8de12783",
+      "bytes": 5632,
+      "endpoints": 3,
+      "operations": 3
+    },
+    {
+      "name": "file.json",
+      "source_url": "https://dev.opendrive.com/api/v1/resources/file.json",
+      "sha256": "39a5e6e77ebf9cf8803917fd04b5304b903590c92c92f6fe95066cc08d6546fc",
+      "bytes": 4741,
+      "endpoints": 3,
+      "operations": 3
+    },
+    {
+      "name": "folder.json",
+      "source_url": "https://dev.opendrive.com/api/v1/resources/folder.json",
+      "sha256": "e8d89a66607f2806358585819dc96bdbe3c4dce20128a741d688daef3e84ae2b",
+      "bytes": 3906,
+      "endpoints": 2,
+      "operations": 2
+    },
+    {
+      "name": "oauth2.json",
+      "source_url": "https://dev.opendrive.com/api/v1/resources/oauth2.json",
+      "sha256": "05159e0fb3e682acb17ccdce3a561800b25c4fa1f8020945eddbec1b6a606eef",
+      "bytes": 1553,
+      "endpoints": 1,
+      "operations": 1
+    },
+    {
+      "name": "resources.json",
+      "source_url": "https://dev.opendrive.com/api/v1/resources.json",
+      "sha256": "6d68fdcb83fee88b932e67b292eb4d1c6b7b9d36dce9b2f0ca0c248fb5db5873",
+      "bytes": 1084,
+      "endpoints": 0,
+      "operations": 0
+    },
+    {
+      "name": "session.json",
+      "source_url": "https://dev.opendrive.com/api/v1/resources/session.json",
+      "sha256": "a88bb902aa8a8771e55f406674059dff02b36e776d35c6ece276c928ed8b43b9",
+      "bytes": 3596,
+      "endpoints": 3,
+      "operations": 3
+    },
+    {
+      "name": "tasks.json",
+      "source_url": "https://dev.opendrive.com/api/v1/resources/tasks.json",
+      "sha256": "65883d6514314932d5e18ee195f39928caba4c60c35987e93d837f0d8f6deb66",
+      "bytes": 4866,
+      "endpoints": 2,
+      "operations": 2
+    },
+    {
+      "name": "upload.json",
+      "source_url": "https://dev.opendrive.com/api/v1/resources/upload.json",
+      "sha256": "d359e43059e9fc94b8d6ab96ce0daa1c65130615b11bc6d75e236c97c1526d35",
+      "bytes": 1730,
+      "endpoints": 1,
+      "operations": 1
+    },
+    {
+      "name": "users.json",
+      "source_url": "https://dev.opendrive.com/api/v1/resources/users.json",
+      "sha256": "7154e1c4c2e16f3d75a07a2360c5ac6154c77f9f5df22bbe2f2f0b20af215edb",
+      "bytes": 3699,
+      "endpoints": 3,
+      "operations": 3
+    }
+  ]
+}

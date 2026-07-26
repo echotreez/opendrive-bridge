@@ -1,0 +1,187 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https://dev.opendrive.com/api",
+  "produces": [
+    "application/json"
+  ],
+  "consumes": [
+    "application/json",
+    "multipart/form-data"
+  ],
+  "apis": [
+    {
+      "path": "/v1/download/file.{format}/{file_id}",
+      "description": "Download API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveFile",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "file_id",
+              "description": "File ID.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "offset",
+              "description": "Offset in bytes.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "inline",
+              "description": "Disposition, by default send as attachment.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "boolean"
+            },
+            {
+              "name": "sharing_id",
+              "description": "Sharing ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "test",
+              "description": "Only test that file can be download.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "backup",
+              "description": "Download file backup if available.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "app",
+              "description": "Internal.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "temp_auth",
+              "description": "Internal.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "preview",
+              "description": "Internal.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "int"
+            },
+            {
+              "name": "temp_key",
+              "description": "Temp key for password-protected files.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Download file&nbsp; <i class=\"icon-adjust icon-large\"></i>",
+          "notes": "Download file",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/download/redirecttocustomapiserver.{format}",
+      "description": "Download API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "redirectToCustomAPIServer",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "owner",
+              "description": "",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "file_id",
+              "description": "",
+              "paramType": "query",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "&nbsp; <i class=\"icon-unlock-alt icon-large\"></i>",
+          "notes": "",
+          "errorResponses": []
+        }
+      ]
+    },
+    {
+      "path": "/v1/download/all.{format}",
+      "description": "Download API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createAll",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>files : <tag>string</tag>  - Comma-separated files Ids.<hr/>folders : <tag>string</tag>  - Comma-separated folder IDs.<hr/>session_id : <tag>string</tag>  - Session ID.",
+              "required": false,
+              "defaultValue": "{}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Download zipped content&nbsp; <i class=\"icon-adjust icon-large\"></i>",
+          "notes": "Download zipped content",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "/download",
+  "models": {}
+}

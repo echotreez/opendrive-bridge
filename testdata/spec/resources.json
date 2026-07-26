@@ -1,0 +1,50 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https:\/\/dev.opendrive.com\/api",
+  "produces": [
+    "application\/json"
+  ],
+  "consumes": [
+    "application\/json",
+    "multipart\/form-data"
+  ],
+  "apis": [
+    {
+      "path": "\/resources\/branding.{format}",
+      "description": ""
+    },
+    {
+      "path": "\/resources\/download.{format}",
+      "description": ""
+    },
+    {
+      "path": "\/resources\/file.{format}",
+      "description": ""
+    },
+    {
+      "path": "\/resources\/folder.{format}",
+      "description": "All methods in this class are protected"
+    },
+    {
+      "path": "\/resources\/session.{format}",
+      "description": ""
+    },
+    {
+      "path": "\/resources\/tasks.{format}",
+      "description": "Class Notes"
+    },
+    {
+      "path": "\/resources\/upload.{format}",
+      "description": "All methods in this class are protected"
+    },
+    {
+      "path": "\/resources\/users.{format}",
+      "description": ""
+    },
+    {
+      "path": "\/resources\/oauth2.{format}",
+      "description": "Class Server"
+    }
+  ]
+}

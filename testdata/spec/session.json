@@ -1,0 +1,106 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https://dev.opendrive.com/api",
+  "produces": [
+    "application/json"
+  ],
+  "consumes": [
+    "application/json",
+    "multipart/form-data"
+  ],
+  "apis": [
+    {
+      "path": "/v1/session/captcharequired.{format}",
+      "description": "Session API",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveCaptchaRequired",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "username",
+              "description": "Optional account to also evaluate the account-based check for.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": "",
+              "allowMultiple": false,
+              "dataType": "string"
+            }
+          ],
+          "summary": "Whether captcha is currently required for the requesting client&nbsp; <i class=\"icon-unlock-alt icon-large\"></i>",
+          "notes": "Lets the login page render the captcha on first load when the client's IP is already throttled, instead of only after a failed submission.",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/session/exists.{format}",
+      "description": "Session API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createExists",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following property.<hr/>session_id : <tag>string</tag>  <i>(required)</i> - Session ID.",
+              "required": true,
+              "defaultValue": "{\n    \"session_id\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Session exists&nbsp; <i class=\"icon-unlock-alt icon-large\"></i>",
+          "notes": "Session exists",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/v1/session/login.{format}",
+      "description": "Session API",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createLogin",
+          "responseClass": "void",
+          "parameters": [
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>username : <tag>string</tag>  <i>(required)</i> - Username.<hr/>passwd : <tag>string</tag>  <i>(required)</i> - User password.<hr/>version : <tag>string</tag>  - Application version number (max 10).<hr/>partner_id : <tag>string</tag>  - Partner username (Empty for OpenDrive).<hr/>captcha_response : <tag>string</tag>  - Captcha response.",
+              "required": true,
+              "defaultValue": "{\n    \"username\": \"\",\n    \"passwd\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Create a session&nbsp; <i class=\"icon-unlock-alt icon-large\"></i>",
+          "notes": "Create a session",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "/session",
+  "models": {}
+}

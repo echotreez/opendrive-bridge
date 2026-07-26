@@ -1,0 +1,164 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https:\/\/dev.opendrive.com\/api",
+  "produces": [
+    "application\/json"
+  ],
+  "consumes": [
+    "application\/json",
+    "multipart\/form-data"
+  ],
+  "apis": [
+    {
+      "path": "\/v1\/tasks.{format}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieve",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_id",
+              "description": "Task ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_list_id",
+              "description": "Task List ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "type",
+              "description": "Task type.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "active",
+                  "trashed",
+                  "archived"
+                ]
+              }
+            },
+            {
+              "name": "search_query",
+              "description": "Search query.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "with_comments",
+              "description": "Include comments for single task.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": false,
+              "allowMultiple": false,
+              "dataType": "boolean"
+            }
+          ],
+          "summary": "Get active tasks. Search for tasks (search in task names and comment text)&nbsp; <i class=\"icon-adjust icon-large\"><\/i>",
+          "notes": "Get active tasks. Search for tasks (search in task names and comment text)",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "\/v1\/tasks\/projectlists.{format}",
+      "description": "Class Notes",
+      "operations": [
+        {
+          "httpMethod": "GET",
+          "nickname": "retrieveProjectLists",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "session_id",
+              "description": "Session ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "with_projects",
+              "description": "Include projects in response.",
+              "paramType": "query",
+              "required": false,
+              "defaultValue": false,
+              "allowMultiple": false,
+              "dataType": "boolean"
+            },
+            {
+              "name": "project_list_id",
+              "description": "Project List ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "task_id",
+              "description": "Task ID.",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "filter",
+              "description": "Project list filter (by default - return only active).",
+              "paramType": "query",
+              "required": false,
+              "allowMultiple": false,
+              "dataType": "string",
+              "allowableValues": {
+                "valueType": "LIST",
+                "values": [
+                  "archived",
+                  "trashed",
+                  "any"
+                ]
+              }
+            }
+          ],
+          "summary": "Get project lists&nbsp; <i class=\"icon-adjust icon-large\"><\/i>",
+          "notes": "Get project lists",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "\/tasks",
+  "models": {}
+}

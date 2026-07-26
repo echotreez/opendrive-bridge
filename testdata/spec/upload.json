@@ -1,0 +1,54 @@
+{
+  "apiVersion": "1",
+  "swaggerVersion": "1.1",
+  "basePath": "https://dev.opendrive.com/api",
+  "produces": [
+    "application/json"
+  ],
+  "consumes": [
+    "application/json",
+    "multipart/form-data"
+  ],
+  "apis": [
+    {
+      "path": "/v1/upload/checkfileexistsbyname.{format}/{folder_id}",
+      "description": "All methods in this class are protected",
+      "operations": [
+        {
+          "httpMethod": "POST",
+          "nickname": "createCheckFileExistsByName",
+          "responseClass": "Array",
+          "parameters": [
+            {
+              "name": "folder_id",
+              "description": "Folder ID. If root folder(0), session is required.",
+              "paramType": "path",
+              "required": true,
+              "allowMultiple": false,
+              "dataType": "string"
+            },
+            {
+              "name": "REQUEST_BODY",
+              "description": "Paste JSON data here with the following properties.<hr/>name : <tag>Array</tag>  <i>(required)</i> - File Names.<hr/>session_id : <tag>string</tag>  - Session ID.<hr/>sharing_id : <tag>string</tag>  - Sharing ID.",
+              "required": true,
+              "defaultValue": "{\n    \"name\": \"\"\n}",
+              "paramType": "body",
+              "allowMultiple": false,
+              "dataType": "Object"
+            }
+          ],
+          "summary": "Check if file exists with such name&nbsp; <i class=\"icon-adjust icon-large\"></i>",
+          "notes": "Check if file exists with such name",
+          "errorResponses": [
+            {
+              "reason": "RestException",
+              "code": 500
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "resourcePath": "/upload",
+  "models": {}
+}
