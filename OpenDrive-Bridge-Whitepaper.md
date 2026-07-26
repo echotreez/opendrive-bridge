@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| 文档版本 | 1.0 |
-| 日期 | 2026-07-24 |
+| 文档版本 | 1.1(修订记录见附录 E) |
+| 日期 | 2026-07-25 |
 | 目标读者 | Claude Opus 5 / 其他代码开发 AI / 项目开发者 |
 | 依据资料 | OpenDrive REST API Guide v1.1.7 (10/2023)、官方 PHP/C# 代码样本、官方 API Explorer (https://dev.opendrive.com/api/explorer/) |
 | 技术栈 | Go (≥1.22) |
@@ -98,7 +98,16 @@ Upstream 提供两套并存的认证:
 - token 过期时返回 HTTP 401,body 为 `{"error":{"code":401,"error":"invalid_token","error_description":"The access token provided has expired"}}`;refresh token 失效返回 `{"error":"invalid_grant", ...}`(注意两种错误格式不同)。
 - 官方要求:使用 OAuth2 后**不得在客户端存储用户密码**。
 
-**Bridge 策略**:默认 OAuth2;首次登录用密码换 token 后立即丢弃密码,token 存 OS keyring(§9.2)。access_token 过期前 5 分钟主动刷新;收到 401 invalid_token 时被动刷新并重放请求(最多 1 次);refresh 失败则要求用户重新登录。Session 模式作为 fallback 保留(某些端点如 Secure Folders 可能只认 session)。
+**Bridge 策略(v1.1 修订——"初始设定后永久无缝"为 v1.0 硬需求)**:
+
+产品要求:用户完成初始设定后,Bridge 长期静默运行,任何情况下都不再要求输入账号密码;**唯一例外**是用户在别处修改了密码导致上游拒绝登录。据此:
+
+1. **凭证模型**:初始 `login` 时,username、password、OAuth token(access+refresh)、SessionID(若用 session 模式)全部持久化到凭证存储(§9.2 CredentialStore:默认 OS keyring,Docker/headless 用显式配置的加密文件)。这与官方 OAuth2 条款"不得存储密码"存在**有意偏离**,理由与缓解措施见 §9.2——refresh token 仅 30 天有效且只在使用时滚动,不存密码就无法满足"停机超 30 天后仍无缝"的产品要求。
+2. **主动续期(防闲置掉登录)**:access_token 过期前 5 分钟主动刷新;此外 daemon 内置续期定时器,**即使无 API 流量,也至少每 7 天执行一次 refresh** 以滚动 refresh_token;daemon 启动时若 token 已过半衰期立即刷新。
+3. **静默重登**:收到 401 invalid_token → 被动刷新并重放(最多 1 次);refresh 失败(invalid_grant / refresh 过期)→ **用存储的密码静默重新 login,换取新 token,全程不打扰用户**(单飞行、带退避,严禁循环重试)。
+4. **要求用户介入的仅两种情况**:(a) 重登返回"用户名或密码错误"→ 判定密码已被修改,进入 `reauth_required` 状态,停止一切自动尝试(防撞 captcha),等待用户提供新密码;(b) 上游要求 captcha → `captcha_required`,透传提示。凭证存储不可用(keyring 锁定等)是独立的 `keystore_unavailable` 状态,**此时不得发起任何上游认证请求**,详见 §4.5。
+5. **Session fallback 同样持久化**:SessionID 存入 CredentialStore;session 失效时用存储的密码静默重建 session。因密码已持久化,session 模式下无缝性与 OAuth 模式等同,不作降级标记;仅当用户显式配置"不存密码"(`auth.persist_password: false`,提供给合规敏感用户的逃生口)时,status 中 `seamless` 才为 false。
+6. **SDK 接口要求**:`Authenticator` 接口(OAuth2 与 Session 两个实现)必须统一提供 `Identity()`(返回当前配置账号的标识,不触发网络)与 `AuthState()`(返回 §4.5 定义的认证状态机状态),供 `/v1/auth/status` 与 job engine 使用。
 
 ### 2.3 核心模块与端点清单 Endpoint Inventory(第一版范围)
 
@@ -205,6 +214,8 @@ Upstream 提供两套并存的认证:
 
 ### 2.6 文档与线上规格的已知偏差 & 陷阱 Known Discrepancies & Gotchas
 
+> **v1.1 起的优先级声明**:本清单撰写于 v1.0(基于 PDF 与首次线上抓取)。P0/P1 实施后,已验证的实际差异记录在仓库 `docs/discrepancies.md`(截至本版 21 条),**凡与本节冲突,以 discrepancies.md 与存档规格为准**。已确认 PDF 有错的三例:面包屑端点线上拼写正确为 `breadcrumb.json`(本节 #3 相应作废);文件资源为 `/file.json` 而非 `/file/file.json`(D14);`download/all.json` 用的就是 `session_id`(本节 #2 的 `session_key` 说法来自 PDF,线上规格不同,D1);另有三个端点动词与 PDF 不符(D15)。
+
 开发 AI 必须注意以下坑(均来自本次对 PDF、样本代码和线上 Swagger 的交叉比对):
 
 1. **以线上 Swagger 为准**:PDF 自称 v1.1.7 (10/2023),但内页版权栏仍写 v1.1.6 (03/2017);线上已出现 PDF 没有的端点(如 `session/captcharequired.json`)。开发前先跑 `tools/fetch-spec` 拉全量线上规格。
@@ -299,6 +310,8 @@ opendrive-bridge/
 ```yaml
 listen: 127.0.0.1:9750        # 默认只绑 loopback
 auth_mode: oauth2             # oauth2 | session
+persist_password: true        # v1.1: 默认存密码到 keystore 以实现永久无缝(§2.2/§9.2)
+keystore: auto                # auto(keyring 优先) | keyring | encrypted_file;均不可用则拒绝启动
 upstream_base: https://dev.opendrive.com/api/v1
 transfers:
   chunk_size_mb: 50           # 官方样本值;可调 8–100
@@ -320,9 +333,28 @@ Bridge API 是**面向使用者的简化层**,统一 JSON、统一错误、路�
 
 | 端点 | 方法 | 说明 |
 |---|---|---|
-| `/v1/auth/login` | POST | `{username, password}` → 换取 upstream token 并存 keyring;密码不落盘 |
-| `/v1/auth/logout` | POST | 撤销并清除本地 token |
-| `/v1/auth/status` | GET | 登录状态、token 到期时间、账户配额 (StorageUsed/Max, BwUsed/Max) |
+| `/v1/auth/login` | POST | `{username, password}` → 验证后将凭证(含密码)写入 CredentialStore(§2.2/§9.2),此后 Bridge 静默运行 |
+| `/v1/auth/logout` | POST | 撤销 token、销毁 session,并从 CredentialStore 清除全部凭证(含密码) |
+| `/v1/auth/status` | GET | 见下方 schema(v1.1 定稿) |
+
+`/v1/auth/status` 响应 schema:
+
+```json
+{
+  "account":   { "username": "derek@example.com", "user_id": "...", "acc_type": 1 },
+  "auth_mode": "oauth2",
+  "state":     "authenticated",
+  "seamless":  true,
+  "token_expires_at": "2026-07-26T10:00:00Z",
+  "keystore":  { "backend": "keyring", "available": true },
+  "quota":     { "storage_used": 0, "storage_max": 0, "bw_used": 0, "bw_max": 0 }
+}
+```
+
+- `account` 来自 SDK `Authenticator.Identity()`——**未配置凭证时为 null 且 `state:"not_configured"`**,不触发网络请求即可返回。
+- `state` 枚举(与 §4.5 错误码一一对应的认证状态机):`not_configured` → `authenticated` ⇄ `refreshing` → `reauth_required` / `captcha_required` / `keystore_unavailable`。
+- `seamless`:当密码已持久化且 keystore 可用时为 true;用户显式关闭 `persist_password` 时为 false。
+- `quota` 字段惰性获取,拿不到时为 null,不阻塞 status 响应。
 
 ### 4.2 文件与文件夹(路径式,自动解析为 upstream ID)
 
@@ -363,7 +395,17 @@ Bridge API 是**面向使用者的简化层**,统一 JSON、统一错误、路�
              "message": "remote path /Docs/x.pdf does not exist",
              "upstream": { "code": 404, "message": "File not exists" } } }
 ```
-`code` 为稳定机器可读枚举:`unauthorized / token_expired / captcha_required / not_found / conflict / quota_exceeded / bandwidth_exceeded / invalid_name / upstream_error / rate_limited`。
+`code` 为稳定机器可读枚举(v1.1 修订——凭证类错误一分为三):
+
+| code | 含义 | daemon 行为 |
+|---|---|---|
+| `keystore_unavailable` | 凭证存储不可达:keyring 锁定、Docker 未挂载 secret、加密文件密钥缺失 | **不得发起任何上游认证请求**(防止空手重试撞 captcha);轮询本地 keystore 恢复即自动回到正常态 |
+| `reauth_required` | 上游明确拒绝存储的凭证(密码已改/账号异常),静默重登已失败 | 停止一切自动认证;等待用户经 `/v1/auth/login` 提供新密码;期间业务请求快速失败返回此 code |
+| `token_expired` | access_token 过期(瞬态) | SDK 自动刷新/重登,调用方通常看不到;仅在自动处理中途才短暂外露 |
+| `captcha_required` | 上游要求 captcha | 停止自动尝试,提示用户到网页端解锁 |
+| `unauthorized` | 仅指 **Bridge API 自身**鉴权失败(API key 错误等),与上游凭证无关 | 拒绝请求 |
+
+其余不变:`not_found / conflict / quota_exceeded / bandwidth_exceeded / invalid_name / upstream_error / rate_limited / network / invalid_response / invalid_request`。SDK 层 `errors.Kind` 与此枚举一一映射,新增 `KindKeystoreUnavailable` 与 `KindReauthRequired`(替代原先笼统归入 `unauthorized`/`refresh_token_failed` 的用法;`refresh_token_failed` 保留为内部瞬态,静默重登成功后对外不可见)。
 
 ### 4.6 odctl 命令面
 
@@ -389,8 +431,8 @@ odctl daemon install|start|stop|uninstall  # 注册系统服务
 | Phase | 内容 | 出口标准 |
 |---|---|---|
 | **P0 基建** (1) | 仓库脚手架、CI 骨架、`tools/fetch-spec` 拉取并存档线上规格、fixture 录制方案 | CI 绿;规格存档入库 |
-| **P1 SDK 核心** (2–3) | `pkg/opendrive`: client core、auth(OAuth2+session)、types(FlexBool 等)、errors | 单测覆盖 ≥85%;mock server 下全部 auth 流转(过期/刷新/重放)通过 |
-| **P2 存储操作** (2) | folder/file/sharing/users 全部端点绑定 | 契约测试对照存档规格通过;沙盒账户冒烟通过 |
+| **P1 SDK 核心** (2–3) | `pkg/opendrive`: client core、auth(OAuth2+session)、types(FlexBool 等)、errors。**v1.1 补充**:`Authenticator` 须带 `Identity()`/`AuthState()`;错误模型含 `KindKeystoreUnavailable`/`KindReauthRequired`;静默重登状态机(§2.2 第 3–4 条) | 单测覆盖 ≥85%;mock server 下全部 auth 流转(过期/刷新/重放/静默重登/密码变更/keystore 锁定)通过 |
+| **P2 凭证持久化 + 存储操作** (2–3) | **先做 `internal/keystore`**(CredentialStore:keyring + 加密文件后端、原子滚动、"无持久化 = 配置错误"启动检查)——它是"初始设定后无缝使用"的地基,故从 P4 提前至此;随后 folder/file/sharing/users 全部端点绑定 | keystore 三平台真机测试 + 加密文件后端测试通过;契约测试对照存档规格通过;沙盒账户冒烟通过 |
 | **P3 传输管线** (3) | 4 步上传(秒传/压缩/断点)、下载续传、job engine | 大文件 (>1GB)、断网恢复、崩溃续传场景测试通过 |
 | **P4 Bridge API + CLI** (2–3) | `internal/server`、`odctl`、OpenAPI 文档 | E2E 测试通过;OpenAPI lint 通过 |
 | **P5 打包发布** (1–2) | goreleaser 6 平台矩阵、Docker multi-arch、服务安装脚本 | 6 平台二进制 + 2 架构镜像在 CI 全部构建并冒烟 |
@@ -490,11 +532,17 @@ docker run -d -p 127.0.0.1:9750:9750 \
 
 Bridge 持有能完全控制用户云盘的 token,运行在用户主机上。主要威胁:token 泄漏(日志/磁盘/进程列表)、本机其他进程滥用 Bridge API、中间人攻击、恶意文件名/路径注入、供应链攻击。
 
-### 9.2 凭证与 Token 管理
+### 9.2 凭证与 Token 管理(v1.1 修订)
 
-- 密码只存在于登录请求的内存中,用后即弃,**永不落盘、永不入日志**(官方 OAuth2 条款也如此要求)。
-- Token 首选 OS keyring(macOS Keychain / Windows Credential Manager / Linux Secret Service);不可用时(Docker、headless Linux)fallback 到 AES-256-GCM 加密文件,密钥由环境变量或首次启动生成的机器密钥提供,文件权限 0600。
-- refresh_token 滚动更新必须原子持久化(先写新值成功再作废旧值的本地副本),防止刷新到一半崩溃导致永久掉登录。
+**CredentialStore**(`internal/keystore`)统一保存四类凭证:username、password、OAuth token(access+refresh)、SessionID。
+
+**凭证永远只存在用户本机**:Bridge 是纯本地软件,没有云端组件,凭证仅在调用 OpenDrive 官方 API 时经 HTTPS 发往上游,绝不发往任何第三方。三大平台均使用 OS 原生加密凭证库——macOS Keychain、**Windows Credential Manager(DPAPI,绑定用户账户)**、**Linux Secret Service(GNOME Keyring / KWallet)**。它们的共同性质是"随用户登录会话自动解锁、磁盘上加密存放":用户正常使用电脑时 Bridge 完全静默,设备丢失或他人账户则读不出凭证——这就是安全与便利的平衡点。仅在无 keyring 的环境(headless Linux、Docker)才使用显式配置的加密文件后端。
+
+- **默认后端 OS keyring**(macOS Keychain / Windows Credential Manager / Linux Secret Service);不可用时(Docker、headless Linux)须**显式配置** AES-256-GCM 加密文件后端,密钥由环境变量/挂载 secret 提供,文件权限 0600。无任何持久化后端可用时,daemon **拒绝以默认模式启动**并明确报错(`--ephemeral` 旗标可显式选择内存模式,仅供测试;内存模式绝不静默成为默认,防止"看似登录了、重启后凭证蒸发"。SDK 的 `MemoryTokenStore` 仅限测试代码使用)。
+- **密码持久化是有意的设计偏离**:官方 OAuth2 条款要求应用不存储密码,但 refresh_token 仅 30 天且只在使用时滚动,无法满足"初始设定后永久无缝"的产品硬需求(§2.2)。缓解:密码只进 keyring/加密文件,永不出现在配置文件、日志、错误信息、进程参数中;`persist_password: false` 配置项供合规敏感用户关闭(代价:长期停机后需重新登录,status 标记 `seamless:false`)。
+- 密码**永不入日志**:§9.4 的脱敏正则覆盖 `passwd`/`password` 字段,且 CredentialStore 的调试输出只打印字段存在性,不打印值。
+- refresh_token 滚动更新必须原子持久化(先写新值成功再作废旧值的本地副本),防止刷新到一半崩溃导致永久掉登录;静默重登取得的新 token 同样原子落盘。
+- keyring 锁定/不可读时进入 `keystore_unavailable` 状态(§4.5):不发起任何上游请求,后台低频探测 keystore 恢复。
 
 ### 9.3 Bridge API 自身防护
 
@@ -614,7 +662,22 @@ odctl share /Finance/2026/report.xlsx --expires 7d --max-uses 10
 4. 安全条款(§9)与测试覆盖率(§6.3)不可协商;性能优化(§10)在正确性之后。
 5. 所有公开函数写 godoc;错误信息面向使用者,不泄漏内部路径与 token。
 
+### E. 修订记录 Changelog
+
+**v1.1 (2026-07-25)** — P1 完成后的凭证生命周期修订(源自 Opus 5 开发备忘 + Derek 的产品要求"初始设定后永久无缝、静默运行"):
+
+1. §2.2 Bridge 策略重写:凭证(含密码)默认持久化到 CredentialStore;新增主动续期定时器(≥每 7 天滚动 refresh_token)与静默重登状态机;明确仅"密码被修改"与"captcha"两种情况需要用户介入。
+2. §4.5:凭证类错误一分为三——新增 `keystore_unavailable`(不得触发上游请求)与 `reauth_required`(停止自动尝试防 captcha),`unauthorized` 收窄为仅指 Bridge API 自身鉴权。
+3. §4.1:定稿 `/v1/auth/status` schema(account/state/seamless/keystore);SDK `Authenticator` 增加 `Identity()`/`AuthState()` 接口要求。
+4. §2.2 第 5 条:session fallback 的 SessionID 同样持久化,无缝性与 OAuth 等同,不作降级。
+5. §5:`internal/keystore` 从 P4 提前至 P2 首项;P1 补充"无持久化 = 配置错误"的启动检查与 MemoryTokenStore 仅限测试的约束。
+6. §9.2 重写:密码持久化作为对官方 OAuth 条款的有意偏离被明确记录(理由 + 缓解 + `persist_password:false` 逃生口);补充三平台 OS 凭证库说明与"凭证永不离开本机"声明。
+7. §2.6 增加优先级声明:`docs/discrepancies.md` 与存档规格优先于本节;标注 D1/D12/D14/D15 四处 PDF 错误。
+8. §3.4 配置示例新增 `persist_password`、`keystore` 项。
+
+**v1.0 (2026-07-24)** — 初版。
+
 ---
 
-*本白皮书基于 OpenDrive REST API Guide v1.1.7、官方代码样本及 2026-07-24 抓取的线上 API Explorer 规格编写。*
+*本白皮书基于 OpenDrive REST API Guide v1.1.7、官方代码样本及 2026-07-24 抓取的线上 API Explorer 规格编写;v1.1 修订依据 P0/P1 实施结论(docs/discrepancies.md)与产品无缝性要求。*
 
