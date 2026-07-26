@@ -199,6 +199,12 @@ func (s *stubAuth) Refresh(context.Context) error {
 	return s.refreshErr
 }
 
+func (s *stubAuth) Identity() Identity {
+	return Identity{Username: "stub", AuthMode: AuthModeOAuth2, Seamless: true}
+}
+
+func (s *stubAuth) AuthState() AuthState { return StateAuthenticated }
+
 func (s *stubAuth) refreshCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

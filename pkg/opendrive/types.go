@@ -125,6 +125,11 @@ func (i FlexInt) Int() int { return int(i) }
 // Int64 returns the value as an int64.
 func (i FlexInt) Int64() int64 { return int64(i) }
 
+// String renders the value in base 10. Upstream returns the same identifier as
+// a number in one response and as a string in another (docs/discrepancies.md
+// D19), so callers that need a stable id use this.
+func (i FlexInt) String() string { return strconv.FormatInt(int64(i), 10) }
+
 // UnmarshalJSON implements json.Unmarshaler.
 func (i *FlexInt) UnmarshalJSON(data []byte) error {
 	data = bytes.TrimSpace(data)

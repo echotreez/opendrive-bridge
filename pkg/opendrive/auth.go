@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Authentication defaults (whitepaper §2.2 B).
+// Authentication defaults (whitepaper §2.2).
 const (
 	// DefaultClientID is the client_id upstream expects for the simplified
 	// resource-owner password credentials flow.
@@ -19,24 +19,115 @@ const (
 	DefaultAccessTokenTTL = 86400 * time.Second
 	// DefaultRefreshTokenTTL is the documented refresh token lifetime.
 	DefaultRefreshTokenTTL = 30 * 24 * time.Hour
-	// DefaultRefreshSkew is how long before expiry the client refreshes
-	// proactively.
+	// DefaultRefreshSkew is how long before expiry the access token is
+	// refreshed proactively.
 	DefaultRefreshSkew = 5 * time.Minute
+	// DefaultRenewInterval is the upper bound on how long a refresh token may
+	// sit unused. The daemon's keep-alive timer calls EnsureFresh at least this
+	// often so that an idle bridge never loses its 30-day refresh token
+	// (§2.2 #2).
+	DefaultRenewInterval = 7 * 24 * time.Hour
 	// SessionLoginVersion is the "version" field the login endpoint expects.
 	SessionLoginVersion = "10"
+
+	// maxRenewBackoff caps the wait between failed renewal attempts. Renewal is
+	// never retried in a tight loop: an account that keeps failing to
+	// authenticate is one captcha away from being locked out (§2.2 #3).
+	maxRenewBackoff  = 15 * time.Minute
+	baseRenewBackoff = 5 * time.Second
 )
 
-// ErrNoToken is returned by a TokenStore that holds nothing yet.
-var ErrNoToken = errors.New("opendrive: no stored token")
+// ErrNoCredentials is returned by a CredentialStore that holds nothing yet.
+var ErrNoCredentials = errors.New("opendrive: no stored credentials")
+
+// AuthState is the authentication state machine of whitepaper §4.1/§4.5. The
+// daemon reports it verbatim through /v1/auth/status.
+type AuthState string
+
+// Authentication states.
+const (
+	// StateNotConfigured means no credentials have ever been stored.
+	StateNotConfigured AuthState = "not_configured"
+	// StateAuthenticated means usable credentials are in hand.
+	StateAuthenticated AuthState = "authenticated"
+	// StateRefreshing means a renewal is in progress or waiting out a backoff
+	// after a transient failure.
+	StateRefreshing AuthState = "refreshing"
+	// StateReauthRequired means upstream rejected the stored credentials.
+	// Automatic attempts have stopped and the user must supply a password.
+	StateReauthRequired AuthState = "reauth_required"
+	// StateCaptchaRequired means upstream demands a captcha the bridge cannot
+	// answer.
+	StateCaptchaRequired AuthState = "captcha_required"
+	// StateKeystoreUnavailable means the credential store cannot be read. No
+	// upstream request is made while in this state.
+	StateKeystoreUnavailable AuthState = "keystore_unavailable"
+)
+
+// Identity is the account the bridge is configured for. It is answered from
+// local state only: /v1/auth/status must not make a network call (§4.1).
+type Identity struct {
+	// Username is the configured login. Empty when nothing is configured.
+	Username string
+	// UserID and AccType are filled in when a login response provided them.
+	UserID  string
+	AccType int
+	// AuthMode is the scheme in use.
+	AuthMode AuthMode
+	// Seamless reports whether the bridge can recover on its own indefinitely,
+	// which requires a stored password and a working credential store
+	// (§2.2 #5, §4.1).
+	Seamless bool
+}
+
+// Configured reports whether any account is set up.
+func (i Identity) Configured() bool { return i.Username != "" }
+
+// Credentials are what an Authenticator hands to the client for a single call.
+type Credentials struct {
+	// SessionID is a real session id in session mode, or OAuthSessionID when
+	// AccessToken is set.
+	SessionID string
+	// AccessToken is the OAuth2 access token; upstream requires it in the URL
+	// query string rather than in a header (§2.2 B).
+	AccessToken string
+}
+
+// Authenticator supplies credentials, renews them silently, and reports what
+// state it is in. Both implementations (OAuth2 and SessionAuth) satisfy the
+// whole interface, so the daemon never branches on the auth mode (§2.2 #6).
+type Authenticator interface {
+	// Credentials returns the credentials to use for the next call, renewing
+	// them first if they are expired or about to expire.
+	Credentials(ctx context.Context) (Credentials, error)
+	// Refresh renews credentials after upstream rejected them. It is called at
+	// most once per request (§2.2 #3).
+	Refresh(ctx context.Context) error
+	// Identity reports the configured account without touching the network.
+	Identity() Identity
+	// AuthState reports the current state machine position.
+	AuthState() AuthState
+}
+
+// StaleTokenRefresher is an optional Authenticator extension. When the client
+// replays a request after a 401 it reports which access token failed, so that
+// an authenticator can ignore refresh requests triggered by a token another
+// goroutine has already replaced. Without it, concurrent 401s would each burn
+// one rolling refresh token and the losers would be logged out (§9.2).
+type StaleTokenRefresher interface {
+	RefreshStale(ctx context.Context, staleAccessToken string) error
+}
+
+// ---------------------------------------------------------------- credentials
 
 // Token is an OAuth2 credential pair. Its String method is deliberately
 // redacted so that a stray log statement cannot leak it (§9.4).
 type Token struct {
 	AccessToken   string    `json:"access_token"`
 	RefreshToken  string    `json:"refresh_token"`
+	IssuedAt      time.Time `json:"issued_at"`
 	Expiry        time.Time `json:"expiry"`
 	RefreshExpiry time.Time `json:"refresh_expiry"`
-	Account       string    `json:"account,omitempty"`
 }
 
 // Valid reports whether the access token can still be used at now.
@@ -60,6 +151,23 @@ func (t *Token) RefreshUsable(now time.Time) bool {
 	return t != nil && t.RefreshToken != "" && (t.RefreshExpiry.IsZero() || now.Before(t.RefreshExpiry))
 }
 
+// StaleForRenewal reports whether the token should be rolled even though it is
+// still valid, either because it has passed its half-life or because it has not
+// been rotated for interval (§2.2 #2).
+func (t *Token) StaleForRenewal(now time.Time, interval time.Duration) bool {
+	if t == nil || t.AccessToken == "" {
+		return true
+	}
+	if !t.IssuedAt.IsZero() && interval > 0 && now.Sub(t.IssuedAt) >= interval {
+		return true
+	}
+	if !t.IssuedAt.IsZero() && !t.Expiry.IsZero() {
+		half := t.IssuedAt.Add(t.Expiry.Sub(t.IssuedAt) / 2)
+		return !now.Before(half)
+	}
+	return false
+}
+
 // String implements fmt.Stringer without revealing the secrets.
 func (t *Token) String() string {
 	if t == nil {
@@ -77,481 +185,217 @@ func (t *Token) Clone() *Token {
 	return &c
 }
 
-// TokenStore persists OAuth2 tokens. Implementations live in internal/keystore
-// (OS keyring, encrypted file fallback); the SDK only needs this contract
-// (§9.2).
-type TokenStore interface {
-	// Load returns the stored token, or ErrNoToken when there is none.
-	Load(ctx context.Context) (*Token, error)
-	// Save persists the token, replacing any previous one. It must be atomic:
-	// a crash may never leave the store without a usable refresh token.
-	Save(ctx context.Context, t *Token) error
-	// Delete removes the stored token.
+// StoredCredentials is everything the bridge persists to stay seamless: the
+// four credential kinds of whitepaper §9.2.
+//
+// Password is stored deliberately, as a documented deviation from upstream's
+// OAuth2 terms: a refresh token lasts 30 days and only rolls when used, so
+// without the password a bridge that sits idle longer than that would demand a
+// login, which the product requirement forbids (§2.2 #1, §9.2). Users who
+// cannot accept that set persist_password:false and give up seamlessness.
+type StoredCredentials struct {
+	Username  string    `json:"username"`
+	Password  string    `json:"password,omitempty"`
+	Token     *Token    `json:"token,omitempty"`
+	SessionID string    `json:"session_id,omitempty"`
+	AuthMode  AuthMode  `json:"auth_mode"`
+	UserID    string    `json:"user_id,omitempty"`
+	AccType   int       `json:"acc_type,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// String implements fmt.Stringer without revealing anything secret (§9.2: the
+// debug output prints field presence, never values).
+func (c *StoredCredentials) String() string {
+	if c == nil {
+		return "StoredCredentials(nil)"
+	}
+	has := func(b bool) string {
+		if b {
+			return "yes"
+		}
+		return "no"
+	}
+	return "StoredCredentials(user=" + Redacted +
+		", password=" + has(c.Password != "") +
+		", token=" + has(c.Token != nil) +
+		", session=" + has(c.SessionID != "") +
+		", mode=" + string(c.AuthMode) + ")"
+}
+
+// Clone returns a deep copy.
+func (c *StoredCredentials) Clone() *StoredCredentials {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	out.Token = c.Token.Clone()
+	return &out
+}
+
+// CredentialStore persists the credentials that keep the bridge seamless.
+// Implementations live in internal/keystore (OS keyring, encrypted file
+// fallback); the SDK only needs this contract (§9.2).
+type CredentialStore interface {
+	// Load returns the stored credentials, or ErrNoCredentials when there are
+	// none. Any other error means the store itself is unavailable and puts the
+	// authenticator into StateKeystoreUnavailable.
+	Load(ctx context.Context) (*StoredCredentials, error)
+	// Save persists the credentials, replacing any previous set. It must be
+	// atomic: a crash may never leave the store without a usable refresh token
+	// (§9.2).
+	Save(ctx context.Context, c *StoredCredentials) error
+	// Delete removes everything.
 	Delete(ctx context.Context) error
 }
 
-// MemoryTokenStore is an in-process TokenStore, used by tests and by the
-// --direct CLI mode where nothing should touch disk.
-type MemoryTokenStore struct {
-	mu  sync.Mutex
-	tok *Token
+// EphemeralStore is implemented by stores that do not survive a restart. The
+// daemon refuses to start on one unless the operator asked for it explicitly,
+// so that a bridge can never look configured and then forget everything on
+// reboot (§9.2).
+type EphemeralStore interface {
+	Ephemeral() bool
 }
 
-// NewMemoryTokenStore returns an empty store.
+// MemoryTokenStore is an in-process CredentialStore.
+//
+// It is for tests and for explicitly ephemeral runs only: it reports itself as
+// ephemeral so that internal/keystore can refuse to hand it to a daemon that
+// did not ask for it (§9.2).
+type MemoryTokenStore struct {
+	mu   sync.Mutex
+	cred *StoredCredentials
+}
+
+// NewMemoryTokenStore returns an empty in-memory store.
 func NewMemoryTokenStore() *MemoryTokenStore { return &MemoryTokenStore{} }
 
-// Load implements TokenStore.
-func (s *MemoryTokenStore) Load(context.Context) (*Token, error) {
+// Load implements CredentialStore.
+func (s *MemoryTokenStore) Load(context.Context) (*StoredCredentials, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.tok == nil {
-		return nil, ErrNoToken
+	if s.cred == nil {
+		return nil, ErrNoCredentials
 	}
-	return s.tok.Clone(), nil
+	return s.cred.Clone(), nil
 }
 
-// Save implements TokenStore.
-func (s *MemoryTokenStore) Save(_ context.Context, t *Token) error {
+// Save implements CredentialStore.
+func (s *MemoryTokenStore) Save(_ context.Context, c *StoredCredentials) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tok = t.Clone()
+	s.cred = c.Clone()
 	return nil
 }
 
-// Delete implements TokenStore.
+// Delete implements CredentialStore.
 func (s *MemoryTokenStore) Delete(context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tok = nil
+	s.cred = nil
 	return nil
 }
 
-// StaleTokenRefresher is an optional Authenticator extension. When the client
-// replays a request after a 401 it reports which access token failed, so that
-// an authenticator can ignore refresh requests triggered by a token another
-// goroutine has already replaced. Without it, concurrent 401s would each burn
-// one rolling refresh token and the losers would be logged out (§2.2 B, §9.2).
-type StaleTokenRefresher interface {
-	RefreshStale(ctx context.Context, staleAccessToken string) error
+// Ephemeral implements EphemeralStore.
+func (s *MemoryTokenStore) Ephemeral() bool { return true }
+
+// ---------------------------------------------------------------- renew gate
+
+// renewGate is the shared part of the silent re-login state machine: it holds
+// the current state, the last error, and the backoff that keeps a failing
+// renewal from turning into a retry loop (§2.2 #3).
+type renewGate struct {
+	state       AuthState
+	lastErr     *APIError
+	attempts    int
+	nextAttempt time.Time
 }
 
-// ---------------------------------------------------------------- OAuth2
-
-// OAuth2 implements Authenticator using upstream's simplified resource-owner
-// password credentials flow (§2.2 B). It is the Bridge default: the password is
-// exchanged for tokens once and then dropped, and refresh tokens are rotated
-// and persisted atomically.
-type OAuth2 struct {
-	c        *Client
-	store    TokenStore
-	clientID string
-	skew     time.Duration
-	now      func() time.Time
-
-	mu     sync.Mutex
-	tok    *Token
-	loaded bool
-}
-
-// OAuth2Option configures an OAuth2 authenticator.
-type OAuth2Option func(*OAuth2)
-
-// WithTokenStore persists tokens through the given store.
-func WithTokenStore(s TokenStore) OAuth2Option {
-	return func(a *OAuth2) {
-		if s != nil {
-			a.store = s
-		}
-	}
-}
-
-// WithClientID overrides the OAuth2 client_id.
-func WithClientID(id string) OAuth2Option {
-	return func(a *OAuth2) {
-		if id != "" {
-			a.clientID = id
-		}
-	}
-}
-
-// WithRefreshSkew sets how early the access token is refreshed.
-func WithRefreshSkew(d time.Duration) OAuth2Option {
-	return func(a *OAuth2) {
-		if d >= 0 {
-			a.skew = d
-		}
-	}
-}
-
-// WithClock replaces the time source, for tests.
-func WithClock(now func() time.Time) OAuth2Option {
-	return func(a *OAuth2) {
-		if now != nil {
-			a.now = now
-		}
-	}
-}
-
-// NewOAuth2 creates an OAuth2 authenticator bound to c. It does not attach
-// itself: call c.SetAuthenticator(a) or opendrive.New(WithAuthenticator(a)).
-func NewOAuth2(c *Client, opts ...OAuth2Option) *OAuth2 {
-	a := &OAuth2{
-		c:        c,
-		store:    NewMemoryTokenStore(),
-		clientID: DefaultClientID,
-		skew:     DefaultRefreshSkew,
-		now:      time.Now,
-	}
-	for _, o := range opts {
-		o(a)
-	}
-	return a
-}
-
-// grantResponse is the body of POST /oauth2/grant.json.
-type grantResponse struct {
-	AccessToken           string  `json:"access_token"`
-	RefreshToken          string  `json:"refresh_token"`
-	TokenType             string  `json:"token_type"`
-	ExpiresIn             FlexInt `json:"expires_in"`
-	RefreshTokenExpiresIn FlexInt `json:"refresh_token_expires_in"`
-}
-
-// Login exchanges a username and password for tokens. The password is used for
-// this single call and never stored, logged or persisted (§2.2 B, §9.2).
-func (a *OAuth2) Login(ctx context.Context, username, password string) error {
-	var out grantResponse
-	err := a.c.Do(ctx, Request{
-		Method:           http.MethodPost,
-		Path:             "/oauth2/grant.json",
-		SessionPlacement: SessionOmit,
-		Body: map[string]string{
-			"grant_type": "password",
-			"client_id":  a.clientID,
-			"username":   username,
-			"password":   password,
-		},
-	}, &out)
-	if err != nil {
-		return err
-	}
-	tok, err := a.tokenFrom(out, "")
-	if err != nil {
-		return err
-	}
-	tok.Account = username
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.adopt(ctx, tok)
-}
-
-// Credentials implements Authenticator, refreshing proactively when the access
-// token is within the refresh skew of expiry (§2.2 Bridge strategy).
-func (a *OAuth2) Credentials(ctx context.Context) (Credentials, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if err := a.ensureLoaded(ctx); err != nil {
-		return Credentials{}, err
-	}
-	if a.tok == nil {
-		return Credentials{}, &APIError{Kind: KindUnauthorized, UpstreamMsg: "not logged in"}
-	}
-	if a.tok.NeedsRefresh(a.now(), a.skew) {
-		if err := a.refreshLocked(ctx); err != nil {
-			return Credentials{}, err
-		}
-	}
-	return Credentials{SessionID: OAuthSessionID, AccessToken: a.tok.AccessToken}, nil
-}
-
-// Refresh implements Authenticator.
-func (a *OAuth2) Refresh(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if err := a.ensureLoaded(ctx); err != nil {
-		return err
-	}
-	return a.refreshLocked(ctx)
-}
-
-// RefreshStale implements StaleTokenRefresher: a refresh triggered by an access
-// token that has already been replaced is a no-op.
-func (a *OAuth2) RefreshStale(ctx context.Context, stale string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if err := a.ensureLoaded(ctx); err != nil {
-		return err
-	}
-	if stale != "" && a.tok != nil && a.tok.AccessToken != stale {
-		return nil
-	}
-	return a.refreshLocked(ctx)
-}
-
-// Logout drops the tokens locally. Upstream has no token revocation endpoint in
-// the documented surface, so this is a local operation.
-func (a *OAuth2) Logout(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.tok = nil
-	a.loaded = true
-	if a.store == nil {
-		return nil
-	}
-	if err := a.store.Delete(ctx); err != nil && !errors.Is(err, ErrNoToken) {
-		return err
-	}
-	return nil
-}
-
-// Token returns a copy of the current token, and whether there is one. The
-// daemon uses it for /v1/auth/status (§4.1).
-func (a *OAuth2) Token() (Token, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.tok == nil {
-		return Token{}, false
-	}
-	return *a.tok.Clone(), true
-}
-
-func (a *OAuth2) ensureLoaded(ctx context.Context) error {
-	if a.loaded || a.store == nil {
-		a.loaded = true
-		return nil
-	}
-	a.loaded = true
-	tok, err := a.store.Load(ctx)
-	if err != nil {
-		if errors.Is(err, ErrNoToken) {
-			return nil
-		}
-		return &APIError{Kind: KindUnauthorized, UpstreamMsg: "cannot read the stored token", Err: err}
-	}
-	a.tok = tok
-	return nil
-}
-
-// refreshLocked exchanges the refresh token. The caller must hold a.mu.
-func (a *OAuth2) refreshLocked(ctx context.Context) error {
-	now := a.now()
-	if a.tok == nil || a.tok.RefreshToken == "" {
-		return &APIError{Kind: KindUnauthorized, UpstreamMsg: "not logged in: no refresh token available"}
-	}
-	if !a.tok.RefreshUsable(now) {
-		return &APIError{Kind: KindRefreshTokenFailed, UpstreamMsg: "the refresh token has expired, log in again"}
-	}
-
-	var out grantResponse
-	err := a.c.Do(ctx, Request{
-		Method:           http.MethodPost,
-		Path:             "/oauth2/grant.json",
-		SessionPlacement: SessionOmit,
-		Body: map[string]string{
-			"grant_type":    "refresh_token",
-			"client_id":     a.clientID,
-			"refresh_token": a.tok.RefreshToken,
-		},
-	}, &out)
-	if err != nil {
-		return err
-	}
-	// Upstream rotates the refresh token on every exchange; if it withholds a
-	// new one, the previous one stays valid (§2.2 B).
-	tok, err := a.tokenFrom(out, a.tok.RefreshToken)
-	if err != nil {
-		return err
-	}
-	tok.Account = a.tok.Account
-	return a.adopt(ctx, tok)
-}
-
-// adopt persists the new token before it becomes the in-memory one, so a crash
-// mid-refresh can never leave the store holding a refresh token upstream has
-// already invalidated (§9.2). The caller must hold a.mu.
-func (a *OAuth2) adopt(ctx context.Context, tok *Token) error {
-	if a.store != nil {
-		if err := a.store.Save(ctx, tok); err != nil {
-			// Upstream has already rotated the credential: keeping the old
-			// token would guarantee a logout, so the new one is adopted in
-			// memory and the persistence failure is reported loudly instead.
-			a.c.Logger().Error("cannot persist the refreshed token; the session survives only in memory",
-				slog.String("error", RedactString(err.Error())))
-		}
-	}
-	a.tok = tok
-	a.loaded = true
-	return nil
-}
-
-func (a *OAuth2) tokenFrom(g grantResponse, fallbackRefresh string) (*Token, error) {
-	if g.AccessToken == "" {
-		return nil, &APIError{Kind: KindInvalidResponse, UpstreamMsg: "grant response carried no access_token"}
-	}
-	now := a.now()
-	ttl := time.Duration(g.ExpiresIn) * time.Second
-	if ttl <= 0 {
-		ttl = DefaultAccessTokenTTL
-	}
-	refresh := g.RefreshToken
-	if refresh == "" {
-		refresh = fallbackRefresh
-	}
-	refreshTTL := time.Duration(g.RefreshTokenExpiresIn) * time.Second
-	if refreshTTL <= 0 {
-		refreshTTL = DefaultRefreshTokenTTL
-	}
-	return &Token{
-		AccessToken:   g.AccessToken,
-		RefreshToken:  refresh,
-		Expiry:        now.Add(ttl),
-		RefreshExpiry: now.Add(refreshTTL),
-	}, nil
-}
-
-// ---------------------------------------------------------------- session
-
-// SessionAuth implements Authenticator with the legacy session mode (§2.2 A).
-// It is the fallback for deployments or endpoints that do not accept OAuth2.
-// The password is not retained, so an expired session requires an explicit
-// Login rather than a silent refresh (§9.2).
-type SessionAuth struct {
-	c *Client
-
-	mu      sync.Mutex
-	session string
-	info    SessionLogin
-}
-
-// NewSessionAuth creates a session-mode authenticator bound to c.
-func NewSessionAuth(c *Client) *SessionAuth { return &SessionAuth{c: c} }
-
-// LoginOption customises a session login.
-type LoginOption func(map[string]string)
-
-// WithCaptchaResponse supplies the solved captcha upstream asked for (§2.6 #11).
-func WithCaptchaResponse(resp string) LoginOption {
-	return func(body map[string]string) { body["captcha_response"] = resp }
-}
-
-// WithPartnerID sets the partner_id login field.
-func WithPartnerID(id string) LoginOption {
-	return func(body map[string]string) { body["partner_id"] = id }
-}
-
-// Login performs POST /session/login.json. A captcha challenge surfaces as an
-// APIError of Kind KindCaptchaRequired, which callers must not retry: the user
-// has to solve it (§2.6 #11).
-func (a *SessionAuth) Login(ctx context.Context, username, password string, opts ...LoginOption) (*SessionLogin, error) {
-	body := map[string]string{
-		"username":         username,
-		"passwd":           password,
-		"version":          SessionLoginVersion,
-		"partner_id":       "",
-		"captcha_response": "",
-	}
-	for _, o := range opts {
-		o(body)
-	}
-	var out SessionLogin
-	if err := a.c.Do(ctx, Request{
-		Method:           http.MethodPost,
-		Path:             "/session/login.json",
-		SessionPlacement: SessionOmit,
-		Body:             body,
-	}, &out); err != nil {
-		return nil, err
-	}
-	if out.SessionID == "" {
-		return nil, &APIError{Kind: KindInvalidResponse, UpstreamMsg: "login response carried no SessionID"}
-	}
-	a.mu.Lock()
-	a.session, a.info = out.SessionID, out
-	a.mu.Unlock()
-	return &out, nil
-}
-
-// Credentials implements Authenticator.
-func (a *SessionAuth) Credentials(context.Context) (Credentials, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.session == "" {
-		return Credentials{}, &APIError{Kind: KindUnauthorized, UpstreamMsg: "not logged in"}
-	}
-	return Credentials{SessionID: a.session}, nil
-}
-
-// Refresh implements Authenticator. Session mode has nothing to refresh: the
-// password is not kept, so the caller must log in again (§9.2).
-func (a *SessionAuth) Refresh(context.Context) error {
-	a.mu.Lock()
-	a.session = ""
-	a.mu.Unlock()
-	return &APIError{Kind: KindUnauthorized, UpstreamMsg: "the session has expired, log in again"}
-}
-
-// SessionID returns the current session id, empty when not logged in.
-func (a *SessionAuth) SessionID() string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.session
-}
-
-// Info returns the account information the login response carried.
-func (a *SessionAuth) Info() SessionLogin {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.info
-}
-
-// Exists checks the session with POST /session/exists.json.
-func (a *SessionAuth) Exists(ctx context.Context) (bool, error) {
-	var out BoolResult
-	if err := a.c.Do(ctx, Request{
-		Method:           http.MethodPost,
-		Path:             "/session/exists.json",
-		SessionPlacement: SessionInBody,
-		Body:             map[string]string{},
-	}, &out); err != nil {
-		return false, err
-	}
-	return out.OK(), nil
-}
-
-// Logout performs POST /session/logout.json and forgets the session.
-func (a *SessionAuth) Logout(ctx context.Context) error {
-	var out BoolResult
-	err := a.c.Do(ctx, Request{
-		Method:           http.MethodPost,
-		Path:             "/session/logout.json",
-		SessionPlacement: SessionInBody,
-		Body:             map[string]string{},
-	}, &out)
-	a.mu.Lock()
-	a.session, a.info = "", SessionLogin{}
-	a.mu.Unlock()
+// terminal parks the gate in a state only the user can leave.
+func (g *renewGate) terminal(state AuthState, err *APIError) *APIError {
+	g.state = state
+	g.lastErr = err
+	g.attempts = 0
+	g.nextAttempt = time.Time{}
 	return err
 }
 
-// CaptchaRequired reports whether upstream currently demands a captcha for this
-// client or account. The endpoint exists online but not in the PDF (§2.6 #1).
-func CaptchaRequired(ctx context.Context, c *Client, username string) (*CaptchaStatus, error) {
-	q := map[string][]string{}
-	if username != "" {
-		q["username"] = []string{username}
+// backoff records a transient failure and schedules the next allowed attempt.
+func (g *renewGate) backoff(now time.Time, err *APIError) *APIError {
+	g.state = StateRefreshing
+	g.lastErr = err
+	g.attempts++
+	wait := baseRenewBackoff << min(g.attempts-1, 8)
+	if wait > maxRenewBackoff || wait <= 0 {
+		wait = maxRenewBackoff
 	}
-	var out CaptchaStatus
-	if err := c.Do(ctx, Request{
-		Method:           http.MethodGet,
-		Path:             "/session/captcharequired.json",
-		Query:            q,
-		SessionPlacement: SessionOmit,
-	}, &out); err != nil {
-		return nil, err
+	g.nextAttempt = now.Add(wait)
+	return err
+}
+
+// succeed clears the gate after a successful renewal.
+func (g *renewGate) succeed() {
+	g.state = StateAuthenticated
+	g.lastErr = nil
+	g.attempts = 0
+	g.nextAttempt = time.Time{}
+}
+
+// blocked reports the error to return without touching the network, if any.
+func (g *renewGate) blocked(now time.Time) *APIError {
+	switch g.state {
+	case StateReauthRequired, StateCaptchaRequired, StateKeystoreUnavailable:
+		return g.lastErr
 	}
-	return &out, nil
+	if !g.nextAttempt.IsZero() && now.Before(g.nextAttempt) {
+		return g.lastErr
+	}
+	return nil
+}
+
+// reset returns the gate to a pristine state, used after an explicit login.
+func (g *renewGate) reset() {
+	g.state = StateAuthenticated
+	g.lastErr = nil
+	g.attempts = 0
+	g.nextAttempt = time.Time{}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// asError converts a possibly-nil *APIError into an error interface. Returning
+// a typed nil pointer directly would produce a non-nil error interface, which
+// is the classic Go trap this helper exists to avoid.
+func asError(e *APIError) error {
+	if e == nil {
+		return nil
+	}
+	return e
+}
+
+// keystoreError wraps a credential store failure. §4.5: while in this state the
+// SDK issues no upstream request at all.
+func keystoreError(err error) *APIError {
+	return &APIError{
+		Kind:        KindKeystoreUnavailable,
+		UpstreamMsg: "the credential store is unavailable; unlock the keyring or check the configured key",
+		Err:         err,
+	}
+}
+
+// reauthError signals that only the user can move things forward.
+func reauthError(msg string) *APIError {
+	return &APIError{Kind: KindReauthRequired, UpstreamMsg: msg}
+}
+
+// notConfiguredError is the reauth error used before any login has happened.
+func notConfiguredError() *APIError {
+	return reauthError("the bridge is not configured yet; log in once to store the account")
 }
 
 // ---------------------------------------------------------------- selection
@@ -565,16 +409,17 @@ const (
 	AuthModeSession AuthMode = "session"
 )
 
-// Login authenticates c and attaches the resulting Authenticator to it.
+// Login authenticates c, persists the credentials and attaches the resulting
+// Authenticator. It is the one entry point that takes a password: from here on
+// the bridge renews itself silently (§2.2).
 //
-// With AuthModeOAuth2 (the Bridge default) it uses the OAuth2 grant and falls
-// back to session mode when upstream rejects the grant endpoint itself — a 404
-// or 501 — rather than the credentials. Bad credentials, a captcha challenge or
-// any other definite answer are returned as-is, because retrying them in
-// session mode would only burn another login attempt (§2.2, §2.6 #11).
-func Login(ctx context.Context, c *Client, mode AuthMode, username, password string, store TokenStore) (Authenticator, error) {
+// With AuthModeOAuth2 (the default) it uses the OAuth2 grant and falls back to
+// session mode only when upstream lacks the grant endpoint — a 404 or 501 —
+// never when the credentials themselves were rejected, because retrying a bad
+// password only moves the account closer to a captcha lock (§2.6 #11).
+func Login(ctx context.Context, c *Client, mode AuthMode, username, password string, store CredentialStore, opts ...AuthOption) (Authenticator, error) {
 	if mode == AuthModeSession {
-		sa := NewSessionAuth(c)
+		sa := NewSessionAuth(c, append([]AuthOption{WithCredentialStore(store)}, opts...)...)
 		if _, err := sa.Login(ctx, username, password); err != nil {
 			return nil, err
 		}
@@ -582,7 +427,7 @@ func Login(ctx context.Context, c *Client, mode AuthMode, username, password str
 		return sa, nil
 	}
 
-	oa := NewOAuth2(c, WithTokenStore(store))
+	oa := NewOAuth2(c, append([]AuthOption{WithCredentialStore(store)}, opts...)...)
 	err := oa.Login(ctx, username, password)
 	if err == nil {
 		c.SetAuthenticator(oa)
@@ -593,12 +438,46 @@ func Login(ctx context.Context, c *Client, mode AuthMode, username, password str
 	}
 	c.Logger().Warn("oauth2 grant is unavailable upstream, falling back to session mode",
 		slog.String("error", RedactString(err.Error())))
-	sa := NewSessionAuth(c)
+	sa := NewSessionAuth(c, append([]AuthOption{WithCredentialStore(store)}, opts...)...)
 	if _, lerr := sa.Login(ctx, username, password); lerr != nil {
 		return nil, lerr
 	}
 	c.SetAuthenticator(sa)
 	return sa, nil
+}
+
+// Resume rebuilds an Authenticator from the credential store without asking for
+// a password, which is what the daemon does on every start (§2.2 #1). It makes
+// no network call: the first business request triggers whatever renewal is due.
+//
+// A store that holds nothing yields an authenticator in StateNotConfigured
+// rather than an error, so /v1/auth/status can report it.
+func Resume(ctx context.Context, c *Client, store CredentialStore, opts ...AuthOption) (Authenticator, error) {
+	if store == nil {
+		return nil, invalidRequest("a credential store is required to resume a session")
+	}
+	cred, err := store.Load(ctx)
+	switch {
+	case err == nil:
+	case errors.Is(err, ErrNoCredentials):
+		cred = nil
+	default:
+		return nil, keystoreError(err)
+	}
+
+	all := append([]AuthOption{WithCredentialStore(store)}, opts...)
+	if cred != nil && cred.AuthMode == AuthModeSession {
+		sa := NewSessionAuth(c, all...)
+		sa.adoptLoaded(cred)
+		c.SetAuthenticator(sa)
+		return sa, nil
+	}
+	oa := NewOAuth2(c, all...)
+	if cred != nil {
+		oa.adoptLoaded(cred)
+	}
+	c.SetAuthenticator(oa)
+	return oa, nil
 }
 
 // grantUnsupported reports whether the error means "this deployment has no
@@ -613,4 +492,85 @@ func grantUnsupported(err error) bool {
 		return true
 	}
 	return ae.Kind == KindInvalidResponse
+}
+
+// ---------------------------------------------------------------- options
+
+// AuthOption configures an authenticator. The same options apply to both
+// implementations so that callers need not branch on the mode.
+type AuthOption func(*authConfig)
+
+type authConfig struct {
+	store           CredentialStore
+	clientID        string
+	skew            time.Duration
+	renewInterval   time.Duration
+	persistPassword bool
+	now             func() time.Time
+}
+
+func defaultAuthConfig() authConfig {
+	return authConfig{
+		store:           NewMemoryTokenStore(),
+		clientID:        DefaultClientID,
+		skew:            DefaultRefreshSkew,
+		renewInterval:   DefaultRenewInterval,
+		persistPassword: true,
+		now:             time.Now,
+	}
+}
+
+// WithCredentialStore persists credentials through the given store.
+func WithCredentialStore(s CredentialStore) AuthOption {
+	return func(c *authConfig) {
+		if s != nil {
+			c.store = s
+		}
+	}
+}
+
+// WithClientID overrides the OAuth2 client_id (the partner id, see
+// docs/discrepancies.md D6).
+func WithClientID(id string) AuthOption {
+	return func(c *authConfig) {
+		if id != "" {
+			c.clientID = id
+		}
+	}
+}
+
+// WithRefreshSkew sets how early the access token is refreshed.
+func WithRefreshSkew(d time.Duration) AuthOption {
+	return func(c *authConfig) {
+		if d >= 0 {
+			c.skew = d
+		}
+	}
+}
+
+// WithRenewInterval sets the maximum age a refresh token may reach before
+// EnsureFresh rolls it (§2.2 #2).
+func WithRenewInterval(d time.Duration) AuthOption {
+	return func(c *authConfig) {
+		if d > 0 {
+			c.renewInterval = d
+		}
+	}
+}
+
+// WithPersistPassword controls whether the password is kept for silent
+// re-login. Turning it off honours upstream's OAuth2 terms literally at the
+// cost of seamlessness after a long idle period (config persist_password,
+// §9.2).
+func WithPersistPassword(on bool) AuthOption {
+	return func(c *authConfig) { c.persistPassword = on }
+}
+
+// WithClock replaces the time source, for tests.
+func WithClock(now func() time.Time) AuthOption {
+	return func(c *authConfig) {
+		if now != nil {
+			c.now = now
+		}
+	}
 }

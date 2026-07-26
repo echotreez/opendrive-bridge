@@ -33,26 +33,6 @@ const (
 	maxResponseBytes = 64 << 20
 )
 
-// Credentials are what an Authenticator hands to the client for a single call.
-type Credentials struct {
-	// SessionID is a real session id in session mode, or OAuthSessionID when
-	// AccessToken is set.
-	SessionID string
-	// AccessToken is the OAuth2 access token; upstream requires it in the URL
-	// query string rather than in a header (§2.2 B).
-	AccessToken string
-}
-
-// Authenticator supplies credentials and knows how to renew them.
-type Authenticator interface {
-	// Credentials returns the credentials to use for the next call, refreshing
-	// proactively if they are about to expire.
-	Credentials(ctx context.Context) (Credentials, error)
-	// Refresh renews expired credentials. It is called at most once per
-	// request, after upstream answered 401 invalid_token (§2.2, §11).
-	Refresh(ctx context.Context) error
-}
-
 // SessionPlacement says where the session parameter belongs for an endpoint.
 // Upstream is not consistent about this, which is why it is per request
 // (§1.2, §2.6 #4).
@@ -287,9 +267,12 @@ func (c *Client) Do(ctx context.Context, r Request, out any) error {
 			return nil
 		}
 
-		// An expired access token is not a retry: refresh once, then replay
-		// the very same request (§2.2, §11).
-		if apiErr.Kind == KindTokenExpired && c.auth != nil && !refreshed {
+		// An expired access token is not a retry: renew once, then replay the
+		// very same request (§2.2 #3). Requests that carry no session at all —
+		// login and grant — are excluded: renewing in response to their 401
+		// would recurse straight back into the same call.
+		if apiErr.Kind == KindTokenExpired && c.auth != nil && !refreshed &&
+			r.SessionPlacement != SessionOmit {
 			refreshed = true
 			if err := c.refreshAuth(ctx, creds.AccessToken); err != nil {
 				return err

@@ -88,10 +88,40 @@ func TestParseErrorShapes(t *testing.T) {
 			wantKind: KindRateLimited,
 		},
 		{
-			name:     "forbidden maps to unauthorized",
+			// v1.1 §4.5: unauthorized is reserved for the Bridge API's own
+			// auth, so an upstream refusal is a plain upstream error.
+			name:     "forbidden is an upstream refusal, not a credential problem",
 			status:   403,
 			body:     `{"error":{"code":403,"message":"Access denied"}}`,
-			wantKind: KindUnauthorized,
+			wantKind: KindUpstreamError,
+		},
+		{
+			// A 401 that is not about the credentials means the session or
+			// token on the wire is stale, which the SDK renews silently.
+			name:     "session expiry is renewable",
+			status:   401,
+			body:     `{"error":{"code":401,"message":"Session does not exist"}}`,
+			wantKind: KindTokenExpired,
+		},
+		{
+			// §2.2 #4a: the one case that must stop every automatic attempt.
+			name:     "rejected password",
+			status:   401,
+			body:     `{"error":{"code":401,"message":"Invalid username or password"}}`,
+			wantKind: KindReauthRequired,
+		},
+		{
+			name:      "rejected oauth client",
+			status:    401,
+			body:      `{"error":"invalid_client","error_description":"Invalid username or password"}`,
+			wantKind:  KindReauthRequired,
+			wantOAuth: "invalid_client",
+		},
+		{
+			name:     "suspended account",
+			status:   403,
+			body:     `{"error":{"code":403,"message":"Account is suspended"}}`,
+			wantKind: KindReauthRequired,
 		},
 		{
 			name:     "message only",

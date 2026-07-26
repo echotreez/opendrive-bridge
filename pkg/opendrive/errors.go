@@ -15,42 +15,66 @@ import (
 // layer can pass them through unchanged.
 type Kind string
 
-// Error kinds. The first ten are the §4.5 enumeration; the remaining ones cover
-// failures that never reach the Bridge API surface as-is.
+// Error kinds, mapping one-to-one onto the Bridge API error enumeration of
+// whitepaper §4.5 (v1.1).
+//
+// The three credential kinds are deliberately distinct, because the daemon has
+// to react differently to each:
+//
+//	KindKeystoreUnavailable — the credential store cannot be read. No upstream
+//	    request may be made at all: retrying with no credentials would walk the
+//	    account into a captcha lock. Recovery is local (unlock the keyring).
+//	KindReauthRequired      — upstream rejected the stored credentials, so the
+//	    password has changed (or the bridge was never configured). All automatic
+//	    attempts stop until the user supplies a new password.
+//	KindTokenExpired        — transient: the SDK refreshes or silently logs in
+//	    again, so callers rarely observe it.
+//
+// KindUnauthorized is reserved for the Bridge API's own authentication (a wrong
+// API key on a non-loopback listener). The SDK never produces it for an
+// upstream credential problem.
 const (
-	KindUnauthorized       Kind = "unauthorized"
-	KindTokenExpired       Kind = "token_expired"
-	KindCaptchaRequired    Kind = "captcha_required"
-	KindNotFound           Kind = "not_found"
-	KindConflict           Kind = "conflict"
-	KindQuotaExceeded      Kind = "quota_exceeded"
-	KindBandwidthExceeded  Kind = "bandwidth_exceeded"
-	KindInvalidName        Kind = "invalid_name"
-	KindUpstreamError      Kind = "upstream_error"
-	KindRateLimited        Kind = "rate_limited"
-	KindNetwork            Kind = "network"
-	KindInvalidResponse    Kind = "invalid_response"
-	KindInvalidRequest     Kind = "invalid_request"
+	KindKeystoreUnavailable Kind = "keystore_unavailable"
+	KindReauthRequired      Kind = "reauth_required"
+	KindTokenExpired        Kind = "token_expired"
+	KindCaptchaRequired     Kind = "captcha_required"
+	KindUnauthorized        Kind = "unauthorized"
+	KindNotFound            Kind = "not_found"
+	KindConflict            Kind = "conflict"
+	KindQuotaExceeded       Kind = "quota_exceeded"
+	KindBandwidthExceeded   Kind = "bandwidth_exceeded"
+	KindInvalidName         Kind = "invalid_name"
+	KindUpstreamError       Kind = "upstream_error"
+	KindRateLimited         Kind = "rate_limited"
+	KindNetwork             Kind = "network"
+	KindInvalidResponse     Kind = "invalid_response"
+	KindInvalidRequest      Kind = "invalid_request"
+	// KindRefreshTokenFailed is internal and transient: it means the refresh
+	// grant was rejected, which sends the authenticator down the silent
+	// re-login path (§2.2 #3). Once that succeeds the caller never sees it; if
+	// it fails the error becomes KindReauthRequired.
 	KindRefreshTokenFailed Kind = "refresh_token_failed"
 )
 
 // Sentinel errors for errors.Is. Every APIError reports itself as the sentinel
 // matching its Kind, so callers can write errors.Is(err, ErrTokenExpired).
 var (
-	ErrUnauthorized       = &APIError{Kind: KindUnauthorized}
-	ErrTokenExpired       = &APIError{Kind: KindTokenExpired}
-	ErrCaptchaRequired    = &APIError{Kind: KindCaptchaRequired}
-	ErrNotFound           = &APIError{Kind: KindNotFound}
-	ErrConflict           = &APIError{Kind: KindConflict}
-	ErrQuotaExceeded      = &APIError{Kind: KindQuotaExceeded}
-	ErrBandwidthExceeded  = &APIError{Kind: KindBandwidthExceeded}
-	ErrInvalidName        = &APIError{Kind: KindInvalidName}
-	ErrUpstream           = &APIError{Kind: KindUpstreamError}
-	ErrRateLimited        = &APIError{Kind: KindRateLimited}
-	ErrNetwork            = &APIError{Kind: KindNetwork}
-	ErrInvalidResponse    = &APIError{Kind: KindInvalidResponse}
-	ErrInvalidRequest     = &APIError{Kind: KindInvalidRequest}
-	ErrRefreshTokenFailed = &APIError{Kind: KindRefreshTokenFailed}
+	ErrKeystoreUnavailable = &APIError{Kind: KindKeystoreUnavailable}
+	ErrReauthRequired      = &APIError{Kind: KindReauthRequired}
+	ErrUnauthorized        = &APIError{Kind: KindUnauthorized}
+	ErrTokenExpired        = &APIError{Kind: KindTokenExpired}
+	ErrCaptchaRequired     = &APIError{Kind: KindCaptchaRequired}
+	ErrNotFound            = &APIError{Kind: KindNotFound}
+	ErrConflict            = &APIError{Kind: KindConflict}
+	ErrQuotaExceeded       = &APIError{Kind: KindQuotaExceeded}
+	ErrBandwidthExceeded   = &APIError{Kind: KindBandwidthExceeded}
+	ErrInvalidName         = &APIError{Kind: KindInvalidName}
+	ErrUpstream            = &APIError{Kind: KindUpstreamError}
+	ErrRateLimited         = &APIError{Kind: KindRateLimited}
+	ErrNetwork             = &APIError{Kind: KindNetwork}
+	ErrInvalidResponse     = &APIError{Kind: KindInvalidResponse}
+	ErrInvalidRequest      = &APIError{Kind: KindInvalidRequest}
+	ErrRefreshTokenFailed  = &APIError{Kind: KindRefreshTokenFailed}
 )
 
 // APIError is the single error type the SDK returns for upstream failures. It
@@ -227,20 +251,40 @@ func parseError(status int, header http.Header, body []byte, op, url string) *AP
 	return e
 }
 
+// badCredentialPhrases are the messages upstream uses when it rejects the
+// account itself rather than a stale token. They are the trigger for
+// KindReauthRequired, which stops every automatic attempt (§2.2 #4a).
+var badCredentialPhrases = []string{
+	"invalid username or password",
+	"invalid username",
+	"invalid password",
+	"wrong password",
+	"incorrect password",
+	"username or password",
+	"account is suspended",
+	"account suspended",
+}
+
 // classify maps an upstream response onto a Kind. The message sniffing is a
-// deliberate concession: upstream reuses HTTP 403 for captcha, quota and
-// bandwidth conditions that callers must treat very differently (§11).
+// deliberate concession: upstream reuses HTTP 401 and 403 for conditions that
+// callers must treat very differently (§4.5, §11).
 func classify(status int, oauthErr string, upstreamCode int, msg string) Kind {
 	lower := strings.ToLower(msg)
-	switch {
-	case oauthErr == "invalid_token", oauthErr == "expired_token":
+	switch oauthErr {
+	case "invalid_token", "expired_token":
 		return KindTokenExpired
-	case oauthErr == "invalid_grant":
+	case "invalid_grant":
+		// The refresh token was rejected. Transient by design: the caller
+		// falls back to a silent password login.
 		return KindRefreshTokenFailed
+	case "invalid_client", "unauthorized_client", "access_denied":
+		return KindReauthRequired
 	}
 	switch {
 	case strings.Contains(lower, "captcha"):
 		return KindCaptchaRequired
+	case containsAny(lower, badCredentialPhrases):
+		return KindReauthRequired
 	case strings.Contains(lower, "bandwidth"):
 		return KindBandwidthExceeded
 	case strings.Contains(lower, "quota"), strings.Contains(lower, "storage limit"),
@@ -257,9 +301,17 @@ func classify(status int, oauthErr string, upstreamCode int, msg string) Kind {
 	}
 	switch code {
 	case http.StatusUnauthorized:
-		return KindUnauthorized
+		// A 401 that is not about the credentials themselves means the
+		// session or token on the wire is stale, which the SDK renews
+		// silently. Session mode reaches this branch when upstream forgets a
+		// session ("session does not exist").
+		return KindTokenExpired
 	case http.StatusForbidden:
-		return KindUnauthorized
+		// Upstream uses 403 for "you may not touch this object" as well as for
+		// the captcha and quota cases handled above. What is left is a plain
+		// upstream refusal, not a credential problem (§4.5: unauthorized is
+		// reserved for the Bridge API's own auth).
+		return KindUpstreamError
 	case http.StatusNotFound:
 		return KindNotFound
 	case http.StatusConflict:
@@ -270,6 +322,15 @@ func classify(status int, oauthErr string, upstreamCode int, msg string) Kind {
 		return KindQuotaExceeded
 	}
 	return KindUpstreamError
+}
+
+func containsAny(haystack string, needles []string) bool {
+	for _, n := range needles {
+		if strings.Contains(haystack, n) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseRetryAfter(h http.Header) time.Duration {
