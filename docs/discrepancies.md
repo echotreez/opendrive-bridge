@@ -33,6 +33,10 @@ per-file SHA256 checksums.
 | [D19](#d19) | confirmed, implemented | the same field is a string in one response and a number in another |
 | [D20](#d20) | implemented | `users/info.json` returns a `PrivateKey` |
 | [D21](#d21) | informational | six modules beyond the v1.0 scope are live |
+| [D22](#d22) | confirmed, implemented | `idbypath` answers with `FolderId`, everything else with `FolderID` |
+| [D23](#d23) | confirmed, implemented | `itembyname` reports "not found" by omitting the arrays |
+| [D24](#d24) | confirmed, implemented | folder and file `move_copy` disagree on the type of `move` |
+| [D25](#d25) | informational | the sandbox account is read-only |
 
 ---
 
@@ -341,3 +345,72 @@ The authenticated listing exposes, with operation counts:
 
 Informational: the roadmap in §12.1 lines up with what exists, and `admin`
 (40 operations) is a module the whitepaper never mentions at all.
+
+## D22 — `folder/idbypath.json` answers with `FolderId`, not `FolderID` {#d22}
+
+Observed against the sandbox on 2026-07-26:
+
+```
+POST /v1/folder/idbypath.json  {"session_id":"…","path":"Developing"}
+→ {"FolderId":"MzNfNDg3Njg1N19WM3pvSg"}
+```
+
+Every other folder endpoint spells the field `FolderID`. The Swagger
+declaration documents neither, because the response class is `void` throughout
+the module.
+
+**Resolution:** the decoder accepts both spellings and prefers the observed one,
+so a future correction upstream will not break the SDK
+(`TestFolderIDByPathAcceptsBothSpellings`).
+
+## D23 — `folder/itembyname.json` reports a miss by omitting the arrays {#d23}
+
+A hit returns `{"DirUpdateTime":…,"Folders":[…]}`; a miss returns
+`{"DirUpdateTime":…}` — no error, no empty array, HTTP 200. Reading the result
+naively yields "found nothing" and "the folder is empty" as the same value.
+
+**Resolution:** the SDK maps an empty result to `KindNotFound`, so callers can
+use `errors.Is(err, ErrNotFound)` as they would anywhere else.
+
+## D24 — the two `move_copy` endpoints disagree on the type of `move` {#d24}
+
+| endpoint | `move` | `overwrite_if_exists` / `copy_recursive` |
+|---|---|---|
+| `file/move_copy.json` | **string** `"true"`/`"false"`, required | `overwrite_if_exists`, string, required |
+| `folder/move_copy.json` | **boolean**, optional | `copy_recursive`, boolean, optional |
+
+Whitepaper §2.6 #13 documents the string form as though it were universal. It is
+not: the folder endpoint documents real JSON booleans.
+
+**Resolution:** the folder binding sends real booleans and the file binding will
+send `StringBool`; both are asserted against the archived spec, so if upstream
+ever aligns the two, the contract test says so.
+
+## D25 — the sandbox account is read-only {#d25}
+
+Every mutating folder call with the current test account is refused:
+
+```
+POST /v1/folder.json          → 403 "Your user access enables you only to view
+                                     this folder, please contact your
+                                     administrator…"
+GET  /v1/folder/trashlist.json → 403 "Permission denied"
+GET  /v1/folder/exportcsv.json → 403 "Export failed. Permission denied for
+                                     restricted user"
+```
+
+`users/info.json` shows why: the login is an *account user*
+(`AccessUserID` differs from `UserID`) with view-only rights on the one folder
+it can see.
+
+**Consequence:** the P2 exit criterion "sandbox smoke test passes" can only be
+met for read operations. Every write binding is covered by unit tests against a
+mock upstream and by contract tests against the archived spec, but nothing has
+executed a real create, rename, move, trash or delete. An account with write
+rights is needed before the P3 transfer pipeline, which cannot be validated any
+other way.
+
+**Note for classification:** these 403s are plain upstream refusals, not
+credential problems. They map to `upstream_error`, which is what keeps the
+silent re-login state machine from mistaking a permission problem for a changed
+password (v1.1 §4.5).

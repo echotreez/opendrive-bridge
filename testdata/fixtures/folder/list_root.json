@@ -1,0 +1,53 @@
+{
+  "DirUpdateTime": 1785053779,
+  "Name": "",
+  "Encrypted": 0,
+  "TotalFiles": 0,
+  "TotalFolders": 0,
+  "Size": 0,
+  "UserAccessMode": 0,
+  "ParentFolderID": "MzNfMF8",
+  "DirectFolderLink": "https://od.lk/fl/MzNfMF8",
+  "ResponseType": 1,
+  "Folders": [
+    {
+      "FolderID": "RXhhbXBsZUZvbGRlcklE",
+      "Name": "Developing",
+      "DateCreated": 1785027933,
+      "DirUpdateTime": 1785053779,
+      "Access": 2,
+      "DateModified": 1785027933,
+      "Shared": "False",
+      "Size": 0,
+      "Link": "https://od.lk/fl/RXhhbXBsZUZvbGRlcklE",
+      "Encrypted": "0"
+    }
+  ],
+  "Files": [
+    {
+      "FileId": "RXhhbXBsZUZpbGVJRA",
+      "Name": "report.xlsx",
+      "GroupID": 0,
+      "Extension": "xlsx",
+      "Size": "20480",
+      "Views": "0",
+      "Version": "",
+      "Downloads": "0",
+      "DateModified": "1785027940",
+      "Access": "0",
+      "Link": "https://od.lk/f/RXhhbXBsZUZpbGVJRA",
+      "DownloadLink": "https://od.lk/d/RXhhbXBsZUZpbGVJRA",
+      "StreamingLink": "",
+      "TempStreamingLink": "",
+      "DirUpdateTime": 1785053779,
+      "Encrypted": "0",
+      "Password": "",
+      "EditOnline": 0,
+      "FileHash": "9a0364b9e99bb480dd25e1f0284c8555",
+      "Description": "",
+      "ThumbLink": "",
+      "UPurl": "",
+      "MimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+  ]
+}
