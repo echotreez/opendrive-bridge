@@ -142,6 +142,7 @@ type Client struct {
 	ua        string
 	log       *slog.Logger
 	auth      Authenticator
+	pathCache PathCache
 	retry     RetryPolicy
 	sleep     func(context.Context, time.Duration) error
 	newReqID  func() string
