@@ -17,6 +17,18 @@ jobs:
       - run: go build ./...
       - run: go test -race -coverprofile=coverage.out ./...
 
+  # Whitepaper §6.3: pkg/opendrive >= 85%, internal/* >= 75%. CI blocks a PR
+  # that drops below the gate.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.22' }
+      - run: go test -coverprofile=coverage.out ./...
+      - name: Enforce coverage gates
+        run: ./scripts/check-coverage.sh coverage.out
+
   lint:
     runs-on: ubuntu-latest
     steps:
