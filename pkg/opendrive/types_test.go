@@ -159,13 +159,13 @@ func TestUnixTime(t *testing.T) {
 	if err := json.Unmarshal([]byte(`1753444800`), &ts); err != nil {
 		t.Fatal(err)
 	}
-	if !ts.Time.Equal(time.Unix(1753444800, 0).UTC()) {
+	if !ts.Equal(time.Unix(1753444800, 0).UTC()) {
 		t.Fatalf("integer timestamp = %v", ts.Time)
 	}
 	if err := json.Unmarshal([]byte(`"1753444800"`), &ts); err != nil {
 		t.Fatal(err)
 	}
-	if ts.Time.Unix() != 1753444800 {
+	if ts.Unix() != 1753444800 {
 		t.Fatalf("string timestamp = %v", ts.Time)
 	}
 	for _, empty := range []string{`0`, `""`, `null`} {

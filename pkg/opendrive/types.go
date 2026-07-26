@@ -231,7 +231,7 @@ func (t UnixTime) MarshalJSON() ([]byte, error) {
 	if t.Time.IsZero() {
 		return []byte("0"), nil
 	}
-	return []byte(strconv.FormatInt(t.Time.Unix(), 10)), nil
+	return []byte(strconv.FormatInt(t.Unix(), 10)), nil
 }
 
 // IsZero reports whether the timestamp is unset.
