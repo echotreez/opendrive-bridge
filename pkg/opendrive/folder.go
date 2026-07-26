@@ -660,9 +660,12 @@ func (s *FolderService) Rename(ctx context.Context, folderID, newName string, sh
 
 // MoveCopyParams describes a folder move or copy (POST /folder/move_copy.json).
 //
-// Note the type mismatch with the file module: the live spec documents move and
-// copy_recursive here as real JSON booleans, while file/move_copy.json requires
-// the strings "true"/"false" (§2.6 #13, docs/discrepancies.md D24).
+// The archived spec documents move and copy_recursive as real JSON booleans,
+// but the live endpoint rejects the boolean false with "Invalid value specified
+// for `move`. Expecting boolean value" while accepting the strings "true" and
+// "false" — so a copy is impossible in the documented encoding. Both flags are
+// therefore sent as StringBool, matching file/move_copy.json after all
+// (§2.6 #13, docs/discrepancies.md D24, D26).
 type MoveCopyParams struct {
 	FolderID    string
 	DstFolderID string
@@ -689,8 +692,8 @@ func (s *FolderService) MoveCopy(ctx context.Context, p MoveCopyParams) (*Folder
 	body := map[string]any{
 		"folder_id":      p.FolderID,
 		"dst_folder_id":  p.DstFolderID,
-		"move":           p.Move,
-		"copy_recursive": p.CopyRecursive,
+		"move":           StringBool(p.Move),
+		"copy_recursive": StringBool(p.CopyRecursive),
 	}
 	if p.NewName != "" {
 		body["new_folder_name"] = p.NewName

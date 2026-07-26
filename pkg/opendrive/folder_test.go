@@ -462,9 +462,10 @@ func TestFolderRename(t *testing.T) {
 	}
 }
 
-// docs/discrepancies.md D24: folder/move_copy documents move as a real JSON
-// boolean, while file/move_copy demands the strings "true"/"false".
-func TestFolderMoveCopySendsRealBooleans(t *testing.T) {
+// docs/discrepancies.md D26: the archived spec calls move a real JSON boolean,
+// but the live endpoint rejects the boolean false and accepts the strings, so a
+// copy is only expressible as "false". Both flags go out as StringBool.
+func TestFolderMoveCopySendsStringBooleans(t *testing.T) {
 	m, folders := newFolderFixture(t)
 	m.push(200, `{"FolderID":"FID","Name":"n","Shared":"False"}`)
 
@@ -474,8 +475,19 @@ func TestFolderMoveCopySendsRealBooleans(t *testing.T) {
 		t.Fatalf("MoveCopy: %v", err)
 	}
 	body := m.lastCall().Body
-	if body["move"] != true || body["copy_recursive"] != true {
-		t.Fatalf("move/copy_recursive = %v/%v, want JSON booleans", body["move"], body["copy_recursive"])
+	if body["move"] != "true" || body["copy_recursive"] != "true" {
+		t.Fatalf("move/copy_recursive = %v/%v, want the strings", body["move"], body["copy_recursive"])
+	}
+
+	// A copy must serialise as "false", the form the live endpoint accepts.
+	m.push(200, `{"FolderID":"FID","Name":"n","Shared":"False"}`)
+	if _, err := folders.MoveCopy(context.Background(), MoveCopyParams{
+		FolderID: "SRC", DstFolderID: "DST", Move: false,
+	}); err != nil {
+		t.Fatalf("MoveCopy copy: %v", err)
+	}
+	if got := m.lastCall().Body["move"]; got != "false" {
+		t.Fatalf("copy sent move=%v, want the string \"false\" (D26)", got)
 	}
 	if body["new_folder_name"] != "copy" {
 		t.Fatalf("body = %v", body)

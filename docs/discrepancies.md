@@ -36,7 +36,9 @@ per-file SHA256 checksums.
 | [D22](#d22) | confirmed, implemented | `idbypath` answers with `FolderId`, everything else with `FolderID` |
 | [D23](#d23) | confirmed, implemented | `itembyname` reports "not found" by omitting the arrays |
 | [D24](#d24) | confirmed, implemented | folder and file `move_copy` disagree on the type of `move` |
-| [D25](#d25) | informational | the sandbox account is read-only |
+| [D25](#d25) | resolved | the sandbox account is read-only |
+| [D26](#d26) | **spec is wrong**, implemented | `folder/move_copy` rejects the boolean `false`, so a copy needs the string |
+| [D27](#d27) | confirmed, implemented | `folder/info.json` still answers for a permanently deleted folder |
 
 ---
 
@@ -414,3 +416,46 @@ other way.
 credential problems. They map to `upstream_error`, which is what keeps the
 silent re-login state machine from mistaking a permission problem for a changed
 password (v1.1 §4.5).
+
+## D26 — `folder/move_copy.json` rejects the documented boolean `false` {#d26}
+
+The archived spec (and D24) describe `move` on the folder endpoint as a real
+JSON boolean, unlike the file endpoint's `"true"`/`"false"` strings. The live
+endpoint disagrees, and only for one of the two values:
+
+| `move` sent | result |
+|---|---|
+| `false` (JSON boolean) | **400** — ``Invalid value specified for `move`. Expecting boolean value`` |
+| `true` (JSON boolean) | 200, moves |
+| `"false"` (string) | 200, copies |
+| `"true"` (string) | 200, moves |
+| `0` (integer) | 200, copies |
+| `"0"` (string) | 400 |
+
+So the documented encoding cannot express a copy at all: the boolean `false` is
+refused with a message that asks for the very type it was given. Whitepaper
+§2.6 #13, which called the string form universal, turns out to be right, and the
+Swagger description is wrong.
+
+**Resolution:** the folder binding sends `move` and `copy_recursive` as
+`StringBool`, matching the file module. Caught by
+`TestSandboxWriteCapabilities` against the live API — the mock-based unit test
+had happily asserted the spec's (wrong) boolean form, which is exactly the class
+of bug integration tests exist for.
+
+Covered by `TestFolderMoveCopySendsStringBooleans`,
+`TestSandboxWriteLifecycle`.
+
+## D27 — `folder/info.json` still answers for a permanently deleted folder {#d27}
+
+After `folder/trash.json` followed by `folder/remove.json` (a permanent
+delete), `folder/info.json/{session}/{folder_id}` keeps returning the folder's
+full metadata — immediately, and still five seconds later, so this is not
+eventual consistency. The parent's `folder/list.json` drops the folder at once,
+which is the correct view.
+
+**Consequence:** `info.json` is not a liveness check. Anything deciding whether
+a folder exists — `/v1/stat`, the path cache, upload pre-flight in P3 — must use
+the parent listing or `idbypath`, never a successful `info` call.
+
+Covered by `TestSandboxWriteLifecycle`.
