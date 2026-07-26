@@ -144,8 +144,13 @@ func TestFileStoreEncryptsAndRestrictsPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("file mode = %04o, want 0600", perm)
+	// POSIX permission bits are meaningless on Windows (NTFS uses ACLs; Go
+	// reports synthetic modes there). Tightening the file via ACLs is part of
+	// the owed Windows keystore work — see CLAUDE.md item 2.
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("file mode = %04o, want 0600", perm)
+		}
 	}
 }
 
