@@ -654,13 +654,15 @@ func TestFolderSendByEmail(t *testing.T) {
 func TestFolderExpiringLinks(t *testing.T) {
 	ctx := context.Background()
 	m, folders := newFolderFixture(t)
-	m.push(200, `{"Link":"https://od.lk/fl/x","ExpirationDate":1785999999,"Counter":10}`)
+	m.push(200, fixture(t, "expiringlink.json"))
 
 	got, err := folders.CreateExpiringLink(ctx, "FID", "2026-08-01", 10, true)
 	if err != nil {
 		t.Fatalf("CreateExpiringLink: %v", err)
 	}
-	if got.Link == "" || got.Counter.Int() != 10 || got.ExpiresAt.Unix() != 1785999999 {
+	// Creating a folder link yields only Link; the counter and the date come
+	// back from the listing endpoint (docs/discrepancies.md D31).
+	if got.Link == "" || got.URL() != got.Link {
 		t.Fatalf("link = %+v", got)
 	}
 	if p := m.lastCall().Path; p != "/api/v1/folder/expiringlink.json/SID/2026-08-01/10/FID/true" {
@@ -671,11 +673,21 @@ func TestFolderExpiringLinks(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 
+	// D31: the plural endpoint answers with a single object, not an array.
 	m2, f2 := newFolderFixture(t)
-	m2.push(200, `[{"Link":"https://od.lk/fl/x","Counter":"3"}]`)
-	links, err := f2.ExpiringLinks(ctx, "FID")
-	if err != nil || len(links) != 1 || links[0].Counter.Int() != 3 {
-		t.Fatalf("links = %+v, %v", links, err)
+	m2.push(200, fixture(t, "folderexpiringlinks.json"))
+	link, err := f2.ExpiringLinks(ctx, "FID")
+	if err != nil {
+		t.Fatalf("ExpiringLinks: %v", err)
+	}
+	if link.CounterMax.Int() != 5 || link.Counter.Int() != 0 || link.CounterEnable.Bool() {
+		t.Fatalf("counters = %+v", link)
+	}
+	if link.ExpiringDate != "2026-12-31" {
+		t.Fatalf("ExpiringDate = %q; upstream sends a calendar date, not a timestamp", link.ExpiringDate)
+	}
+	if _, err := f2.ExpiringLinks(ctx, ""); ErrorKind(err) != KindInvalidRequest {
+		t.Fatalf("err = %v", err)
 	}
 }
 
