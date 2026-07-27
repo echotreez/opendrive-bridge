@@ -39,6 +39,11 @@ per-file SHA256 checksums.
 | [D25](#d25) | resolved | the sandbox account is read-only |
 | [D26](#d26) | **spec is wrong**, implemented | `folder/move_copy` rejects the boolean `false`, so a copy needs the string |
 | [D27](#d27) | confirmed, implemented | `folder/info.json` still answers for a permanently deleted folder |
+| [D28](#d28) | **live API is stricter**, implemented | `file.json` rejects an empty `access_folder_id` |
+| [D29](#d29) | confirmed, implemented | `DELETE /file.json` deletes a file that was never trashed |
+| [D30](#d30) | **spec is wrong**, implemented | `file/filefullpath.json` answers in `DownloadLink`, with backslashes |
+| [D31](#d31) | **spec is wrong**, implemented | the expiring-link endpoints return one object, not an array |
+| [D32](#d32) | open, blocks password-protected downloads | `file/verifypassword.json` answers false for a correct password |
 
 ---
 
@@ -459,3 +464,103 @@ a folder exists — `/v1/stat`, the path cache, upload pre-flight in P3 — must
 the parent listing or `idbypath`, never a successful `info` call.
 
 Covered by `TestSandboxWriteLifecycle`.
+
+## D28 — `POST /file.json` rejects an empty `access_folder_id` {#d28}
+
+The spec marks `access_folder_id` required but says nothing about its value, and
+the obvious reading — "required, so send it, empty when there is no access
+folder" — fails every time:
+
+| `access_folder_id` | result |
+|---|---|
+| omitted | 400 ``  `access_folder_id` is required. `` |
+| `""` | 400 ``  `access_folder_id` is required. `` |
+| `"0"` | **200**, file created |
+| the granted base folder id | 200, file created |
+| the target folder's own id | 403 "Your user access enables you only to view this folder" |
+
+So an empty string does not satisfy a required string, and the value that works
+is the root marker `"0"` — the same convention as `folder_sub_parent` (§2.6 #9).
+
+**Resolution:** `CreateEmpty` defaults `access_folder_id` to `RootFolderID`.
+Caught by the live suite; the mock test had been asserting the empty string and
+passing. Covered by `TestSandboxFileAccessFolderIDIsRequired`.
+
+Also recorded while probing: `file_type` is an extension, not a MIME type.
+`"txt"` produces a file called `Text.txt`, and a second call in the same folder
+produces `Text (1).txt`.
+
+## D29 — `DELETE /file.json` does not require the file to be trashed {#d29}
+
+The PDF presents `DELETE /file.json/{session}/{file_id}` as the way to remove a
+file *from the trash*. The sandbox deletes a live file just as readily, with no
+trash step and no warning, returning `{"DirUpdateTime":…}` either way.
+
+**Consequence:** the trash is not a safety net for this call. The Bridge's
+`/v1/rm` keeps `permanent: false` as its default (§4.2) and only reaches this
+endpoint when the caller asks for a permanent delete.
+
+Covered by `TestSandboxFileDeleteWithoutTrash`.
+
+## D30 — `file/filefullpath.json` answers in `DownloadLink`, with backslashes {#d30}
+
+```
+GET /v1/file/filefullpath.json/{session}/{file_id}
+→ {"DownloadLink":"Application\\odb-f3-1785122522\\Text.txt"}
+```
+
+Two surprises in one small body: the field is called `DownloadLink` even though
+it holds a path rather than a URL, and the separator is a backslash, while the
+folder module's `folder/path.json` returns forward slashes. A binding that reads
+`FullPath` — the name the field has in the folder module — silently returns the
+empty string.
+
+**Resolution:** the binding reads `DownloadLink`, still accepts `FullPath` in
+case upstream corrects it, and normalises the separators. Covered by
+`TestFileFullPathNormalisesTheRecordedShape` and `TestSandboxFileLifecycle`.
+
+## D31 — the expiring-link endpoints return one object, not an array {#d31}
+
+`folder/folderexpiringlinks.json` and `file/fileexpiringlinks.json` are plural
+and the PDF describes them as lists. Both return a single JSON object, so a
+binding that decodes into a slice fails with "cannot unmarshal object into Go
+value of type []…".
+
+The two modules also disagree on the field names:
+
+| | create | list |
+|---|---|---|
+| folder | `{"Link":…}` | `{"Link":…,"CounterMax":"5","CounterEnable":"0","ExpiringDate":"2026-12-31","Counter":"0"}` |
+| file | `{"DownloadLink":…,"StreamingLink":…}` | the same plus the counter fields |
+
+`ExpiringDate` is a calendar date string, not the Unix timestamp the shared
+model originally assumed, and the counters arrive quoted.
+
+**Resolution:** one `ExpiringLink` type covering both shapes with a `URL()`
+accessor, and both `ExpiringLinks` methods return a single value. This was a
+latent bug in the already-merged folder module, not only in the new file one.
+Covered by `TestFolderExpiringLinks`, `TestFileExpiringLinksAndLocalValidation`
+and `TestSandboxFileExpiringLink`.
+
+## D32 — `file/verifypassword.json` answers false for a correct password {#d32}
+
+After setting a password through `file/filesettings.json`, verifying it returns
+the same body as verifying a wrong one:
+
+```
+POST /v1/file/verifypassword.json {"file_id":…,"password":"<correct>"} → {"result":false}
+POST /v1/file/verifypassword.json {"file_id":…,"password":"wrong"}     → {"result":false}
+```
+
+No `TempKey` is returned in either case, so the documented flow — verify a
+password, receive a temporary key, pass it to `download/file.json` or
+`file/thumb.json` — cannot be completed as described.
+
+**Status:** open, and it blocks password-protected downloads in P3. The binding
+reports exactly what upstream sends and its doc comment warns that a false
+result is not evidence of a wrong password. Possible explanations still to rule
+out: the password may need to be set through a different endpoint, or the
+verification may only work on the public share route rather than the API one.
+
+Covered by `TestSandboxFileVerifyPassword`, which logs loudly if upstream ever
+starts distinguishing the two.

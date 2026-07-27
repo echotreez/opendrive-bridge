@@ -80,6 +80,13 @@ type Request struct {
 	Retryable *bool
 	// Accept overrides the Accept header.
 	Accept string
+	// RawResponse returns the successful response body as []byte instead of
+	// decoding it as JSON. It is for endpoints such as file/thumb.json that
+	// return image bytes, while retaining the normal authentication, retry and
+	// upstream-error handling path.
+	//
+	// When set, out must be a *[]byte.
+	RawResponse bool
 }
 
 // Retryable returns a pointer to v, for use with Request.Retryable.
@@ -390,6 +397,18 @@ func (c *Client) attempt(ctx context.Context, r Request, out any) (Credentials, 
 	// Some endpoints answer 200 with an error envelope in the body.
 	if apiErr := errorInBody(raw, op, safeURL); apiErr != nil {
 		return creds, apiErr
+	}
+
+	if r.RawResponse {
+		if out == nil {
+			return creds, nil
+		}
+		bytesOut, ok := out.(*[]byte)
+		if !ok {
+			return creds, invalidRequest("raw response for %s needs a *[]byte output", op)
+		}
+		*bytesOut = append((*bytesOut)[:0], raw...)
+		return creds, nil
 	}
 
 	if out == nil {

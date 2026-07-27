@@ -171,11 +171,32 @@ type TrashListing struct {
 	Count FlexInt `json:"Count"`
 }
 
-// ExpiringLink is the response of folder/expiringlink.json.
+// ExpiringLink is the response of the expiring-link endpoints of both the
+// folder and the file module.
+//
+// The shape was recorded from the sandbox, not taken from the spec, which
+// declares the response class as void (docs/discrepancies.md D31). A folder
+// answers with Link; a file answers with DownloadLink and StreamingLink and no
+// Link at all. Use URL to get whichever one is present.
+//
+// ExpiringDate is a calendar date string such as "2026-12-31", not a Unix
+// timestamp, and Counter/CounterMax arrive quoted.
 type ExpiringLink struct {
-	Link      string   `json:"Link"`
-	ExpiresAt UnixTime `json:"ExpirationDate"`
-	Counter   FlexInt  `json:"Counter"`
+	Link          string   `json:"Link"`
+	DownloadLink  string   `json:"DownloadLink"`
+	StreamingLink string   `json:"StreamingLink"`
+	ExpiringDate  string   `json:"ExpiringDate"`
+	Counter       FlexInt  `json:"Counter"`
+	CounterMax    FlexInt  `json:"CounterMax"`
+	CounterEnable FlexBool `json:"CounterEnable"`
+}
+
+// URL returns the shareable link, whichever field upstream used.
+func (l ExpiringLink) URL() string {
+	if l.Link != "" {
+		return l.Link
+	}
+	return l.DownloadLink
 }
 
 // FolderAccess mirrors upstream's folder_is_public tri-state (§2.3).
@@ -1009,11 +1030,17 @@ func (s *FolderService) CreateExpiringLink(ctx context.Context, folderID, date s
 	return &out, nil
 }
 
-// ExpiringLinks lists a folder's expiring links.
+// ExpiringLinks returns the expiring link configured on a folder.
 //
-// GET /folder/folderexpiringlinks.json/{session_id}/{folder_id}.
-func (s *FolderService) ExpiringLinks(ctx context.Context, folderID string) ([]ExpiringLink, error) {
-	var out []ExpiringLink
+// GET /folder/folderexpiringlinks.json/{session_id}/{folder_id}. Despite the
+// plural name upstream answers with a single object, not an array
+// (docs/discrepancies.md D31). A folder with no expiring link answers with an
+// empty object, which decodes to a zero ExpiringLink.
+func (s *FolderService) ExpiringLinks(ctx context.Context, folderID string) (*ExpiringLink, error) {
+	if folderID == "" {
+		return nil, invalidRequest("folder expiring links needs a folder id")
+	}
+	var out ExpiringLink
 	if err := s.c.Do(ctx, Request{
 		Method:           http.MethodGet,
 		Path:             EndpointFolderExpiringLinks,
@@ -1022,7 +1049,7 @@ func (s *FolderService) ExpiringLinks(ctx context.Context, folderID string) ([]E
 	}, &out); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return &out, nil
 }
 
 // ExportCSV returns a CSV listing of a folder.

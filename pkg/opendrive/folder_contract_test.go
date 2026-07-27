@@ -297,7 +297,7 @@ func TestFolderModuleMatchesTheArchivedSpec(t *testing.T) {
 			_, err := s.CreateExpiringLink(ctx, "FID", "2026-08-01", 3, true)
 			return err
 		}},
-		{"folderexpiringlinks", `[{"Link":"x"}]`, func(s *FolderService) error {
+		{"folderexpiringlinks", `{"Link":"x"}`, func(s *FolderService) error {
 			_, err := s.ExpiringLinks(ctx, "FID")
 			return err
 		}},
