@@ -3,10 +3,11 @@
 // (whitepaper §9.2, the four credential kinds of the CredentialStore).
 //
 // Two real backends are available. The default is the operating system's own
-// credential vault — macOS Keychain, Linux Secret Service — which unlocks with
-// the user's login session and stores its contents encrypted on disk. Where no
-// vault exists (Docker, headless servers) an AES-256-GCM encrypted file is used
-// instead, and its key must be supplied explicitly.
+// credential vault — macOS Keychain, Linux Secret Service, Windows Credential
+// Manager — which unlocks with the user's login session and stores its contents
+// encrypted on disk. Where no vault exists (Docker, headless servers) an
+// AES-256-GCM encrypted file is used instead, and its key must be supplied
+// explicitly.
 //
 // Open refuses to hand back a store that forgets everything on restart unless
 // the caller asks for that in so many words: a bridge that looks configured and
