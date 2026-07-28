@@ -80,12 +80,24 @@ func (s *keyringStore) Available(ctx context.Context) error {
 			return fmt.Errorf("keystore: the Secret Service is not answering: %w", err)
 		}
 		return nil
+	case "windows":
+		// The Credential Manager has no usable command line tool — cmdkey
+		// cannot read a secret back — so this one goes through the Win32
+		// credential API directly (credman_windows.go).
+		if err := credManAvailable(); err != nil {
+			return fmt.Errorf("keystore: the Windows Credential Manager is not usable: %w", err)
+		}
+		return nil
 	default:
-		// Windows Credential Manager has no scriptable read-back, so the
-		// encrypted file backend covers it until a DPAPI binding lands
-		// (docs/discrepancies.md, §9.2 follow-up).
 		return fmt.Errorf("keystore: no OS keyring integration for %s", s.platform)
 	}
+}
+
+// credManTarget is the Credential Manager target name for this store. The
+// service and account are folded into one string because the Win32 API keys
+// generic credentials by target name alone.
+func (s *keyringStore) credManTarget() string {
+	return s.service + ":" + s.account
 }
 
 // Load implements opendrive.CredentialStore.
@@ -104,6 +116,8 @@ func (s *keyringStore) Load(ctx context.Context) (*opendrive.StoredCredentials, 
 	case "linux":
 		out, err = s.run(ctx, []string{"secret-tool", "lookup",
 			"service", s.service, "account", s.account}, "")
+	case "windows":
+		out, err = credManLoad(s.credManTarget())
 	default:
 		return nil, fmt.Errorf("keystore: no OS keyring integration for %s", s.platform)
 	}
@@ -154,6 +168,13 @@ func (s *keyringStore) Save(ctx context.Context, cred *opendrive.StoredCredentia
 			return fmt.Errorf("keystore: cannot write to the Secret Service: %w", err)
 		}
 		return nil
+	case "windows":
+		// The payload never becomes a command argument here either: it is
+		// passed as a byte blob through the credential API (§9.2).
+		if err := credManSave(s.credManTarget(), payload); err != nil {
+			return fmt.Errorf("keystore: cannot write to the Credential Manager: %w", err)
+		}
+		return nil
 	default:
 		return fmt.Errorf("keystore: no OS keyring integration for %s", s.platform)
 	}
@@ -172,6 +193,8 @@ func (s *keyringStore) Delete(ctx context.Context) error {
 	case "linux":
 		_, err = s.run(ctx, []string{"secret-tool", "clear",
 			"service", s.service, "account", s.account}, "")
+	case "windows":
+		err = credManDelete(s.credManTarget())
 	default:
 		return fmt.Errorf("keystore: no OS keyring integration for %s", s.platform)
 	}

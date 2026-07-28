@@ -140,14 +140,15 @@ func TestFileStoreEncryptsAndRestrictsPermissions(t *testing.T) {
 		t.Fatalf("missing format header: %q", blob[:min(8, len(blob))])
 	}
 
-	info, err := os.Stat(s.path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// POSIX permission bits are meaningless on Windows (NTFS uses ACLs; Go
-	// reports synthetic modes there). Tightening the file via ACLs is part of
-	// the owed Windows keystore work — see CLAUDE.md item 2.
+	// Ownership is asserted per platform: the POSIX mode bits below, and the
+	// NTFS access control list in perm_windows_test.go. Windows ignores the
+	// mode entirely — Go reports a synthetic one there — so a single shared
+	// assertion would be checking nothing on a third of the build matrix.
 	if runtime.GOOS != "windows" {
+		info, err := os.Stat(s.path)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if perm := info.Mode().Perm(); perm != 0o600 {
 			t.Fatalf("file mode = %04o, want 0600", perm)
 		}

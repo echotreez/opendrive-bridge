@@ -219,6 +219,11 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("keystore: cannot replace the credential file: %w", err)
 	}
+	// The mode set on the temporary file is meaningless on Windows, so the
+	// access control list is tightened here, after the file is in place (§9.2).
+	if err := restrictToOwner(path); err != nil {
+		return err
+	}
 	// Flush the rename itself, so a power cut cannot lose the new file.
 	if d, err := os.Open(dir); err == nil {
 		_ = d.Sync()
