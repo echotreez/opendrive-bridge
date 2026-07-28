@@ -1,0 +1,14 @@
+[
+  {
+    "UserID": "1000002",
+    "SharingID": "U2hhcmluZ0lE",
+    "UserName": "colleague@example.com",
+    "FirstName": "Sam",
+    "LastName": "Colleague",
+    "Email": "colleague@example.com",
+    "ShareMode": "1",
+    "DateShared": "1785027933",
+    "FolderID": "RXhhbXBsZUZvbGRlcklE",
+    "FolderName": "Shared reports"
+  }
+]

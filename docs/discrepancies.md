@@ -43,7 +43,9 @@ per-file SHA256 checksums.
 | [D29](#d29) | confirmed, implemented | `DELETE /file.json` deletes a file that was never trashed |
 | [D30](#d30) | **spec is wrong**, implemented | `file/filefullpath.json` answers in `DownloadLink`, with backslashes |
 | [D31](#d31) | **spec is wrong**, implemented | the expiring-link endpoints return one object, not an array |
-| [D32](#d32) | open, blocks password-protected downloads | `file/verifypassword.json` answers false for a correct password |
+| [D32](#d32) | **resolved**, workaround for P3 | `file/verifypassword.json` is inert; the password gates the public route only |
+| [D33](#d33) | blocked on an owner account | the whole sharing module is closed to an account user |
+| [D34](#d34) | new endpoint, implemented | `users/userlogscursor.json` is keyset paging the PDF omits |
 
 ---
 
@@ -556,11 +558,107 @@ No `TempKey` is returned in either case, so the documented flow — verify a
 password, receive a temporary key, pass it to `download/file.json` or
 `file/thumb.json` — cannot be completed as described.
 
-**Status:** open, and it blocks password-protected downloads in P3. The binding
-reports exactly what upstream sends and its doc comment warns that a false
-result is not evidence of a wrong password. Possible explanations still to rule
-out: the password may need to be set through a different endpoint, or the
-verification may only work on the public share route rather than the API one.
+**Resolved 2026-07-27.** The two explanations left open above were tested and
+both ruled out, and the real behaviour turns out not to block P3 at all.
+
+What the password actually does — measured on a file with a password set through
+`filesettings.json`, made public through `file/access.json`:
+
+| request | result |
+|---|---|
+| `GET /download/file.json/{id}?session_id=…&test=1` | `{"result":true,"dl_stream_status":true}` — downloadable |
+| `GET /download/file.json/{id}?test=1` (no session) | **403**, refused |
+| `file/info.json` for the owner | `"Password":"*"` — set, and masked |
+| `verifypassword` with the correct password, with or without a session, on a public or private file, with the password set before or together with `file_ispublic` | `{"result":false}` every time |
+
+So the password gates the **anonymous public route only**. An authenticated
+owner is never asked for it: the session already proves the right to the bytes.
+
+The refusal wording depends on which gate upstream reaches first — "File
+requires password" when the file is otherwise downloadable, "Download
+permissions are not enabled for this file" when public download is off — so
+callers must key off the status, not the message.
+`verifypassword.json` appears to be inert on the API route — it never returns
+`true` and never returns a `TempKey`, so the documented "verify, receive a
+temporary key, pass it to download" flow cannot be performed and, for one's own
+files, does not need to be.
+
+**Consequence for P3:** none. The transfer pipeline downloads as the
+authenticated owner, where the password is not a gate. `temp_key` and
+`temp_auth` stay out of the download binding until there is a case that needs
+them, which would be downloading *somebody else's* password-protected share —
+outside v1.0 scope (§1.4), and unreachable with the current account anyway
+(D33).
+
+**If that case ever arrives:** the likely route is the public share URL
+(`od.lk/d/…`) rather than the API, since that is where the password gate lives.
+That would be a browser-style flow, not an API one, and belongs in a later
+version with its own investigation.
 
 Covered by `TestSandboxFileVerifyPassword`, which logs loudly if upstream ever
-starts distinguishing the two.
+starts distinguishing the two, and by `TestSandboxPasswordGatesThePublicRoute`,
+which asserts the owner/anonymous split that makes this a non-issue.
+
+## D33 — the whole sharing module is closed to an account user {#d33}
+
+Every operation in the sharing module — the three listings included — answers
+the same way for the test account:
+
+```
+GET  /v1/sharing/listsharedusers.json/{session}          → 403 "Account users cannot list shared users"
+GET  /v1/sharing/listusers.json/{session}/{folder_id}    → 403 (same message)
+GET  /v1/sharing/listsharedfolders.json/{session}/{id}   → 403 (same message)
+GET  /v1/sharing/checkaccountusersaccess.json            → 403 (same message)
+POST /v1/sharing.json                                    → 403 (same message)
+PUT  /v1/sharing/setmode.json                            → 403 (same message)
+DELETE /v1/sharing.json/{session}/{sharing_id}           → 403 (same message)
+```
+
+The message is the same for all seven regardless of what was asked, including
+the write operations, so it is an account-type gate rather than a per-call
+permission check. `users/info.json` shows why: `AccessUserID` (60516) differs
+from `UserID` (2125533), i.e. the login is an *account user* under the account
+owner, and account users are not permitted to share.
+
+This is a different limitation from D25: that one was a per-folder write
+permission and has since been granted; this one is a property of the login
+itself and cannot be granted from inside the account.
+
+**Consequence:** the sharing bindings are covered by unit and contract tests
+only. No sharing response shape in `testdata/fixtures/sharing/` is recorded —
+they are constructed from the Swagger declaration and flagged as such — and no
+sharing call has ever succeeded against a real server.
+
+**What would settle it:** an *account owner* login. `TestSandboxSharing` checks
+`AccountInfo.IsAccountUser()` first: with an account user it asserts the 403
+above and stops, and with an owner login it runs the full share, setmode,
+list, revoke cycle. So supplying owner credentials is the only step needed to
+turn the constructed fixtures into recorded ones.
+
+**Classification note:** the 403 maps to `upstream_error`, not to
+`reauth_required`. Mapping a permission refusal onto a credential error would
+send the silent re-login state machine chasing a password that was never the
+problem (v1.1 §4.5).
+
+## D34 — `users/userlogscursor.json` is keyset paging the PDF omits {#d34}
+
+The PDF documents `users/userlogs.json`, which pages by number and reports
+`TotalPages`/`CurrentPage`. The live API also has:
+
+```
+GET /v1/users/userlogscursor.json/{session_id}?cursor=…
+→ {"NextCursor":"WzE3ODUxMjI5NzEsIjYwNTE2Iiw5MDIyXQ","Logs":[…]}
+```
+
+Its own description explains the point: *"Returns one page of activity logs,
+newest-first, using keyset (cursor) pagination."* An empty `NextCursor` means
+the end.
+
+This matters because the numbered variant pages over a log that is still being
+appended to, so entries shift between pages as new ones arrive — the same class
+of problem as `folder/list.json` without `last_request_time` (§2.6 #14). The
+cursor endpoint is the correct one for anything longer than a glance.
+
+**Resolution:** both are bound — `Logs` for the numbered form and `LogsCursor`
+for the keyset form — with the doc comment steering callers to the latter.
+Covered by `TestUsersLogsCursorPagesByKeyset` and `TestSandboxUserLogs`.
