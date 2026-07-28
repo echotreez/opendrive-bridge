@@ -139,4 +139,9 @@ const (
 	// PDF §13, read-only in the first release.
 
 	EndpointUsersInfo = "/users/info.json" // GET /{session_id}
+	// EndpointUsersLogs pages the activity log by number.
+	EndpointUsersLogs = "/users/userlogs.json" // GET /{session_id}
+	// EndpointUsersLogsCursor pages the same log by keyset and is absent from
+	// the PDF (docs/discrepancies.md D34).
+	EndpointUsersLogsCursor = "/users/userlogscursor.json" // GET /{session_id}
 )

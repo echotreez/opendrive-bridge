@@ -1,0 +1,15 @@
+{
+  "NextCursor": "WzE3ODUxMjI5NzEsIjYwNTE2Iiw5MDIyXQ",
+  "Logs": [
+    {
+      "Time": 1785127915,
+      "User": "Tester Tester",
+      "LogType": "USER LOGIN",
+      "IP": "203.0.113.10",
+      "FileName": "",
+      "FileSize": "",
+      "Details": "API: 2.0 | APP v10",
+      "App": "API"
+    }
+  ]
+}

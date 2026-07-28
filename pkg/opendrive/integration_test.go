@@ -701,3 +701,256 @@ func TestSandboxFileVerifyPassword(t *testing.T) {
 		t.Logf("upstream now returns a TempKey; revisit D32 and wire it into downloads")
 	}
 }
+
+// TestSandboxPasswordGatesThePublicRoute settles D32 against the live API: a
+// file password stops the anonymous download route and is invisible to the
+// authenticated owner, which is why the P3 pipeline needs no TempKey.
+func TestSandboxPasswordGatesThePublicRoute(t *testing.T) {
+	c, ctx := newSandboxClient(t)
+	files := c.Files()
+	scratch := fileScratch(t, ctx, c)
+	id := newSandboxFile(t, ctx, c, scratch)
+
+	const password = "odb-public-route-password"
+	pw := password
+	if err := files.SetAccess(ctx, id, opendrive.FilePublic, "", ""); err != nil {
+		t.Fatalf("make the file public: %v", err)
+	}
+	if err := files.UpdateSettings(ctx, id, opendrive.FileSettings{Password: &pw}); err != nil {
+		t.Fatalf("set the password: %v", err)
+	}
+
+	// The owner's session downloads without ever being asked for it.
+	var probe opendrive.BoolResult
+	if err := c.Do(ctx, opendrive.Request{
+		Method:           http.MethodGet,
+		Path:             opendrive.EndpointDownloadFile,
+		SessionPlacement: opendrive.SessionInQuery,
+		PathSegments:     []string{id},
+		Query:            map[string][]string{"test": {"1"}},
+	}, &probe); err != nil {
+		t.Fatalf("the owner should be able to download a password-protected file: %v", err)
+	}
+
+	// Anonymously the same request is refused, which is where the password
+	// actually lives.
+	anon, err := opendrive.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = anon.Do(ctx, opendrive.Request{
+		Method:           http.MethodGet,
+		Path:             opendrive.EndpointDownloadFile,
+		SessionPlacement: opendrive.SessionOmit,
+		PathSegments:     []string{id},
+		Query:            map[string][]string{"test": {"1"}},
+	}, &probe)
+	if err == nil {
+		t.Fatal("the anonymous route accepted a password-protected file; revisit D32")
+	}
+	// The wording depends on which gate upstream reaches first — "File requires
+	// password" when the file is otherwise downloadable, "Download permissions
+	// are not enabled for this file" when public download is off. Either way it
+	// is a plain refusal, not a credential problem the SDK should try to fix by
+	// re-authenticating (v1.1 §4.5).
+	if opendrive.ErrorKind(err) != opendrive.KindUpstreamError {
+		t.Errorf("anonymous refusal kind = %q, want upstream_error", opendrive.ErrorKind(err))
+	}
+	if opendrive.IsTemporary(err) {
+		t.Error("a permission refusal must not be retryable")
+	}
+	t.Logf("anonymous download refused as expected: %v", err)
+
+	// And verifypassword remains inert on the API route.
+	got, err := files.VerifyPassword(ctx, id, password, "")
+	if err != nil {
+		t.Fatalf("verifypassword: %v", err)
+	}
+	if got.OK() || got.TempKey != "" {
+		t.Errorf("verifypassword now works (%+v); revisit D32 and the P3 download plan", got)
+	}
+}
+
+// ---------------------------------------------------------------- users
+
+// TestSandboxUserInfo reads the account information the Bridge reports through
+// /v1/auth/status (§4.1).
+func TestSandboxUserInfo(t *testing.T) {
+	c, ctx := newSandboxClient(t)
+
+	info, err := c.Users().Info(ctx)
+	if err != nil {
+		t.Fatalf("users info: %v", err)
+	}
+	if info.UserName == "" || info.UserID == "" {
+		t.Fatalf("info carries no identity: %+v", info)
+	}
+	if info.MaxStorage.Int64() <= 0 {
+		t.Errorf("MaxStorage = %d, want the account quota", info.MaxStorage.Int64())
+	}
+	t.Logf("account %s, plan %q, storage %d/%d, account user: %v",
+		info.UserID, info.UserPlan, info.StorageUsed.Int64(), info.MaxStorage.Int64(),
+		info.IsAccountUser())
+
+	// §9.4: the account information must not spill into logs through its own
+	// String method.
+	if s := info.String(); strings.Contains(s, info.UserName) {
+		t.Errorf("AccountInfo.String leaks the username: %q", s)
+	}
+
+	withBW, err := c.Users().Info(ctx, opendrive.AccountInfoOptions{ApplyBW: true, Branding: true})
+	if err != nil {
+		t.Fatalf("users info with options: %v", err)
+	}
+	if withBW.UserID != info.UserID {
+		t.Errorf("the optional parameters changed the identity: %v vs %v", withBW.UserID, info.UserID)
+	}
+}
+
+// TestSandboxUserLogs covers both paging styles, including the cursor endpoint
+// the PDF omits (D34).
+func TestSandboxUserLogs(t *testing.T) {
+	c, ctx := newSandboxClient(t)
+	users := c.Users()
+
+	page, err := users.Logs(ctx, 1, opendrive.ActivityLogFilter{})
+	if err != nil {
+		t.Fatalf("user logs: %v", err)
+	}
+	t.Logf("numbered paging: page %d of %d, %d entries",
+		page.CurrentPage.Int(), page.TotalPages.Int(), len(page.Logs))
+	if len(page.Logs) == 0 {
+		t.Skip("the account has no activity to page through")
+	}
+	if page.Logs[0].Time.IsZero() || page.Logs[0].LogType == "" {
+		t.Errorf("first log entry looks empty: %+v", page.Logs[0])
+	}
+
+	first, err := users.LogsCursor(ctx, "", opendrive.ActivityLogFilter{})
+	if err != nil {
+		t.Fatalf("user logs cursor: %v", err)
+	}
+	if len(first.Logs) == 0 {
+		t.Fatal("the cursor endpoint returned no entries while the numbered one did")
+	}
+	if first.NextCursor == "" {
+		t.Skip("the whole log fits in one cursor page")
+	}
+
+	second, err := users.LogsCursor(ctx, first.NextCursor, opendrive.ActivityLogFilter{})
+	if err != nil {
+		t.Fatalf("second cursor page: %v", err)
+	}
+	if second.NextCursor == first.NextCursor {
+		t.Error("the cursor did not advance between pages")
+	}
+	// The invariant of keyset paging over a newest-first log: page two never
+	// contains an entry newer than the oldest of page one. Comparing whole
+	// entries would be wrong — two distinct events can share a timestamp and
+	// carry no detail to tell them apart.
+	if len(first.Logs) > 0 && len(second.Logs) > 0 {
+		oldestOfFirst := first.Logs[len(first.Logs)-1].Time
+		newestOfSecond := second.Logs[0].Time
+		if newestOfSecond.After(oldestOfFirst.Time) {
+			t.Errorf("page two starts at %v, newer than page one's oldest entry %v",
+				newestOfSecond, oldestOfFirst)
+		}
+	}
+	t.Logf("keyset paging: %d then %d entries", len(first.Logs), len(second.Logs))
+}
+
+// ---------------------------------------------------------------- sharing
+
+// TestSandboxSharing runs the full share lifecycle when the credentials belong
+// to an account owner, and asserts the documented refusal when they belong to
+// an account user (docs/discrepancies.md D33).
+//
+// Supplying owner credentials is the only step needed to turn the constructed
+// sharing fixtures into recorded ones.
+func TestSandboxSharing(t *testing.T) {
+	c, ctx := newSandboxClient(t)
+	sharing := c.Sharing()
+
+	info, err := c.Users().Info(ctx)
+	if err != nil {
+		t.Fatalf("users info: %v", err)
+	}
+
+	if info.IsAccountUser() {
+		// D33: every operation is refused with the same message, writes
+		// included, so the gate is the account type rather than the call.
+		_, err := sharing.ListSharedUsers(ctx)
+		if err == nil {
+			t.Fatal("an account user was allowed to list shared users; revisit D33")
+		}
+		if opendrive.ErrorKind(err) != opendrive.KindUpstreamError {
+			t.Errorf("refusal kind = %q, want upstream_error: a permission problem "+
+				"must not look like a credential problem (v1.1 §4.5)",
+				opendrive.ErrorKind(err))
+		}
+		if opendrive.IsTemporary(err) {
+			t.Error("a permission refusal must not be retryable")
+		}
+		t.Logf("account user refused as documented: %v", err)
+
+		// The write half is refused the same way, which is what makes this an
+		// account-type gate rather than a per-call check.
+		if _, err := sharing.Share(ctx, "0", info.UserName, opendrive.ShareViewOnly); err == nil {
+			t.Error("an account user was allowed to share; revisit D33")
+		}
+		t.Skip("sharing needs an account-owner login; see docs/discrepancies.md D33")
+	}
+
+	// From here on the account owns itself, so the real lifecycle runs.
+	scratch := fileScratch(t, ctx, c)
+	peer := os.Getenv("ODB_TEST_SHARE_USER")
+	if peer == "" {
+		t.Skip("set ODB_TEST_SHARE_USER to a second OpenDrive account to test sharing")
+	}
+
+	created, err := sharing.Share(ctx, scratch, peer, opendrive.ShareViewOnly)
+	if err != nil {
+		t.Fatalf("share with %s: %v", peer, err)
+	}
+	shareID := created.SharingID.String()
+	if shareID == "" {
+		t.Fatalf("share returned no sharing id: %+v", created)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := sharing.Revoke(ctx, shareID); err != nil {
+			t.Logf("cleanup: share %s may remain: %v", shareID, err)
+		}
+	})
+
+	users, err := sharing.ListFolderUsers(ctx, scratch)
+	if err != nil {
+		t.Fatalf("list the folder's users: %v", err)
+	}
+	var found bool
+	for _, u := range users {
+		if u.SharingID.String() == shareID {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the new share %s is absent from the folder's user list", shareID)
+	}
+
+	if err := sharing.SetMode(ctx, shareID, opendrive.ShareFullAccess); err != nil {
+		t.Fatalf("set share mode: %v", err)
+	}
+	if err := sharing.Revoke(ctx, shareID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	after, err := sharing.ListFolderUsers(ctx, scratch)
+	if err != nil {
+		t.Fatalf("list after revoke: %v", err)
+	}
+	for _, u := range after {
+		if u.SharingID.String() == shareID {
+			t.Errorf("the revoked share %s is still listed", shareID)
+		}
+	}
+}
