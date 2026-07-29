@@ -15,7 +15,7 @@ per-file SHA256 checksums.
 | [D1](#d1) | confirmed, implemented | `download/all.json` uses `session_id`, not `session_key` |
 | [D2](#d2) | confirmed, implemented | `session/captcharequired.json` missing from the PDF |
 | [D3](#d3) | confirmed, implemented | `/v1` appears in both base path and endpoint paths |
-| [D4](#d4) | open, P3 | undocumented `download/file.json` parameters |
+| [D4](#d4) | **closed**, none exposed | undocumented `download/file.json` parameters |
 | [D5](#d5) | open, P2 | undocumented `file/thumb.json` parameters |
 | [D6](#d6) | open, P1 note | `oauth2/grant.json` grant types and `client_id` semantics |
 | [D7](#d7) | confirmed, implemented | listing pagination parameters |
@@ -24,7 +24,7 @@ per-file SHA256 checksums.
 | [D10](#d10) | resolved | the `sharing` module is invisible to anonymous callers |
 | [D11](#d11) | resolved | only the OAuth2 token unlocks the full explorer spec |
 | [D12](#d12) | **PDF is wrong**, implemented | the breadcrumb endpoint is spelled correctly upstream |
-| [D13](#d13) | new endpoint, P3 | `upload/has_ddref.json` is a dedupe probe |
+| [D13](#d13) | new endpoint, implemented | `upload/has_ddref.json` is a dedupe probe |
 | [D14](#d14) | **PDF is wrong**, implemented | the file resource is `/file.json`, not `/file/file.json` |
 | [D15](#d15) | **PDF is wrong**, implemented | three endpoints use a different verb than documented |
 | [D16](#d16) | confirmed, implemented | `move` and `overwrite_if_exists` are required strings |
@@ -43,7 +43,7 @@ per-file SHA256 checksums.
 | [D29](#d29) | confirmed, implemented | `DELETE /file.json` deletes a file that was never trashed |
 | [D30](#d30) | **spec is wrong**, implemented | `file/filefullpath.json` answers in `DownloadLink`, with backslashes |
 | [D31](#d31) | **spec is wrong**, implemented | the expiring-link endpoints return one object, not an array |
-| [D32](#d32) | **resolved**, workaround for P3 | `file/verifypassword.json` is inert; the password gates the public route only |
+| [D32](#d32) | **closed**, P4 route settled | `file/verifypassword.json` is inert; the password gate lives in the web front end |
 | [D33](#d33) | blocked on an owner account | the whole sharing module is closed to an account user |
 | [D34](#d34) | new endpoint, implemented | `users/userlogscursor.json` is keyset paging the PDF omits |
 | [D35](#d35) | **spec is wrong**, implemented | `TotalWritten` counts the chunk, not the running total |
@@ -52,6 +52,10 @@ per-file SHA256 checksums.
 | [D38](#d38) | **OAuth2 not accepted**, implemented | the chunk upload endpoint requires a real session id |
 | [D39](#d39) | **re-diagnosed twice**, handled | writes are refused intermittently with a permission error |
 | [D40](#d40) | **measured**, implemented | a real permission denial and a transient one are byte-identical |
+| [D41](#d41) | **spec is wrong**, implemented | the download `offset` is off by one at the last byte; `Range` is not |
+| [D42](#d42) | **live API is broken**, worked around | `download/all.json` answers a file list with an empty archive |
+| [D43](#d43) | confirmed, implemented | `filesettings` ignores an unknown parameter and answers 200 |
+| [D44](#d44) | confirmed, handled | a just-uploaded file is not downloadable straight away |
 
 ---
 
@@ -101,8 +105,15 @@ such as `/v1/session/login.{format}`, while the Bridge base URL is
 `backup`, `temp_key`. *Live spec* adds `app` (string), `temp_auth` (string) and
 `preview` (int).
 
-**Status:** open; semantics unknown. `temp_auth` is treated as a credential by
-the redaction list already. To be probed in P3 before any is exposed.
+**Closed 2026-07-29, none of them exposed.** `temp_key` and `temp_auth` are the
+password path, and D32 establishes that nothing produces a value for either:
+`verifypassword` never issues a `TempKey`, and the password gate lives in the web
+front end. `app` and `preview` are marked "Internal." in the live spec and have no
+observable effect on an owner download. Binding a parameter we cannot obtain a
+value for, or demonstrate an effect from, would be guessing.
+
+`temp_auth` and `temp_key` remain on the redaction list regardless (§9.4), so a
+value arriving from somewhere unforeseen still cannot reach a log.
 
 ## D5 — `file/thumb.json` accepts `time_offset` and `temp_key` {#d5}
 
@@ -596,10 +607,52 @@ them, which would be downloading *somebody else's* password-protected share —
 outside v1.0 scope (§1.4), and unreachable with the current account anyway
 (D33).
 
-**If that case ever arrives:** the likely route is the public share URL
-(`od.lk/d/…`) rather than the API, since that is where the password gate lives.
-That would be a browser-style flow, not an API one, and belongs in a later
-version with its own investigation.
+**Closed 2026-07-29.** The public share route was tested, as the note below
+predicted it would have to be, and the answer is definite: **there is no API
+route by which a password-protected file can be fetched by anyone other than its
+owner.**
+
+What the public route actually is, measured on a file made public with a password
+set through `file_password` (D43 — the earlier probe used `password` and silently
+set nothing, which is what made this take a third round):
+
+| request | result |
+|---|---|
+| `GET /download/file.json/{id}` anonymously | `403 {"error":{"code":403,"message":"File requires password"}}` |
+| `GET https://od.lk/f/{id}` | `200 text/html`, a page titled "secret.txt - OpenDrive" containing an `<input name="file_password">` |
+| `GET https://od.lk/d/{id}/{name}` | the same HTML page, not the bytes |
+| the same with `?password=`, `?pass=`, `?p=`, `?temp_key=` | the HTML page again; the query is ignored |
+| `POST file_password=` to `od.lk/f/{id}` | `200 text/html`, a different page — it responds, but in HTML, and the bytes never arrive without the session cookie the page sets |
+| `verifypassword` with the correct password, with or without a session, with or without `sharing_id` or `captcha_response` | `{"result":false}`, and **no `tempkey` field at all** |
+
+Two further notes on `verifypassword`: it insists on `password` and rejects
+`file_password` with `400 "`password` is required."`, so the spelling asymmetry
+with `filesettings` is real; and on a file with *no* password it answers
+`{"result":true,"tempkey":null}` for **any** password including a wrong one. So
+it never validates anything in either direction — it reports whether a password
+exists, inverted, and never issues the `TempKey` the documented flow needs.
+
+**The conclusion, in one line:** the password gate lives in the `od.lk` web front
+end as an HTML form with a cookie, not in the API.
+
+**What this means for P4, so `/v1/download/stream` does not need rework:**
+
+1. **The bridge's own downloads are unaffected.** An authenticated owner is never
+   asked for the password — verified live on a file with one set. Every transfer
+   in v1.0 scope is an owner transfer, so `/v1/download/stream` can be designed
+   without a password path at all.
+2. **Setting a password is supported; consuming one is not.** `filesettings`
+   with `file_password` works, so the bridge can expose password protection as a
+   sharing feature. It simply cannot fetch somebody else's protected file.
+3. **The alternative, when the case arrives:** drive the `od.lk` form with a
+   cookie jar — an HTTP-client flow against the web front end, not the API. That
+   does not belong in `pkg/opendrive`, which speaks the API; it would be a
+   separate, clearly-labelled component, and it is out of v1.0 scope (§1.4).
+4. **What P4 must do instead:** surface the `403 "File requires password"` as its
+   own actionable error rather than a generic refusal, so a user pointed at
+   somebody else's protected share is told why rather than shown "forbidden".
+   `temp_key` and `temp_auth` stay out of the binding: no route produces a value
+   for them.
 
 Covered by `TestSandboxFileVerifyPassword`, which logs loudly if upstream ever
 starts distinguishing the two, and by `TestSandboxPasswordGatesThePublicRoute`,
@@ -896,3 +949,121 @@ Covered by `TestTaxonomyFormsClassify`,
 `TestAmbiguous403WithAWorkingCredentialAndAWitnessIsTransient`,
 `TestAmbiguous403WithoutAWitnessIsPermanent` and
 `TestSandboxAmbiguousPermissionRefusal`.
+
+## D41 — the download `offset` is off by one at the last byte {#d41}
+
+`download/file.json` documents an `offset` query parameter for resuming. It works
+— until the very end of the file. Measured on a 9000 byte file on 2026-07-29,
+with a binary search for the boundary:
+
+| `offset` | status | bytes returned |
+|---|---|---|
+| 0 | 200 | 9000 (the whole file, correctly) |
+| 1 | 206 | 8999 |
+| 4000 | 206 | 5000 |
+| **8998** | **206** | **2** |
+| **8999** | **200** | **9000 — the whole file again** |
+| 9000 | 200 | 9000 |
+| 20000 | 200 | 9000 |
+
+So the largest honoured offset is `size - 2`. Asking for the final byte, which is
+a perfectly ordinary resume request, silently answers with the entire file. The
+`Range` header has no such problem — `Range: bytes=8999-` returns `206` with
+`Content-Range: bytes 8999-8999/9000` and one byte.
+
+**Why this is dangerous rather than merely odd:** a resume appends to a partial
+file. A pipeline that sends `offset=N`, gets 200, and appends the body produces a
+file that is *longer* than the original with its opening bytes repeated in the
+middle — and no error anywhere. The corruption is silent and survives until
+someone checks a hash.
+
+**Resolution:** the pipeline sends `Range` rather than `offset`, and it treats
+**the status as the only honest signal**: `206` means the resume point was
+honoured, anything else means the body starts at zero regardless of what was
+asked. When upstream ignores the range the leading bytes are skipped from the
+stream instead of being written, so the destination is correct either way and
+`DownloadResult.Resumed` reports which happened. The MD5 is taken from the raw
+stream before the skip, so a restarted transfer can still be verified end to end.
+
+Covered by `TestDownloadSkipsForwardWhenUpstreamIgnoresTheRange`,
+`TestDownloadFileResumesOnDisk`, `TestSandboxDownloadOffsetBoundary`.
+
+## D42 — `download/all.json` answers a file list with an empty archive {#d42}
+
+The endpoint takes `files` and `folders`. Only `folders` produces anything:
+
+| request | result |
+|---|---|
+| `{"files": "<file id>"}` | **200**, `application/zip`, 98 bytes — a structurally valid ZIP with **no entries** |
+| `{"files": "<id>,<id>"}` | 200, the same empty 98 byte archive |
+| `{"files": ["<id>"]}` | 400 ``Invalid value specified for `files`. Expecting alpha numeric value`` |
+| `{"files": "<numeric id>"}` | 400 `Invalid File ID` |
+| `{"folders": "<folder id>"}` | **200**, a real archive containing `<folder>/one.txt`, `<folder>/two.txt` |
+| `{}` | 400 `Empty files list` |
+
+The file id is accepted — the array form is rejected specifically for not being a
+string, so it is parsed — and then produces nothing. There is no error to notice.
+
+This is the download-side twin of D23 and D27: a success that lies. A "download
+these files as a zip" feature built on it would hand users an empty archive and
+report success.
+
+**Resolution:** `DownloadService.Archive` takes folder ids only and does not
+offer a files parameter, because an unusable parameter that answers 200 is worse
+than an absent one. Downloading several files individually is what
+`DownloadService.Download` is for. Covered by `TestArchiveSendsFoldersOnly`,
+`TestSandboxDownloadArchive`.
+
+Recorded at the same time: **D1 is settled.** `download/all.json` sent
+`session_key` — the name the PDF gives it — answers `403 "File is private"`,
+i.e. it ignores the parameter and falls back to anonymous. The live spec's
+`session_id` is correct and the PDF is wrong. Whitepaper §2.6 #2 should be
+amended.
+
+## D43 — `filesettings` ignores an unknown parameter and answers 200 {#d43}
+
+Setting a file password with `{"password": "..."}` returns `200` and a full file
+object, and does nothing at all: `file/info.json` still reports `Password: ""`
+and the file stays anonymously downloadable. The parameter is `file_password`;
+with that name the same call works and `info` reports `Password: "*"`.
+
+Half a debugging round went into this while settling D32, because the 200 and the
+returned object both look exactly like success.
+
+**Consequence:** upstream does not validate parameter *names*, only values. A
+misspelled field is silently discarded. This is why a binding is not finished
+until a live probe confirms the effect actually happened — checking that the call
+returned 200 confirms nothing (`CLAUDE.md` rule 2).
+
+The SDK sends `file_password`, and `TestSandboxPasswordDoesNotGateTheOwner`
+asserts through `file/info.json` that the password really took, rather than
+trusting the 200.
+
+## D44 — a just-uploaded file is not downloadable straight away {#d44}
+
+`close_file_upload.json` returns 200 with the file's full metadata, and for a
+short window afterwards the download endpoint does not know about it:
+
+```
+POST /upload/close_file_upload.json  → 200 {"FileId":"…","Size":65536,"FileHash":"…"}
+GET  /download/file.json/{that id}   → 404 {"error":{"code":404,"message":"File does not exist"}}
+```
+
+Seen once in a live suite run and not reproducible on demand, which is what makes
+it worth writing down: read-after-write on this API is not guaranteed, so any
+code that uploads and then immediately reads has to tolerate a brief `not_found`.
+The counterpart is D27 for folders and the deleted-file window recorded in
+`TestSandboxDownloadOfADeletedFile`, where visibility lags in the other
+direction.
+
+**Resolution — deliberately not in the SDK.** A 404 means "not found", and
+teaching the classifier to retry it would mask genuine missing files, which is
+the one thing `docs/error-taxonomy.md` exists to prevent. Instead:
+
+- the integration fixtures wait for the cheap `test=1` probe to succeed before
+  downloading (`waitUntilDownloadable`);
+- P3's job engine must treat "verify immediately after upload" as a step that may
+  legitimately need a short wait, not as a failed transfer.
+
+Covered by `TestSandboxDownloadRoundTrip` and every other download fixture,
+through `waitUntilDownloadable`.

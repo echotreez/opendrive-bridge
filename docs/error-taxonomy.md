@@ -73,8 +73,9 @@ a JSON body from the API: the OAuth error identifiers (`invalid_token`,
 | [T11](#t11) | a captcha is required, anywhere | `403`/`200` mentioning captcha | `captcha_required`, never retried | message match, checked first |
 | [T12](#t12) | the session really has expired | `401` JSON "Session does not exist, please re-login." | `token_expired` | JSON body **and** API-shaped |
 | [T13](#t13) | no information at all | non-2xx, empty body | `upstream_error`, ambiguous | length 0 |
-| [T14](#t14) | the account's bandwidth is spent | `200` with `BWExceeded=1`, or a message | `bandwidth_exceeded`, never retried | body field or message |
+| [T14](#t14) | the account's bandwidth is spent | `200` with `BWExceeded=1`, or a message | `bandwidth_exceeded`, never retried | Content-Type says JSON where bytes belong |
 | [T15](#t15) | a genuine rate limit | `429`/`503` + `Retry-After` | `rate_limited`, retryable | status + header |
+| [T16](#t16) | nothing was archived | `200` + a valid, empty ZIP | — | binding rule: the parameter is not offered |
 
 ---
 
@@ -222,14 +223,29 @@ Listed here so the taxonomy is complete about the ways a 200 can lie.
 
 ### T8 — `{"result":false}` for a correct password {#t8}
 
-`file/verifypassword.json` returns `{"result":false}` for the correct password
-and for a wrong one alike, and never issues a `TempKey` (D32). Separately, the
-refusal wording on the public download route depends on which gate upstream
-reaches first — "File requires password" or "Download permissions are not enabled
-for this file" — for the same underlying state.
+`file/verifypassword.json` never validates anything, in either direction (D32,
+closed 2026-07-29):
 
-Rule: **key off the status, never the message.** A `result:false` from this
-endpoint is not evidence of a wrong password and must not be reported as one.
+| the file | correct password | wrong password | `TempKey` |
+|---|---|---|---|
+| has a password | `{"result":false}` | `{"result":false}` | never present |
+| has no password | `{"result":true,"tempkey":null}` | `{"result":true,"tempkey":null}` | always null |
+
+So `result` reports whether the file is *unprotected*, inverted — and never
+answers the question the endpoint is named for. The documented flow (verify →
+receive a `TempKey` → pass it to `download/file.json`) cannot be performed at all.
+
+Rule: **key off the status, never the message, and never treat `result:false`
+from this endpoint as a wrong password.** Reporting "wrong password" to a user
+who typed the right one is worse than reporting nothing.
+
+The refusal wording on the public route also varies with which gate upstream
+reaches first — "File requires password" or "Download permissions are not enabled
+for this file" — for the same underlying state, which is the same rule again.
+
+The password gate itself lives in the `od.lk` web front end as an HTML form, not
+in the API. The bridge downloads as the owner, who is never asked, so this
+blocks nothing in v1.0; the reasoning and the P4 consequences are in D32.
 
 ### T9 — the 400 that is really a resume point {#t9}
 
@@ -285,6 +301,22 @@ tempting and least justified.
 rather than as an error. `bandwidth_exceeded`, never retried: the allowance does
 not come back within any retry window, and hammering it is how an account gets
 throttled further.
+
+The discriminator is the **Content-Type**, not the status: a download that
+succeeds answers `application/octet-stream`, and one that has anything to say
+instead answers `application/json`. The download pipeline therefore checks the
+content type before writing a single byte, so a JSON refusal can never be
+mistaken for content and saved to disk as though it were the file. Any
+JSON-where-bytes-belong that is *not* a recognised bandwidth refusal becomes
+`invalid_response` rather than being written out.
+
+### T16 — an archive that is valid and empty {#t16}
+
+`download/all.json` answers a list of file ids with `200`, `application/zip`, and
+a structurally valid archive containing nothing (D42). Only `folders` produces
+content. There is no error to classify, so — like T7 — the rule is a binding
+rule: the parameter is not offered, because a feature that reports success and
+hands back an empty archive is worse than no feature.
 
 ### T15 — a genuine rate limit {#t15}
 

@@ -99,6 +99,10 @@ type Request struct {
 	Retryable *bool
 	// Accept overrides the Accept header.
 	Accept string
+	// Header carries extra request headers. The download pipeline uses it for
+	// Range, which upstream honours correctly at every offset while its own
+	// offset parameter does not (docs/discrepancies.md D41).
+	Header http.Header
 	// RawResponse returns the successful response body as []byte instead of
 	// decoding it as JSON. It is for endpoints such as file/thumb.json that
 	// return image bytes, while retaining the normal authentication, retry and
@@ -387,6 +391,171 @@ func (c *Client) Do(ctx context.Context, r Request, out any) error {
 		}
 		attempt++
 	}
+}
+
+// StreamResponse is a live upstream response handed to a DoStream callback. The
+// body is still open and must be consumed inside the callback.
+type StreamResponse struct {
+	Status int
+	Header http.Header
+	// ContentLength is -1 when upstream did not say.
+	ContentLength int64
+	Body          io.Reader
+}
+
+// DoStream performs a request and hands the live response body to fn rather than
+// reading it into memory. It exists for the transfer pipeline: a download must
+// not be bounded by maxResponseBytes, and the bytes have to reach the disk as
+// they arrive (§10.1).
+//
+// Everything else is unchanged — credentials, redaction, classification and a
+// single token renewal all behave as they do for Do. What it deliberately does
+// *not* do is retry: once fn has seen a byte, replaying the request would
+// duplicate it. Recovering from a failed transfer is resume, not retry, and the
+// download pipeline owns that.
+func (c *Client) DoStream(ctx context.Context, r Request, fn func(*StreamResponse) error) error {
+	if r.Method == "" || r.Path == "" {
+		return invalidRequest("a streaming request needs a method and a path")
+	}
+	if ctx == nil {
+		return invalidRequest("context must not be nil")
+	}
+	if fn == nil {
+		return invalidRequest("a streaming request needs a callback")
+	}
+
+	var refreshed bool
+	for {
+		creds, apiErr := c.streamAttempt(ctx, r, fn)
+		if apiErr == nil {
+			return nil
+		}
+		if apiErr.ambiguous {
+			c.resolve(ctx, apiErr)
+		}
+		if apiErr.Kind == KindTokenExpired && apiErr.drivesAuth() && c.auth != nil && !refreshed &&
+			r.SessionPlacement != SessionOmit {
+			refreshed = true
+			if err := c.refreshAuth(ctx, creds.AccessToken); err != nil {
+				return err
+			}
+			continue
+		}
+		return apiErr
+	}
+}
+
+func (c *Client) streamAttempt(ctx context.Context, r Request, fn func(*StreamResponse) error) (Credentials, *APIError) {
+	op := r.Method + " " + r.Path
+
+	creds, apiErr := c.credentialsFor(ctx, r, op)
+	if apiErr != nil {
+		return creds, apiErr
+	}
+
+	u, payload, err := c.buildURL(r, creds)
+	if err != nil {
+		var ae *APIError
+		if errors.As(err, &ae) {
+			return creds, ae
+		}
+		return creds, invalidRequest("%v", err)
+	}
+	safeURL := RedactURL(u.String())
+
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, r.Method, u.String(), body)
+	if err != nil {
+		return creds, invalidRequest("%v", err)
+	}
+	req.Header.Set("User-Agent", c.ua)
+	if r.Accept != "" {
+		req.Header.Set("Accept", r.Accept)
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if r.ContentType != "" {
+		req.Header.Set("Content-Type", r.ContentType)
+	}
+	for k, vs := range r.Header {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
+
+	start := time.Now()
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return creds, networkError(op, safeURL, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	c.log.Debug("upstream stream", slog.String("op", op), slog.String("url", safeURL),
+		slog.Int("status", resp.StatusCode), slog.Duration("took", time.Since(start)))
+
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		// An error body is small; reading it is what makes it classifiable.
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		return creds, classifyResponse(Evidence{
+			Status: resp.StatusCode, Header: resp.Header, Body: raw,
+			ContentType: resp.Header.Get("Content-Type"),
+			Op:          op, Path: r.Path, Scope: r.Scope, URL: safeURL,
+		})
+	}
+
+	c.amb.noteSuccess(witnessKey(op, r.Scope))
+
+	if err := fn(&StreamResponse{
+		Status:        resp.StatusCode,
+		Header:        resp.Header,
+		ContentLength: resp.ContentLength,
+		Body:          resp.Body,
+	}); err != nil {
+		var ae *APIError
+		if errors.As(err, &ae) {
+			return creds, ae
+		}
+		return creds, &APIError{Kind: KindNetwork, Op: op, URL: safeURL, Err: err}
+	}
+	return creds, nil
+}
+
+// credentialsFor resolves the credentials a request needs, including the real
+// session id the one OAuth-hostile endpoint insists on (D38).
+func (c *Client) credentialsFor(ctx context.Context, r Request, op string) (Credentials, *APIError) {
+	var creds Credentials
+	if r.SessionPlacement == SessionOmit || c.auth == nil {
+		return creds, nil
+	}
+	creds, err := c.auth.Credentials(ctx)
+	if err != nil {
+		var ae *APIError
+		if errors.As(err, &ae) {
+			return creds, ae
+		}
+		return creds, &APIError{Kind: KindUnauthorized, Op: op, Err: err}
+	}
+	if r.NeedsSessionID && creds.AccessToken != "" {
+		provider, ok := c.auth.(SessionIDProvider)
+		if !ok {
+			return creds, &APIError{Kind: KindReauthRequired, Op: op,
+				UpstreamMsg: "this endpoint needs a real session id and the authenticator cannot supply one"}
+		}
+		session, err := provider.SessionID(ctx)
+		if err != nil {
+			var ae *APIError
+			if errors.As(err, &ae) {
+				return creds, ae
+			}
+			return creds, &APIError{Kind: KindReauthRequired, Op: op, Err: err}
+		}
+		creds = Credentials{SessionID: session}
+	}
+	return creds, nil
 }
 
 // refreshAuth renews credentials after a 401. When the authenticator can tell
