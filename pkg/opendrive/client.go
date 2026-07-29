@@ -79,6 +79,16 @@ type Request struct {
 	// requires a real session id. Only the chunk upload does
 	// (docs/discrepancies.md D38); everything else takes either form.
 	NeedsSessionID bool
+	// Scope names the resource this call acts on — normally the containing
+	// folder id. It is used for one purpose: the success witness that separates
+	// a transient permission-shaped refusal from a real one
+	// (docs/error-taxonomy.md T2). "Writes into this folder worked a moment ago"
+	// is evidence; "writes somewhere worked a moment ago" is not, since an
+	// account may hold rights on one folder and none on another.
+	//
+	// Optional. When empty the witness is kept per operation instead, which is
+	// weaker but never wrong in the unsafe direction.
+	Scope string
 	// SessionParam overrides the name of the session parameter
 	// (DefaultSessionParam when empty; "session_key" for download/all.json).
 	SessionParam string
@@ -163,6 +173,16 @@ type Client struct {
 	sleep     func(context.Context, time.Duration) error
 	newReqID  func() string
 	debugBody bool
+
+	// amb resolves the errors a response does not determine on its own. It is
+	// created in New so that every Client has one (docs/error-taxonomy.md T2).
+	amb *disambiguator
+	// probe and probeInterval hold what the options set, until New assembles
+	// them.
+	probe         AccessProbe
+	probeSet      bool
+	probeInterval time.Duration
+	probeClock    func() time.Time
 }
 
 // Option configures a Client.
@@ -224,6 +244,31 @@ func WithSleepFunc(f func(context.Context, time.Duration) error) Option {
 	}
 }
 
+// WithAccessProbe replaces the read used to disambiguate an error the response
+// does not determine — above all the 403 whose text says "permission" for a
+// condition that is merely transient (docs/error-taxonomy.md T2). The probe must
+// be idempotent and cheap; the default is one users/info.json read.
+//
+// Passing nil disables disambiguation, which makes every such error permanent.
+// That is a safe setting, not a broken one: it costs retries that would have
+// succeeded, never a retry storm.
+func WithAccessProbe(p AccessProbe) Option {
+	return func(c *Client) {
+		c.probe, c.probeSet = p, true
+	}
+}
+
+// WithProbeInterval sets the minimum gap between two access probes
+// (DefaultProbeInterval when zero or negative).
+func WithProbeInterval(d time.Duration) Option {
+	return func(c *Client) { c.probeInterval = d }
+}
+
+// withProbeClock replaces the disambiguator's clock, for tests.
+func withProbeClock(now func() time.Time) Option {
+	return func(c *Client) { c.probeClock = now }
+}
+
 // WithBodyLogging enables debug-level logging of response bodies. Bodies are
 // still redacted, and the option is off by default (§9.4).
 func WithBodyLogging(on bool) Option {
@@ -251,6 +296,11 @@ func New(opts ...Option) (*Client, error) {
 	if c.base == nil || c.base.Scheme == "" || c.base.Host == "" {
 		return nil, invalidRequest("base URL must be absolute")
 	}
+	probe := c.probe
+	if !c.probeSet {
+		probe = c.defaultAccessProbe
+	}
+	c.amb = newDisambiguator(probe, c.probeInterval, c.probeClock)
 	return c, nil
 }
 
@@ -284,11 +334,24 @@ func (c *Client) Do(ctx context.Context, r Request, out any) error {
 			return nil
 		}
 
+		// An error the response did not determine is settled here, once, before
+		// anything acts on it (docs/error-taxonomy.md T2). Nothing downstream —
+		// not the auth machine, not the retry decision — may see it unresolved.
+		if apiErr.ambiguous {
+			c.resolve(ctx, apiErr)
+		}
+
 		// An expired access token is not a retry: renew once, then replay the
 		// very same request (§2.2 #3). Requests that carry no session at all —
 		// login and grant — are excluded: renewing in response to their 401
 		// would recurse straight back into the same call.
-		if apiErr.Kind == KindTokenExpired && c.auth != nil && !refreshed &&
+		//
+		// drivesAuth is the invariant: only an API-shaped, unambiguous error may
+		// move the authentication state machine. An HTML 401 from a proxy in
+		// front of the API (D38) fails it, and so does an unresolved ambiguity,
+		// which is what stops the machine chasing a credential that was never
+		// the problem.
+		if apiErr.Kind == KindTokenExpired && apiErr.drivesAuth() && c.auth != nil && !refreshed &&
 			r.SessionPlacement != SessionOmit {
 			refreshed = true
 			if err := c.refreshAuth(ctx, creds.AccessToken); err != nil {
@@ -297,7 +360,19 @@ func (c *Client) Do(ctx context.Context, r Request, out any) error {
 			continue
 		}
 
-		if !r.retryable() || !apiErr.Temporary() || attempt >= c.retry.Max {
+		// A refusal may be replayed whatever the method: upstream declined to
+		// act, so a second attempt cannot duplicate anything. Without this a
+		// POST would sit out the one condition retrying was built for — the
+		// intermittent permission-shaped 403 of D39/D40, which clears in
+		// seconds.
+		if (!r.retryable() && !apiErr.replaySafe()) || !apiErr.Temporary() {
+			return apiErr
+		}
+		budget := c.retry.Max
+		if apiErr.retryBudget > 0 && apiErr.retryBudget < budget {
+			budget = apiErr.retryBudget
+		}
+		if attempt >= budget {
 			return apiErr
 		}
 		delay := apiErr.RetryAfter()
@@ -422,13 +497,28 @@ func (c *Client) attempt(ctx context.Context, r Request, out any) (Credentials, 
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return creds, parseError(resp.StatusCode, resp.Header, raw, op, safeURL)
+		return creds, classifyResponse(Evidence{
+			Status:      resp.StatusCode,
+			Header:      resp.Header,
+			Body:        raw,
+			ContentType: resp.Header.Get("Content-Type"),
+			Op:          op,
+			Path:        r.Path,
+			Scope:       r.Scope,
+			URL:         safeURL,
+		})
 	}
 
 	// Some endpoints answer 200 with an error envelope in the body.
-	if apiErr := errorInBody(raw, op, safeURL); apiErr != nil {
+	if apiErr := errorInBody(raw, op, r.Path, r.Scope, safeURL); apiErr != nil {
 		return creds, apiErr
 	}
+
+	// The success witness. That this exact operation has worked at least once on
+	// this resource is the only evidence separating a transient
+	// permission-shaped refusal from a permanent one, because upstream words
+	// them identically (docs/error-taxonomy.md T2).
+	c.amb.noteSuccess(witnessKey(op, r.Scope))
 
 	if r.RawResponse {
 		if out == nil {
@@ -455,7 +545,7 @@ func (c *Client) attempt(ctx context.Context, r Request, out any) (Credentials, 
 }
 
 // errorInBody detects a 200 response that actually carries an error envelope.
-func errorInBody(raw []byte, op, url string) *APIError {
+func errorInBody(raw []byte, op, path, scope, url string) *APIError {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return nil
@@ -469,7 +559,7 @@ func errorInBody(raw []byte, op, url string) *APIError {
 	if string(probe.Error) == "null" || string(probe.Error) == `""` {
 		return nil
 	}
-	return parseError(0, nil, trimmed, op, url)
+	return classifyResponse(Evidence{Body: trimmed, Op: op, Path: path, Scope: scope, URL: url})
 }
 
 // buildURL assembles the final URL and JSON payload, injecting the session

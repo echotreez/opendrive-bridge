@@ -39,16 +39,21 @@ const (
 	KindTokenExpired        Kind = "token_expired"
 	KindCaptchaRequired     Kind = "captcha_required"
 	KindUnauthorized        Kind = "unauthorized"
-	KindNotFound            Kind = "not_found"
-	KindConflict            Kind = "conflict"
-	KindQuotaExceeded       Kind = "quota_exceeded"
-	KindBandwidthExceeded   Kind = "bandwidth_exceeded"
-	KindInvalidName         Kind = "invalid_name"
-	KindUpstreamError       Kind = "upstream_error"
-	KindRateLimited         Kind = "rate_limited"
-	KindNetwork             Kind = "network"
-	KindInvalidResponse     Kind = "invalid_response"
-	KindInvalidRequest      Kind = "invalid_request"
+	// KindEdgeRejected means the response did not come from the API at all: a
+	// proxy in front of it refused the request and answered in HTML. Nothing in
+	// such a response says anything about credentials, so it is kept separate
+	// from every credential kind on purpose (docs/error-taxonomy.md T1, D38).
+	KindEdgeRejected      Kind = "edge_rejected"
+	KindNotFound          Kind = "not_found"
+	KindConflict          Kind = "conflict"
+	KindQuotaExceeded     Kind = "quota_exceeded"
+	KindBandwidthExceeded Kind = "bandwidth_exceeded"
+	KindInvalidName       Kind = "invalid_name"
+	KindUpstreamError     Kind = "upstream_error"
+	KindRateLimited       Kind = "rate_limited"
+	KindNetwork           Kind = "network"
+	KindInvalidResponse   Kind = "invalid_response"
+	KindInvalidRequest    Kind = "invalid_request"
 	// KindRefreshTokenFailed is internal and transient: it means the refresh
 	// grant was rejected, which sends the authenticator down the silent
 	// re-login path (§2.2 #3). Once that succeeds the caller never sees it; if
@@ -64,6 +69,7 @@ var (
 	ErrUnauthorized        = &APIError{Kind: KindUnauthorized}
 	ErrTokenExpired        = &APIError{Kind: KindTokenExpired}
 	ErrCaptchaRequired     = &APIError{Kind: KindCaptchaRequired}
+	ErrEdgeRejected        = &APIError{Kind: KindEdgeRejected}
 	ErrNotFound            = &APIError{Kind: KindNotFound}
 	ErrConflict            = &APIError{Kind: KindConflict}
 	ErrQuotaExceeded       = &APIError{Kind: KindQuotaExceeded}
@@ -109,8 +115,65 @@ type APIError struct {
 	// retryAfter is populated from the Retry-After header on 429/503.
 	retryAfter time.Duration
 
+	// shape is what the response body actually was. ShapeUnset means the SDK
+	// built this error itself rather than reading it off the wire.
+	shape BodyShape
+	// scope is the resource the failed call acted on, for the success witness.
+	scope string
+	// ambiguous marks an error whose cause the response does not determine —
+	// the permission-shaped 403 above all (docs/error-taxonomy.md T2). It is
+	// barred from the auth state machine until resolved.
+	ambiguous bool
+	// resolved records that disambiguation has run, so it runs once.
+	resolved bool
+	// retry is the classifier's verdict on retryability, overriding the
+	// kind-based default when set.
+	retry retryState
+	// retryBudget caps the attempts for a verdict the evidence supports only
+	// weakly. 0 means the client's normal policy applies.
+	retryBudget int
+	// diagnosis explains, in words fit for a user, what the classifier
+	// concluded when the upstream message was misleading.
+	diagnosis string
+
 	// Err is an optional wrapped cause (transport or decode error).
 	Err error
+}
+
+// BodyShape reports what the response body was. It is exported because the
+// distinction between an API answer and a proxy's HTML page is the difference
+// between a credential problem and something that merely looks like one.
+func (e *APIError) BodyShape() BodyShape { return e.shape }
+
+// Ambiguous reports whether the response left the cause undetermined.
+func (e *APIError) Ambiguous() bool { return e.ambiguous }
+
+// Diagnosis returns the classifier's explanation when upstream's own message is
+// known to be misleading, or "" when the message can be taken at face value.
+// The Bridge REST layer and the job engine present this instead of the raw
+// upstream text, so that resource pressure is never reported as a permission
+// failure (docs/error-taxonomy.md T2).
+func (e *APIError) Diagnosis() string { return e.diagnosis }
+
+// decisive reports whether this error is trustworthy enough to act on: it came
+// from the API in JSON (or the SDK built it), and nothing about it is
+// unresolved.
+func (e *APIError) decisive() bool {
+	return (e.shape == ShapeUnset || e.shape == ShapeJSON) && (!e.ambiguous || e.resolved)
+}
+
+// drivesAuth reports whether this error may reach the authentication state
+// machine. This is the invariant of docs/error-taxonomy.md, and the reason D38
+// cannot recur: an HTML 401 from a proxy has ShapeHTML, so it can never trigger
+// a refresh, a silent re-login or a reauth_required verdict.
+func (e *APIError) drivesAuth() bool {
+	if e == nil {
+		return false
+	}
+	if e.ambiguous && !e.resolved {
+		return false
+	}
+	return e.shape == ShapeUnset || e.shape == ShapeJSON
 }
 
 func (e *APIError) Error() string {
@@ -137,7 +200,11 @@ func (e *APIError) Error() string {
 	}
 	if e.Err != nil {
 		b.WriteString(": ")
-		b.WriteString(e.Err.Error())
+		// A wrapped cause is not ours and may carry anything. Go's own
+		// *url.Error, for one, quotes the full request URL — access token and
+		// all — so the message is redacted on the way out (§9.4). Unwrap still
+		// returns the original for callers that need to inspect it.
+		b.WriteString(RedactString(e.Err.Error()))
 	}
 	return b.String()
 }
@@ -159,11 +226,18 @@ func (e *APIError) Is(target error) bool {
 // Temporary reports whether retrying the same call has any chance of a
 // different outcome. Captcha, quota, bandwidth and name errors never do
 // (whitepaper §11).
+//
+// This is the only retry authority in the codebase: the transfer pipeline, the
+// job engine and the Bridge REST layer consume it and never re-derive it from a
+// status code or a message (docs/error-taxonomy.md).
 func (e *APIError) Temporary() bool {
+	if e.retry != retryDefault {
+		return e.retry == retryYes
+	}
 	switch e.Kind {
 	case KindRateLimited, KindNetwork:
 		return true
-	case KindUpstreamError:
+	case KindUpstreamError, KindEdgeRejected:
 		return e.HTTPCode == 0 || e.HTTPCode >= 500
 	default:
 		return false
@@ -172,6 +246,21 @@ func (e *APIError) Temporary() bool {
 
 // RetryAfter returns the delay requested by the server, or 0 when it gave none.
 func (e *APIError) RetryAfter() time.Duration { return e.retryAfter }
+
+// RetryBudget returns the maximum number of retries this particular error
+// justifies, or 0 when the caller's normal policy applies. It is set when the
+// evidence supports retrying only weakly (docs/error-taxonomy.md T2).
+func (e *APIError) RetryBudget() int { return e.retryBudget }
+
+// replaySafe reports whether the request may be repeated whatever its method.
+//
+// A refusal is the one failure that is safe to replay unconditionally: upstream
+// declined to act, so nothing happened and a second attempt cannot duplicate
+// anything. That is not true of a 5xx or a timeout, where the write may well
+// have landed — which is why those still respect Request.Retryable.
+func (e *APIError) replaySafe() bool {
+	return e.HTTPCode == http.StatusForbidden || e.HTTPCode == http.StatusTooManyRequests
+}
 
 // IsTemporary reports whether err is an APIError that may be retried.
 func IsTemporary(err error) bool {
@@ -219,118 +308,33 @@ type wireErrorObject struct {
 	ErrorDescription string  `json:"error_description"`
 }
 
-// parseError converts an upstream non-2xx response into an APIError. body may
-// be empty; url must already be redacted.
+// parseError converts an upstream response into an APIError. It is a thin
+// adapter onto classify.go, which holds every rule; nothing here decides
+// anything (docs/error-taxonomy.md).
 func parseError(status int, header http.Header, body []byte, op, url string) *APIError {
-	e := &APIError{HTTPCode: status, Op: op, URL: url}
-
-	var env wireError
-	if len(body) > 0 && json.Unmarshal(body, &env) == nil {
-		var obj wireErrorObject
-		switch {
-		case len(env.Error) > 0 && env.Error[0] == '{':
-			_ = json.Unmarshal(env.Error, &obj)
-		case len(env.Error) > 0 && env.Error[0] == '"':
-			// OAuth grant shape: {"error":"invalid_grant","error_description":…}
-			var s string
-			_ = json.Unmarshal(env.Error, &s)
-			obj.Error = s
-			obj.ErrorDescription = env.ErrorDescription
-		default:
-			obj.Message = env.Message
-		}
-		e.UpstreamCode = obj.Code.Int()
-		e.OAuthError = obj.Error
-		e.UpstreamMsg = firstNonEmpty(obj.Message, obj.ErrorDescription, env.ErrorDescription, env.Message)
+	var contentType string
+	if header != nil {
+		contentType = header.Get("Content-Type")
 	}
-	if e.UpstreamMsg == "" && len(body) > 0 && !isJSON(body) {
-		e.UpstreamMsg = truncate(strings.TrimSpace(string(body)), 300)
-	}
-	e.retryAfter = parseRetryAfter(header)
-	e.Kind = classify(status, e.OAuthError, e.UpstreamCode, e.UpstreamMsg)
-	return e
+	return classifyResponse(Evidence{
+		Status:      status,
+		Header:      header,
+		Body:        body,
+		ContentType: contentType,
+		Op:          op,
+		Path:        endpointOf(op),
+		URL:         url,
+	})
 }
 
-// badCredentialPhrases are the messages upstream uses when it rejects the
-// account itself rather than a stale token. They are the trigger for
-// KindReauthRequired, which stops every automatic attempt (§2.2 #4a).
-var badCredentialPhrases = []string{
-	"invalid username or password",
-	"invalid username",
-	"invalid password",
-	"wrong password",
-	"incorrect password",
-	"username or password",
-	"account is suspended",
-	"account suspended",
-}
-
-// classify maps an upstream response onto a Kind. The message sniffing is a
-// deliberate concession: upstream reuses HTTP 401 and 403 for conditions that
-// callers must treat very differently (§4.5, §11).
-func classify(status int, oauthErr string, upstreamCode int, msg string) Kind {
-	lower := strings.ToLower(msg)
-	switch oauthErr {
-	case "invalid_token", "expired_token":
-		return KindTokenExpired
-	case "invalid_grant":
-		// The refresh token was rejected. Transient by design: the caller
-		// falls back to a silent password login.
-		return KindRefreshTokenFailed
-	case "invalid_client", "unauthorized_client", "access_denied":
-		return KindReauthRequired
+// endpointOf extracts the endpoint identity from an op string ("METHOD /path").
+// Which front end answers, and which parameter conventions apply, depend on it
+// (docs/error-taxonomy.md, D38).
+func endpointOf(op string) string {
+	if i := strings.IndexByte(op, ' '); i >= 0 {
+		return op[i+1:]
 	}
-	switch {
-	case strings.Contains(lower, "captcha"):
-		return KindCaptchaRequired
-	case containsAny(lower, badCredentialPhrases):
-		return KindReauthRequired
-	case strings.Contains(lower, "bandwidth"):
-		return KindBandwidthExceeded
-	case strings.Contains(lower, "quota"), strings.Contains(lower, "storage limit"),
-		strings.Contains(lower, "not enough space"), strings.Contains(lower, "space limit"):
-		return KindQuotaExceeded
-	case strings.Contains(lower, "invalid file name"), strings.Contains(lower, "invalid folder name"),
-		strings.Contains(lower, "illegal character"):
-		return KindInvalidName
-	}
-
-	code := status
-	if code == 0 {
-		code = upstreamCode
-	}
-	switch code {
-	case http.StatusUnauthorized:
-		// A 401 that is not about the credentials themselves means the
-		// session or token on the wire is stale, which the SDK renews
-		// silently. Session mode reaches this branch when upstream forgets a
-		// session ("session does not exist").
-		return KindTokenExpired
-	case http.StatusForbidden:
-		// Upstream uses 403 for "you may not touch this object" as well as for
-		// the captcha and quota cases handled above. What is left is a plain
-		// upstream refusal, not a credential problem (§4.5: unauthorized is
-		// reserved for the Bridge API's own auth).
-		return KindUpstreamError
-	case http.StatusNotFound:
-		return KindNotFound
-	case http.StatusConflict:
-		return KindConflict
-	case http.StatusTooManyRequests:
-		return KindRateLimited
-	case http.StatusRequestEntityTooLarge:
-		return KindQuotaExceeded
-	}
-	return KindUpstreamError
-}
-
-func containsAny(haystack string, needles []string) bool {
-	for _, n := range needles {
-		if strings.Contains(haystack, n) {
-			return true
-		}
-	}
-	return false
+	return op
 }
 
 func parseRetryAfter(h http.Header) time.Duration {

@@ -376,6 +376,9 @@ func (s *FileService) CreateEmpty(ctx context.Context, p CreateEmptyFileParams) 
 		Path:             EndpointFile,
 		SessionPlacement: SessionInBody,
 		Body:             body,
+		// Write rights are per folder, so the success witness is too
+		// (docs/error-taxonomy.md T2).
+		Scope: p.FolderID,
 	}, &out); err != nil {
 		return nil, err
 	}

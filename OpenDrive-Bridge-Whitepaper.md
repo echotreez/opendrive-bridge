@@ -407,6 +407,35 @@ Bridge API 是**面向使用者的简化层**,统一 JSON、统一错误、路�
 
 其余不变:`not_found / conflict / quota_exceeded / bandwidth_exceeded / invalid_name / upstream_error / rate_limited / network / invalid_response / invalid_request`。SDK 层 `errors.Kind` 与此枚举一一映射,新增 `KindKeystoreUnavailable` 与 `KindReauthRequired`(替代原先笼统归入 `unauthorized`/`refresh_token_failed` 的用法;`refresh_token_failed` 保留为内部瞬态,静默重登成功后对外不可见)。
 
+#### 4.5.1 分类层是唯一判据(P3 修订)
+
+上游的状态码与文案**经常描述的不是真实发生的事**:D38 的 HTML 401 与 token 无关,
+D39 的 403 文案说权限、实因是资源压力,而**真实权限不足返回的文案与它逐字节相同**。
+逐个打补丁不可行——下一个绑定会遇到下一种伪装。因此:
+
+1. **唯一判据。** 所有分类由 `pkg/opendrive/classify.go` 给出,规格是
+   `docs/error-taxonomy.md`(逐条列出伪装形态:实际状况 / 上游给的码与文案 /
+   正确的 Kind / 判定依据)。任何绑定、传输管线、job 层**不得**自行判断状态码或
+   匹配文案。
+2. **基于证据组合。** 判据是「状态码 + 响应体形态 + Content-Type + 端点身份」四者,
+   不是状态码单独。**响应体不是 JSON 本身就是强信号**:说明请求根本没到 API 层,
+   一律归入新增的 `edge_rejected`,绝不进入任何凭证类 Kind。
+3. **语义模糊的 403 需消歧。** 引入一次幂等轻量探测(`users/info.json`)判断凭证
+   是否仍然可用,并结合「同一操作此前是否成功过」的见证。探测**单飞行 + 每 30 秒
+   至多一次**。无法消歧时判为永久失败(fail closed):代价是一次可省的报错,而不是
+   重试风暴。
+4. **不变量。** 任何非 JSON 响应体,或任何未经消歧的模糊错误,**不得驱动认证状态机**
+   ——不得触发刷新、静默重登或 `reauth_required`。这是本节对 §2.2 状态机的硬性约束,
+   由 `TestNonAPIBodyNeverDrivesTheAuthStateMachine` 与
+   `TestAmbiguousErrorNeverDrivesTheAuthStateMachine` 固化。
+5. **可重试性统一给出。** `APIError.Temporary()` / `RetryAfter()` 是全代码库唯一的
+   重试权威,调用方消费而不重新推导。D39 那类伪权限 403 经消歧后可退避重试;真权限
+   不足不重试。
+6. **措辞。** 当上游文案已知具有误导性时,`APIError.Diagnosis()` 给出分类层的结论,
+   REST 层与 job 层向用户呈现它而不是上游原文——资源压力不得被说成「权限不足」。
+
+新增 code:`edge_rejected`(响应来自 API 前面的代理,而非 API 本身;与凭证无关)。
+
 ### 4.6 odctl 命令面
 
 ```

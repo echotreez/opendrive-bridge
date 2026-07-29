@@ -301,6 +301,11 @@ func (a *SessionAuth) renewLocked(ctx context.Context) *APIError {
 	if !errors.As(err, &ae) {
 		return a.gate.backoff(now, &APIError{Kind: KindNetwork, Err: err})
 	}
+	// The invariant of docs/error-taxonomy.md: only an API-shaped, unambiguous
+	// error may move this machine (D38).
+	if !ae.drivesAuth() {
+		return a.gate.backoff(now, ae)
+	}
 	switch ae.Kind {
 	case KindReauthRequired:
 		return a.gate.terminal(StateReauthRequired, reauthError(

@@ -44,10 +44,12 @@ func TestParseErrorShapes(t *testing.T) {
 			wantOAuth: "invalid_grant",
 		},
 		{
-			name:     "plain text body",
+			// T1: a body that is not JSON did not come from the API, whatever
+			// the status. It is kept out of every credential kind on purpose.
+			name:     "plain text body is not an API answer",
 			status:   500,
 			body:     "Internal Server Error",
-			wantKind: KindUpstreamError,
+			wantKind: KindEdgeRejected,
 			wantMsg:  "Internal Server Error",
 		},
 		{
@@ -124,10 +126,12 @@ func TestParseErrorShapes(t *testing.T) {
 			wantKind: KindReauthRequired,
 		},
 		{
+			// T4/T5: upstream's 400s describe caller mistakes, including the
+			// ones whose wording misstates which mistake it was.
 			name:     "message only",
 			status:   400,
 			body:     `{"message":"bad request"}`,
-			wantKind: KindUpstreamError,
+			wantKind: KindInvalidRequest,
 			wantMsg:  "bad request",
 		},
 		{

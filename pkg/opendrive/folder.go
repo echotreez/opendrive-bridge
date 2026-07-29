@@ -646,6 +646,9 @@ func (s *FolderService) Create(ctx context.Context, p CreateFolderParams) (*Crea
 		Path:             EndpointFolder,
 		SessionPlacement: SessionInBody,
 		Body:             body,
+		// Write rights are per folder, so the success witness has to be too
+		// (docs/error-taxonomy.md T2).
+		Scope: parent,
 	}, &out); err != nil {
 		return nil, err
 	}

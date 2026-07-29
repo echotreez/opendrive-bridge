@@ -157,9 +157,7 @@ func TestSandboxUploadDeduplicates(t *testing.T) {
 		FolderID: scratch, Name: fmt.Sprintf("odb-dedupe-a-%d.bin", stamp),
 		Size: int64(len(content)), Hash: hash,
 	})
-	if err != nil {
-		t.Fatalf("first upload: %v", err)
-	}
+	skipIfUpstreamIsRefusing(t, err, "first upload")
 	if first.Deduplicated {
 		t.Log("the content was already on the server from an earlier run")
 	}
@@ -310,5 +308,89 @@ func TestSandboxUploadRejectsAWrongOffset(t *testing.T) {
 	t.Logf("offset refusal: %v", err)
 	if !bytes.Contains([]byte(err.Error()), []byte("uploaded=")) {
 		t.Errorf("the refusal no longer reports the resume offset; revisit D37: %v", err)
+	}
+}
+
+// An upload that fails after create_file must take its record back. This is the
+// live half of the orphan-reclamation work: create_file makes a real,
+// zero-length file before any content moves, and D39 showed what a folder full
+// of abandoned records does to every later write into it.
+//
+// The failure is provoked the cheapest honest way — a declared size larger than
+// the content — which fails at the end of the chunk loop, after the record and
+// the temp location both exist.
+func TestSandboxUploadReclaimsItsOrphan(t *testing.T) {
+	c, ctx := newSandboxClient(t)
+	scratch := fileScratch(t, ctx, c)
+
+	name := fmt.Sprintf("odb-orphan-%d.bin", time.Now().UnixNano())
+	content := uploadPayload(2048, "orphan")
+
+	var recordID string
+	_, err := c.Uploads().Upload(ctx, bytes.NewReader(content), opendrive.UploadParams{
+		FolderID:        scratch,
+		Name:            name,
+		Size:            int64(len(content)) + 4096, // a size the source cannot satisfy
+		OnRecordCreated: func(fileID, _ string) { recordID = fileID },
+	})
+	if err == nil {
+		t.Fatal("upstream accepted an upload whose content was shorter than its declared size")
+	}
+	t.Logf("expected failure: %v", err)
+	if recordID == "" {
+		t.Fatal("create_file never reported a record, so there is nothing to check")
+	}
+
+	// An unfinished upload is not listed in its folder, so the parent listing
+	// cannot answer this one. file/info.json can: unlike the folder endpoint of
+	// D27, it does report a removed *file* as gone.
+	info, err := c.Files().Info(ctx, recordID)
+	if err == nil {
+		t.Fatalf("the failed upload left record %s behind (%q, %s bytes); enough of these and "+
+			"the folder starts refusing writes (D39)", recordID, info.Name, info.Size.String())
+	}
+	t.Logf("record %s is gone, as it should be: %v", recordID, err)
+}
+
+// The opposite setting, for the job engine: a caller that intends to resume
+// keeps the record, and is responsible for it afterwards.
+func TestSandboxUploadKeepsTheRecordWhenAsked(t *testing.T) {
+	c, ctx := newSandboxClient(t)
+	scratch := fileScratch(t, ctx, c)
+
+	name := fmt.Sprintf("odb-keep-%d.bin", time.Now().UnixNano())
+	content := uploadPayload(2048, "keep")
+
+	var recordID, recordTemp string
+	_, err := c.Uploads().Upload(ctx, bytes.NewReader(content), opendrive.UploadParams{
+		FolderID:      scratch,
+		Name:          name,
+		Size:          int64(len(content)) + 4096,
+		KeepOnFailure: true,
+		OnRecordCreated: func(fileID, tempLocation string) {
+			recordID, recordTemp = fileID, tempLocation
+		},
+	})
+	if err == nil {
+		t.Fatal("want the upload to fail")
+	}
+	if recordID == "" {
+		t.Fatal("the record was never reported, so a crash-resume could not find it")
+	}
+	if recordTemp == "" {
+		t.Error("no temp location was reported; a resume would have nowhere to send bytes")
+	}
+	// Whatever happens next, this test cleans up after itself (D39).
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := c.Uploads().Reclaim(cleanupCtx, recordID, "", ""); err != nil {
+			t.Logf("cleanup reclaim: %v", err)
+		}
+	})
+
+	if _, err := c.Files().Info(ctx, recordID); err != nil {
+		t.Errorf("KeepOnFailure was set, but record %s is gone (%v); a resume would have "+
+			"nothing to resume into", recordID, err)
 	}
 }

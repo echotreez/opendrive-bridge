@@ -50,7 +50,8 @@ per-file SHA256 checksums.
 | [D36](#d36) | **spec is wrong**, implemented | a deduplicated upload must close *without* `temp_location` |
 | [D37](#d37) | confirmed, implemented | a wrong chunk offset is refused with the authoritative resume point |
 | [D38](#d38) | **OAuth2 not accepted**, implemented | the chunk upload endpoint requires a real session id |
-| [D39](#d39) | **re-diagnosed**, fixed | leaked test artefacts make writes fail with a permission error |
+| [D39](#d39) | **re-diagnosed twice**, handled | writes are refused intermittently with a permission error |
+| [D40](#d40) | **measured**, implemented | a real permission denial and a transient one are byte-identical |
 
 ---
 
@@ -764,7 +765,7 @@ API's either. A bare HTML 401 classifies as `token_expired`, which would send th
 auth state machine chasing a token that was never the problem — another reason
 to send the right credential in the first place.
 
-## D39 — a crowded base folder makes writes fail with a permission error {#d39}
+## D39 — writes are refused intermittently with a permission error {#d39}
 
 Integration runs failed in a pattern that looked random: some `create_file` or
 `file.json` calls answered `403 "Your user access enables you only to view this
@@ -794,17 +795,104 @@ Ruled out along the way, each tested in isolation against the live account:
 | session/OAuth interference | session upload, then OAuth writes | all 200 |
 | accumulated artefacts | delete 16 leftover folders, rerun | **suite goes green** |
 
+**Second revision, 2026-07-29 — the artefact explanation was also wrong.**
+
+Implementing the recommendation below meant reproducing the condition on demand.
+It could not be reproduced, and the accumulation theory does not survive
+measurement either. Every hypothesis was tested in isolation against the live
+account, roughly 500 operations in total:
+
+| hypothesis | test | result |
+|---|---|---|
+| accumulated artefacts | 60 files created one after another in a single folder | all 200; no degradation |
+| leftover folders | the one leaked folder deleted, then writes retried | writes had already been succeeding |
+| operation volume | 300 create/trash/remove operations in 117 s | 10 sporadic `trash` refusals, no sustained failure |
+| new-folder permission lag | create a subfolder, then write into it immediately, 6 trials | first write succeeded after 0.4 s every time |
+| a refused write poisoning the account | 3 refused writes at the account root, then a write into a granted folder | succeeded 1 s later |
+| auth mode | 30 create/trash rounds on OAuth2, 30 on a session | 3 refusals versus 0 — the same order, within noise |
+
+What is left, and what the numbers actually show: **upstream refuses some write
+calls at random, with this message, and then accepts the identical call moments
+later.** In the 300-operation run, `folder/trash.json` was refused 10 times out
+of 100 with no pattern in time or in the state of the folder; `create_file` and
+`POST /file.json` show the same behaviour, occasionally in bursts that last tens
+of seconds. Nothing on the client side triggers it and nothing on the client
+side clears it.
+
+The clean-up rule from the first revision stands on its own merits — a leaked
+artefact is a defect regardless — but it was not the cause, and "delete the
+leftovers and it goes green" was the flakiness resolving on its own.
+
 **Consequences.**
 
-1. Integration tests must remove *every* artefact, including intermediate ones
-   like the copy a probe makes. `TestSandboxWriteCapabilities` now registers a
-   cleanup for the copy.
-2. More importantly for the bridge: upstream answers a resource-pressure
-   condition with a 403 whose text blames permissions. `§4.5` classifies it as
-   `upstream_error`, which is right in that it is not a credential problem, but
-   a bulk upload that trips it will surface "contact your administrator" to the
-   user. P3's job engine should treat a 403 carrying this message as
-   retryable-after-backoff rather than fatal, and the P4 error mapping should
-   not present it as a permission failure. Tracked for the transfer pipeline.
+1. Integration tests must still remove *every* artefact, including intermediate
+   ones like the copy a probe makes.
+2. The refusal cannot be told apart from a genuine denial by reading it: D40
+   measures the two side by side and the messages are byte-identical. It is
+   therefore handled by the classification layer
+   (`pkg/opendrive/classify.go`, `docs/error-taxonomy.md` T2) rather than by
+   any rule about folder contents: a permission-shaped 403 is retried when the
+   credential is verified working and the same call has already succeeded on
+   the same resource, and reported — with `APIError.Diagnosis()` rather than
+   upstream's wording — when it has not.
+3. Because a refusal means upstream declined to act, replaying it is safe
+   whatever the HTTP method, so writes are retried too
+   (`APIError.replaySafe`). Without that the one condition retrying exists for
+   would be the one condition a POST sat out.
+4. The live suite runs with a more patient retry policy than the SDK default,
+   which is the harness accommodating a flaky sandbox rather than a workaround
+   in the product.
 
-Covered by `TestSandboxWriteCapabilities`.
+Covered by `TestSandboxWriteCapabilities`, `TestSandboxAmbiguousPermissionRefusal`.
+
+## D40 — a real permission denial and a transient one are byte-identical {#d40}
+
+D39 ended with a recommendation: treat a 403 carrying the "only to view this
+folder" message as retryable rather than fatal. Measuring it before implementing
+it showed the recommendation cannot be carried out as written.
+
+Measured on 2026-07-29 with the current account, which has write rights inside
+its granted folders and none at the account root:
+
+| request | result |
+|---|---|
+| `POST /folder.json` with `folder_sub_parent` = the granted base folder | `200`, created |
+| `POST /folder.json` with `folder_sub_parent: "0"` | `403 "Your user access enables you only to view this folder, please contact your administrator to discuss your user permissions."` |
+
+That refusal is the same string, byte for byte, that D39 recorded for a folder
+the account *could* write to and that recovered the moment the leaked artefacts
+were deleted. The message therefore distinguishes nothing: reading it and
+retrying would hammer a genuine denial, and reading it and giving up would report
+resource pressure as "contact your administrator".
+
+Three further shapes were pinned down at the same time, because the classifier
+needs to know what an API answer looks like before it can tell one apart from
+something else:
+
+| request | answer |
+|---|---|
+| `POST /upload/upload_file_chunk2.json/OAUTH/xyz?access_token=…` | `401`, `Content-Type: text/html`, an openresty page (D38) |
+| the same path with a real session id | `400 {"error":{"code":400,"message":"`temp_location` is required."}}` — the API, in JSON |
+| `GET /nosuchmodule/nope.json/{session}` | `404 {"error":{"code":404,"message":""}}` — a route that does not exist is still answered *by the API* |
+| `GET /users/info.json/notasession` | `401 {"error":{"code":401,"message":"Session does not exist, please re-login."}}` |
+
+So "the body is not JSON" is a reliable signal that the request never reached the
+API, and it is the only signal that separates D38's 401 from a real one.
+
+**Resolution:** `pkg/opendrive/classify.go`, specified by
+`docs/error-taxonomy.md`. The ambiguous 403 is settled with gathered evidence
+rather than read off the response — one rate-limited `users/info.json` probe to
+establish that the credential still works, plus whether this same operation has
+already succeeded on this client. Both branches stay `upstream_error`; they
+differ in retryability and in the wording the user is shown
+(`APIError.Diagnosis()`).
+
+Also recorded: `folder/exportcsv.json` now succeeds for this account and answers
+`200` with `Content-Type: text/csv` — D25 listed it as a 403, so the account's
+rights have widened since. A non-JSON body on a *successful* response is normal
+and is not what T1 is about; classification only ever looks at failures.
+
+Covered by `TestTaxonomyFormsClassify`,
+`TestAmbiguous403WithAWorkingCredentialAndAWitnessIsTransient`,
+`TestAmbiguous403WithoutAWitnessIsPermanent` and
+`TestSandboxAmbiguousPermissionRefusal`.

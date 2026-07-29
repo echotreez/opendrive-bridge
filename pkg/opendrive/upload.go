@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -148,6 +149,23 @@ type UploadParams struct {
 	// Progress, when set, is called after each accepted chunk with the number
 	// of source bytes sent so far and the total.
 	Progress func(sent, total int64)
+	// OnRecordCreated, when set, is called as soon as create_file has made the
+	// upstream record, with everything a later attempt needs to resume into it.
+	// The job engine persists this so a crash mid-transfer is recoverable
+	// (§10.2); it is called before a single byte is sent.
+	OnRecordCreated func(fileID, tempLocation string)
+	// KeepOnFailure leaves the upstream record in place when the upload fails,
+	// for a caller that intends to resume into it.
+	//
+	// Off by default, and the default is the important case: create_file makes
+	// a real, zero-length record before any content moves, and an abandoned one
+	// is invisible in the UI while still counting against the folder. Once
+	// enough of them accumulate in a single folder, upstream starts refusing
+	// further writes there with a message about permissions that has nothing to
+	// do with permissions (docs/discrepancies.md D39, docs/error-taxonomy.md
+	// T2). A cancelled bulk transfer must not be able to poison its own
+	// destination.
+	KeepOnFailure bool
 }
 
 func (p *UploadParams) chunkSize() int64 {
@@ -289,7 +307,25 @@ func (s *UploadService) Upload(ctx context.Context, src io.Reader, p UploadParam
 		return nil, &APIError{Kind: KindInvalidResponse, Op: "POST " + EndpointUploadCreateFile,
 			UpstreamMsg: "create_file returned no file id"}
 	}
+	if p.OnRecordCreated != nil {
+		p.OnRecordCreated(fileID, created.TempLocation)
+	}
 
+	// From here on an upstream record exists. Every path out of transfer must
+	// either complete it or take it back (see reclaimOrphan).
+	result, err := s.transfer(ctx, src, fileID, created, p)
+	if err != nil {
+		s.reclaimOrphan(ctx, fileID, p)
+		return nil, err
+	}
+	return result, nil
+}
+
+// transfer runs everything after create_file: the branch decision, the chunk
+// loop and the close.
+func (s *UploadService) transfer(
+	ctx context.Context, src io.Reader, fileID string, created *createFileResponse, p UploadParams,
+) (*UploadResult, error) {
 	result := &UploadResult{Hash: p.Hash}
 
 	// Branch 1 — deduplication. Upstream already holds this content, so the
@@ -350,6 +386,61 @@ func (s *UploadService) Upload(ctx context.Context, src io.Reader, p UploadParam
 	return result, nil
 }
 
+// reclaimTimeout bounds the clean-up call. It is short on purpose: reclamation
+// runs on a path that has already failed, and must not hold the caller.
+const reclaimTimeout = 30 * time.Second
+
+// reclaimOrphan takes back the record create_file made when the transfer that
+// should have filled it did not finish.
+//
+// This is a product-level obligation, not tidiness. The record is created before
+// any content moves and is invisible to the user afterwards, so a failed or
+// cancelled bulk transfer silently leaves one per file in the destination
+// folder. Enough of them and upstream begins refusing further writes to that
+// folder with a message about permissions that is not about permissions —
+// exactly the failure D39 took a full round to diagnose, arriving in production
+// as "contact your administrator" for a user whose only mistake was pressing
+// cancel.
+//
+// Two cases are left alone: OpenIfExists, where create_file may have handed back
+// a file that already existed and was never ours to delete, and an explicit
+// KeepOnFailure, where the caller intends to resume into the record.
+func (s *UploadService) reclaimOrphan(ctx context.Context, fileID string, p UploadParams) {
+	if fileID == "" || p.KeepOnFailure || p.OpenIfExists {
+		return
+	}
+	// Cancellation is the case where reclamation matters most, so the clean-up
+	// gets a context that outlives the one that was cancelled.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reclaimTimeout)
+	defer cancel()
+
+	if err := s.Reclaim(ctx, fileID, p.AccessFolderID, p.SharingID); err != nil {
+		// The upload has already failed; this is reported, not propagated.
+		s.c.Logger().Warn("could not reclaim the record left by a failed upload",
+			slog.String("file_id", fileID), slog.String("name", p.Name),
+			slog.String("error", RedactString(err.Error())))
+		return
+	}
+	s.c.Logger().Debug("reclaimed the record left by a failed upload",
+		slog.String("file_id", fileID), slog.String("name", p.Name))
+}
+
+// Reclaim deletes an upstream file record outright, without a trash step.
+//
+// It exists for records an upload created and did not fill. The job engine calls
+// it when a transfer is abandoned for good, and Upload calls it for itself
+// unless UploadParams.KeepOnFailure says otherwise.
+//
+// DELETE /file.json/{session_id}/{file_id} deletes a file that was never
+// trashed (D29), which is what makes it the right call here and the wrong one
+// for anything the user can see.
+func (s *UploadService) Reclaim(ctx context.Context, fileID, accessFolderID, sharingID string) error {
+	if fileID == "" {
+		return invalidRequest("reclaiming an upload record needs a file id")
+	}
+	return s.c.Files().DeleteTrashed(ctx, fileID, accessFolderID, sharingID)
+}
+
 // ---------------------------------------------------------------- steps
 
 // createFile is step one. Passing file_size and file_hash together is what
@@ -381,6 +472,9 @@ func (s *UploadService) createFile(ctx context.Context, folderID string, p Uploa
 		Path:             EndpointUploadCreateFile,
 		SessionPlacement: SessionInBody,
 		Body:             body,
+		// The destination folder decides whether this may be written at all, so
+		// it is what the success witness is keyed on (docs/error-taxonomy.md T2).
+		Scope: folderID,
 	}, &out); err != nil {
 		return nil, err
 	}

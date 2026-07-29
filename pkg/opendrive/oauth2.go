@@ -363,6 +363,13 @@ func (a *OAuth2) classifyRenewFailure(err error, now time.Time) *APIError {
 	if !errors.As(err, &ae) {
 		return a.gate.backoff(now, &APIError{Kind: KindNetwork, Err: err})
 	}
+	// The invariant of docs/error-taxonomy.md: an error that is not API-shaped,
+	// or one still ambiguous, may not move this machine. It backs off instead of
+	// reaching any terminal verdict — an HTML 401 from a proxy is not evidence
+	// that the password changed (D38).
+	if !ae.drivesAuth() {
+		return a.gate.backoff(now, ae)
+	}
 	switch ae.Kind {
 	case KindReauthRequired:
 		return a.gate.terminal(StateReauthRequired, reauthError(
