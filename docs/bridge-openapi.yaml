@@ -1,0 +1,722 @@
+openapi: 3.1.0
+info:
+  title: OpenDrive Bridge
+  version: "1.0.0"
+  summary: A local REST API in front of OpenDrive.com.
+  description: |
+    The Bridge is path-addressed: callers name files the way they think of them
+    (`/Documents/report.pdf`) and never see an upstream identifier.
+
+    Its reason for existing is that OpenDrive's own API frequently describes
+    something other than what happened — 45 such behaviours are recorded in
+    `docs/discrepancies.md`. This boundary is where they stop. In particular:
+
+      * a refusal caused by transient pressure is never reported as a permission
+        problem, and a real permission problem is never reported as temporary;
+      * a 200 from upstream is not treated as proof anything happened;
+      * an archive that came back empty is never reported as a successful
+        download;
+      * a file that was just uploaded and is briefly not visible yet is never
+        reported as missing.
+
+    Every `error.message` is written for a person: it says what happened and,
+    where there is one, what to do about it. Clients that want to branch on the
+    failure should use `error.code`, which is a stable enumeration.
+servers:
+  - url: http://127.0.0.1:7777
+    description: The default loopback listener.
+
+security:
+  - bridgeApiKey: []
+  - {}
+
+tags:
+  - name: auth
+  - name: files
+  - name: transfers
+  - name: sharing
+
+paths:
+  /v1/health:
+    get:
+      tags: [auth]
+      operationId: health
+      summary: Liveness check.
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Sign in and store the credentials.
+      description: |
+        The credential store is checked before the password is: signing in
+        against a store that cannot hold the result would look like success and
+        then forget everything on restart. When the store is unreadable this
+        answers `keystore_unavailable` and makes no request to OpenDrive at all.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Signed in; the body is the same as /v1/auth/status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "428": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Forget every stored credential, the password included.
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/status:
+    get:
+      tags: [auth]
+      operationId: status
+      summary: What the bridge is signed in as, answered from local state.
+      description: |
+        Works when nothing is configured, when the credential store is locked and
+        when OpenDrive is unreachable — those are the moments somebody runs it.
+        Only `quota` involves a network call, and it is null rather than an error
+        when it cannot be had.
+      responses:
+        "200":
+          description: The bridge's authentication state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/ls:
+    get:
+      tags: [files]
+      operationId: list
+      summary: List a folder.
+      description: |
+        Folders and files are merged into one array. Paging past the first page
+        needs both `offset` and the previous response's `dir_update_time`:
+        OpenDrive quietly re-serves the first page without it.
+      parameters:
+        - { $ref: "#/components/parameters/Path" }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: dir_update_time
+          in: query
+          schema: { type: integer }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: The folder's contents.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Listing" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/stat:
+    get:
+      tags: [files]
+      operationId: stat
+      summary: Metadata for one file or folder.
+      description: |
+        Answered from the parent folder's listing, never from OpenDrive's
+        `info.json`, which keeps describing folders that have been deleted.
+      parameters:
+        - { $ref: "#/components/parameters/Path" }
+      responses:
+        "200":
+          description: The item.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entry" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/versions:
+    get:
+      tags: [files]
+      operationId: versions
+      summary: Earlier versions of a file.
+      parameters:
+        - { $ref: "#/components/parameters/Path" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/mkdir:
+    post:
+      tags: [files]
+      operationId: mkdir
+      summary: Create a folder.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string }
+                access:
+                  type: string
+                  enum: [private, public, hidden]
+                  default: private
+                parents:
+                  type: boolean
+                  description: Create missing intermediate folders.
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entry" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/mv:
+    post:
+      tags: [files]
+      operationId: move
+      summary: Move a file or folder.
+      requestBody: { $ref: "#/components/requestBodies/SrcDst" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/cp:
+    post:
+      tags: [files]
+      operationId: copy
+      summary: Copy a file or folder.
+      requestBody: { $ref: "#/components/requestBodies/SrcDst" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/rename:
+    post:
+      tags: [files]
+      operationId: rename
+      summary: Rename in place.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, new_name]
+              properties:
+                path: { type: string }
+                new_name: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/rm:
+    post:
+      tags: [files]
+      operationId: remove
+      summary: Move to the trash, or delete outright.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string }
+                permanent:
+                  type: boolean
+                  default: false
+                  description: Delete for good instead of using the trash.
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/trash:
+    get:
+      tags: [files]
+      operationId: trashList
+      summary: What is in the trash.
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/trash/empty:
+    post:
+      tags: [files]
+      operationId: trashEmpty
+      summary: Empty the trash for good.
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/upload:
+    post:
+      tags: [transfers]
+      operationId: upload
+      summary: Queue an upload and return a job.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [local_path, remote_path]
+              properties:
+                local_path:
+                  type: string
+                  description: A file on the machine running the bridge.
+                remote_path: { type: string }
+                overwrite: { type: boolean, default: false }
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/upload/stream:
+    put:
+      tags: [transfers]
+      operationId: uploadStream
+      summary: Upload the request body as the file, synchronously.
+      description: |
+        Needs a Content-Length: OpenDrive is told the size before the first byte
+        is sent, so it cannot be discovered as the body arrives.
+      parameters:
+        - { $ref: "#/components/parameters/Path" }
+        - name: overwrite
+          in: query
+          schema: { type: boolean }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "201": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "507": { $ref: "#/components/responses/Error" }
+
+  /v1/download:
+    post:
+      tags: [transfers]
+      operationId: download
+      summary: Queue a download and return a job.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [remote_path, local_path]
+              properties:
+                remote_path: { type: string }
+                local_path: { type: string }
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/download/stream:
+    get:
+      tags: [transfers]
+      operationId: downloadStream
+      summary: Send the file as the response body.
+      parameters:
+        - { $ref: "#/components/parameters/Path" }
+      responses:
+        "200":
+          description: The file content.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/download/archive:
+    get:
+      tags: [transfers]
+      operationId: downloadArchive
+      summary: Download a folder as a ZIP.
+      description: |
+        Folders only. OpenDrive's archive endpoint also accepts a list of files,
+        answers 200, and produces a structurally valid archive containing
+        nothing — so that option is not offered here.
+      parameters:
+        - { $ref: "#/components/parameters/Path" }
+      responses:
+        "200":
+          description: The archive.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/jobs:
+    get:
+      tags: [transfers]
+      operationId: jobList
+      summary: Every transfer the bridge knows about.
+      responses:
+        "200":
+          description: The jobs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/jobs/{id}:
+    get:
+      tags: [transfers]
+      operationId: jobGet
+      summary: One transfer.
+      parameters: [{ $ref: "#/components/parameters/JobID" }]
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [transfers]
+      operationId: jobCancel
+      summary: Cancel a transfer.
+      description: |
+        Any record the interrupted upload had created upstream is reclaimed
+        before the job reports itself cancelled, so cancelling cannot leave
+        invisible half-files behind.
+      parameters: [{ $ref: "#/components/parameters/JobID" }]
+      responses:
+        "200":
+          description: Cancelled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/share/link:
+    post:
+      tags: [sharing]
+      operationId: shareCreate
+      summary: Create a link anyone can use.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string }
+                expires_at:
+                  type: string
+                  format: date
+                  description: A calendar date; OpenDrive does not take a time.
+                max_uses: { type: integer, minimum: 0 }
+      responses:
+        "201": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/share/list:
+    get:
+      tags: [sharing]
+      operationId: shareList
+      summary: The link on one path, if there is one.
+      parameters:
+        - { $ref: "#/components/parameters/Path" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+  /v1/share:
+    delete:
+      tags: [sharing]
+      operationId: shareRevoke
+      summary: Stop a link working.
+      parameters:
+        - { $ref: "#/components/parameters/Path" }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    bridgeApiKey:
+      type: http
+      scheme: bearer
+      description: |
+        Optional on loopback, where the operating system already decides who may
+        connect. Mandatory on any other address — the daemon refuses to start
+        without one.
+
+  parameters:
+    Path:
+      name: path
+      in: query
+      required: true
+      schema: { type: string }
+      example: /Documents/report.pdf
+    JobID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+
+  requestBodies:
+    SrcDst:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [src, dst]
+            properties:
+              src: { type: string }
+              dst:
+                type: string
+                description: |
+                  An existing folder to move into, or the full new path.
+              overwrite: { type: boolean, default: false }
+
+  responses:
+    Ok:
+      description: Success.
+      content:
+        application/json:
+          schema: { type: object }
+    Error:
+      description: The standard error envelope.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, http, message]
+          properties:
+            code:
+              type: string
+              description: A stable enumeration; branch on this, not on the message.
+              enum:
+                - keystore_unavailable
+                - reauth_required
+                - token_expired
+                - captcha_required
+                - unauthorized
+                - edge_rejected
+                - not_found
+                - conflict
+                - quota_exceeded
+                - bandwidth_exceeded
+                - invalid_name
+                - upstream_error
+                - rate_limited
+                - network
+                - invalid_response
+                - invalid_request
+                - refresh_token_failed
+            http: { type: integer }
+            message:
+              type: string
+              description: |
+                Written for a person: what happened and what to do about it.
+                Never OpenDrive's own wording, which is frequently misleading.
+            upstream:
+              type: object
+              description: What OpenDrive said, for diagnosis. Not for display.
+              properties:
+                code: { type: integer }
+                message: { type: string }
+
+    Entry:
+      type: object
+      required: [name, path, kind, size, modified, public]
+      properties:
+        name: { type: string }
+        path: { type: string }
+        kind: { type: string, enum: [file, folder] }
+        size: { type: integer }
+        modified: { type: [string, "null"], format: date-time }
+        public: { type: boolean }
+        children: { type: integer }
+        link: { type: string }
+
+    Listing:
+      type: object
+      required: [path, entries, dir_update_time, next_offset]
+      properties:
+        path: { type: string }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/Entry" }
+        dir_update_time:
+          type: integer
+          description: Echo this back with `offset` to fetch the next page.
+        next_offset: { type: [integer, "null"] }
+
+    Status:
+      type: object
+      required: [account, auth_mode, state, seamless, token_expires_at, keystore, quota]
+      properties:
+        account:
+          type: [object, "null"]
+          properties:
+            username: { type: string }
+            user_id: { type: string }
+            acc_type: { type: integer }
+        auth_mode: { type: string, enum: [oauth2, session] }
+        state:
+          type: string
+          enum:
+            - not_configured
+            - authenticated
+            - refreshing
+            - reauth_required
+            - captcha_required
+            - keystore_unavailable
+        seamless:
+          type: boolean
+          description: True when the bridge can recover on its own indefinitely.
+        token_expires_at: { type: [string, "null"], format: date-time }
+        keystore:
+          type: object
+          properties:
+            backend: { type: string, enum: [keyring, encrypted_file, ephemeral, auto] }
+            available: { type: boolean }
+        quota:
+          type: [object, "null"]
+          description: |
+            All four figures are in bytes. OpenDrive reports the two limits in
+            megabytes and the two usages in bytes, in the same object; the bridge
+            normalises them so every field means the same thing.
+          properties:
+            storage_used: { type: integer }
+            storage_max: { type: integer }
+            bw_used: { type: integer }
+            bw_max: { type: integer }
+
+    Job:
+      type: object
+      required: [id, kind, state, bytes_done, bytes_total, speed, created_at, updated_at]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [upload, download] }
+        state:
+          type: string
+          enum: [queued, running, succeeded, failed, cancelled]
+        local_path: { type: string }
+        remote_path: { type: string }
+        bytes_done: { type: integer }
+        bytes_total: { type: integer }
+        speed:
+          type: number
+          description: Bytes per second, smoothed; 0 when not running.
+        attempts: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            retryable: { type: boolean }
+            http_status: { type: integer }

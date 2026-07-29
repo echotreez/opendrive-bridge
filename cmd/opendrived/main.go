@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/StormRealm/opendrive-bridge/internal/cache"
 	"github.com/StormRealm/opendrive-bridge/internal/jobs"
 	"github.com/StormRealm/opendrive-bridge/internal/keystore"
 	"github.com/StormRealm/opendrive-bridge/internal/server"
@@ -83,7 +84,13 @@ func run() error {
 	}
 	log.Info("credential store ready", slog.String("backend", string(store.Backend())))
 
-	client, err := opendrive.New(opendrive.WithLogger(log))
+	// One cache, shared: the client resolves paths through it and the server
+	// drops what a write invalidated (§10.3).
+	pathCache := cache.NewPathCache()
+	client, err := opendrive.New(
+		opendrive.WithLogger(log),
+		opendrive.WithPathCache(pathCache),
+	)
 	if err != nil {
 		return err
 	}
@@ -111,6 +118,7 @@ func run() error {
 	}, auth,
 		server.WithKeystore(store),
 		server.WithClient(client),
+		server.WithPathCache(pathCache),
 		server.WithJobEngine(engine),
 	)
 	if err != nil {

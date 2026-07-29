@@ -73,6 +73,7 @@ type Server struct {
 	store  keystore.Store
 	client *opendrive.Client
 	engine *jobs.Engine
+	cache  opendrive.PathCache
 	router chi.Router
 	http   *http.Server
 }
@@ -89,6 +90,12 @@ func WithKeystore(s keystore.Store) Option {
 // WithClient supplies the SDK client used for account and file operations.
 func WithClient(c *opendrive.Client) Option {
 	return func(srv *Server) { srv.client = c }
+}
+
+// WithPathCache gives the server the same cache the client resolves paths
+// through, so a write can drop what it invalidated (§10.3).
+func WithPathCache(pc opendrive.PathCache) Option {
+	return func(srv *Server) { srv.cache = pc }
 }
 
 // WithJobEngine supplies the transfer engine that backs /v1/jobs.
@@ -149,24 +156,52 @@ func (s *Server) routes(keyRequired bool) chi.Router {
 		r.Use(apiKeyAuth(s.cfg.APIKey, keyRequired))
 
 		r.Get("/health", s.handleHealth)
+
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", s.handleLogin)
 			r.Post("/logout", s.handleLogout)
 			r.Get("/status", s.handleStatus)
 		})
+
+		// Files and folders, addressed by path (§4.2).
+		r.Get("/ls", s.handleList)
+		r.Get("/stat", s.handleStat)
+		r.Get("/versions", s.handleVersions)
+		r.Post("/mkdir", s.handleMkdir)
+		r.Post("/mv", s.handleMove)
+		r.Post("/cp", s.handleCopy)
+		r.Post("/rename", s.handleRename)
+		r.Post("/rm", s.handleRemove)
+		r.Get("/trash", s.handleTrashList)
+		r.Post("/trash/empty", s.handleTrashEmpty)
+
+		// Transfers (§4.3).
+		r.Post("/upload", s.handleUpload)
+		r.Put("/upload/stream", s.handleUploadStream)
+		r.Post("/download", s.handleDownload)
+		r.Get("/download/stream", s.handleDownloadStream)
+		r.Get("/download/archive", s.handleArchive)
+		r.Get("/jobs", s.handleJobList)
+		r.Get("/jobs/{id}", s.handleJobGet)
+		r.Delete("/jobs/{id}", s.handleJobCancel)
+
+		// Sharing (§4.4).
+		r.Post("/share/link", s.handleShareCreate)
+		r.Get("/share/list", s.handleShareList)
+		r.Delete("/share", s.handleShareRevoke)
 	})
 
 	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, req, &RequestError{
 			Code: string(opendrive.KindNotFound), HTTP: http.StatusNotFound,
-			Message: "This bridge has no endpoint at that address. " +
-				"See docs/bridge-openapi.yaml for the ones it does have.",
+			Message: "This bridge has nothing at that address. " +
+				"See docs/bridge-openapi.yaml for what it does offer.",
 		})
 	})
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, req, &RequestError{
 			Code: string(opendrive.KindInvalidRequest), HTTP: http.StatusMethodNotAllowed,
-			Message: "That endpoint does not accept this HTTP method.",
+			Message: "That address does not accept this kind of request.",
 		})
 	})
 	return r
@@ -225,7 +260,7 @@ func decodeJSON(r *http.Request, out any) error {
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
-		return BadRequest("The request body is not the JSON this endpoint expects: " + err.Error())
+		return BadRequest("The request body is not what this request expects: " + err.Error())
 	}
 	return nil
 }

@@ -38,5 +38,13 @@ gate() {
 
 status=0
 gate "/pkg/opendrive/" 85 || status=1
-gate "/internal/" 75 || status=1
+
+# §6.3 says internal/* — every package on its own. Pooling them lets a package
+# that has drifted below the line hide behind better-covered neighbours, which
+# is exactly what happened when internal/server reached 71.7% while the pooled
+# figure still read 77.7%.
+while read -r pkg; do
+  [[ -n "$pkg" ]] || continue
+  gate "/internal/${pkg}/" 75 || status=1
+done < <(grep -o '/internal/[a-z0-9_]*/' "$profile" | sed 's|/internal/||; s|/||' | sort -u)
 exit "$status"
