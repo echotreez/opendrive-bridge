@@ -56,6 +56,7 @@ per-file SHA256 checksums.
 | [D42](#d42) | **live API is broken**, worked around | `download/all.json` answers a file list with an empty archive |
 | [D43](#d43) | confirmed, implemented | `filesettings` ignores an unknown parameter and answers 200 |
 | [D44](#d44) | confirmed, handled | a just-uploaded file is not downloadable straight away |
+| [D45](#d45) | **measured**, normalised at the Bridge | `users/info.json` mixes bytes and megabytes in one object |
 
 ---
 
@@ -1067,3 +1068,34 @@ the one thing `docs/error-taxonomy.md` exists to prevent. Instead:
 
 Covered by `TestSandboxDownloadRoundTrip` and every other download fixture,
 through `waitUntilDownloadable`.
+
+## D45 — `users/info.json` reports usage in bytes and limits in megabytes {#d45}
+
+The same object carries both, with nothing to say so:
+
+```
+StorageUsed  "188726232"     BwUsed  "6901021"
+MaxStorage   "1048576"       BwMax   "10240"
+UserPlan     "OpenDrive Unlimited Personal Plan - Year"
+```
+
+Read as one unit, the account is 180 times over a one-megabyte quota — on an
+unlimited plan. Read correctly, `MaxStorage` is 1048576 **MB** (exactly 1 TiB)
+and `BwMax` is 10240 MB (exactly 10 GiB), which are ordinary plan sizes, while
+the two *used* figures are byte counts of about 180 MB and 6.6 MB.
+
+**Status: inferred, not stated.** Upstream documents no unit for any of the four.
+The evidence is that the limits are exact binary round numbers while the usages
+are not, that the ratio is precisely 2^20, and that the alternative reading
+contradicts the plan name on the same response. One account was available to
+measure, so this is a strong inference rather than a proof, and it is written
+down here so it can be re-checked against a second account.
+
+**Consequence, and why it is the Bridge's problem:** a client showing
+"188 MB of 1 MB used" is worse than showing nothing. `/v1/auth/status` therefore
+converts both limits to bytes so that every field in `quota` means the same
+thing. The conversion is one named constant (`bytesPerMB` in
+`internal/server/auth.go`) so that a future measurement can change it in one
+place.
+
+Covered by `TestQuotaLimitsAreNormalisedToBytes`.
