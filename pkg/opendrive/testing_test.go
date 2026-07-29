@@ -16,11 +16,12 @@ import (
 
 // recordedRequest is one call the mock upstream received.
 type recordedRequest struct {
-	Method  string
-	Path    string
-	Query   url.Values
-	RawBody string
-	Body    map[string]any
+	Method      string
+	Path        string
+	Query       url.Values
+	RawBody     string
+	ContentType string
+	Body        map[string]any
 }
 
 // SessionValue returns the session parameter as it arrived, looking in the
@@ -43,10 +44,11 @@ type mockUpstream struct {
 	t   *testing.T
 	srv *httptest.Server
 
-	mu        sync.Mutex
-	requests  []recordedRequest
-	responses []mockResponse
-	handler   func(w http.ResponseWriter, r *http.Request, n int)
+	mu          sync.Mutex
+	requests    []recordedRequest
+	responses   []mockResponse
+	handler     func(w http.ResponseWriter, r *http.Request, n int)
+	handlerFrom int
 }
 
 type mockResponse struct {
@@ -61,10 +63,11 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 	m.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		rec := recordedRequest{
-			Method:  r.Method,
-			Path:    r.URL.Path,
-			Query:   r.URL.Query(),
-			RawBody: string(raw),
+			Method:      r.Method,
+			Path:        r.URL.Path,
+			Query:       r.URL.Query(),
+			RawBody:     string(raw),
+			ContentType: r.Header.Get("Content-Type"),
 		}
 		if len(raw) > 0 {
 			_ = json.Unmarshal(raw, &rec.Body)
@@ -75,6 +78,9 @@ func newMockUpstream(t *testing.T) *mockUpstream {
 		n := len(m.requests)
 		m.requests = append(m.requests, rec)
 		handler := m.handler
+		if handler != nil && n < m.handlerFrom {
+			handler = nil // the queue answers the scripted prefix
+		}
 		var resp mockResponse
 		hasResp := false
 		if len(m.responses) > 0 {
@@ -129,6 +135,16 @@ func (m *mockUpstream) pushHeader(status int, body string, h http.Header) *mockU
 func (m *mockUpstream) handle(f func(w http.ResponseWriter, r *http.Request, n int)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.handler = f
+}
+
+// handleFrom installs a handler that takes over from the nth request onwards,
+// leaving the queued responses to answer the ones before it. Multi-step
+// protocols use it: a scripted handshake followed by an open-ended loop.
+func (m *mockUpstream) handleFrom(after int, f func(w http.ResponseWriter, r *http.Request, n int)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.handlerFrom = after
 	m.handler = f
 }
 

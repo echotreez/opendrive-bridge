@@ -1001,7 +1001,7 @@ func TestSessionModeSilentlyRebuildsTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	if login.SessionID == "" || auth.SessionID() != login.SessionID {
+	if login.SessionID == "" || auth.CurrentSessionID() != login.SessionID {
 		t.Fatalf("login = %+v", login)
 	}
 	stored := store.stored()
@@ -1034,10 +1034,10 @@ func TestSessionModeSilentlyRebuildsTheSession(t *testing.T) {
 	if _, _, logins, _ := sim.counters(); logins != 2 {
 		t.Fatalf("logins = %d, want the original plus one silent rebuild", logins)
 	}
-	if auth.SessionID() == login.SessionID {
+	if auth.CurrentSessionID() == login.SessionID {
 		t.Fatal("the session id was not replaced")
 	}
-	if store.stored().SessionID != auth.SessionID() {
+	if store.stored().SessionID != auth.CurrentSessionID() {
 		t.Fatal("the new session id was not persisted")
 	}
 	if auth.AuthState() != StateAuthenticated {
@@ -1122,7 +1122,7 @@ func TestSessionAuthWithoutCredentials(t *testing.T) {
 	if auth.AuthState() != StateNotConfigured {
 		t.Fatalf("state = %q", auth.AuthState())
 	}
-	if auth.Identity().Configured() || auth.SessionID() != "" {
+	if auth.Identity().Configured() || auth.CurrentSessionID() != "" {
 		t.Fatal("nothing should be configured")
 	}
 	if err := auth.Refresh(ctx); ErrorKind(err) != KindReauthRequired {
@@ -1194,7 +1194,7 @@ func TestSessionLogoutClearsEverything(t *testing.T) {
 	if err := auth.Logout(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if auth.SessionID() != "" || store.stored() != nil {
+	if auth.CurrentSessionID() != "" || store.stored() != nil {
 		t.Fatal("Logout must clear both memory and the store")
 	}
 	if auth.AuthState() != StateNotConfigured {
@@ -1307,8 +1307,8 @@ func TestLoginFallsBackToSessionWhenTheGrantEndpointIsMissing(t *testing.T) {
 	if !ok {
 		t.Fatalf("authenticator = %T, want *SessionAuth", auth)
 	}
-	if sa.SessionID() != "SID-fallback" {
-		t.Fatalf("session = %q", sa.SessionID())
+	if sa.CurrentSessionID() != "SID-fallback" {
+		t.Fatalf("session = %q", sa.CurrentSessionID())
 	}
 	// §2.2 #5: the fallback is persisted too, so it is just as seamless.
 	if stored := store.stored(); stored == nil || stored.AuthMode != AuthModeSession || stored.Password != "pw" {

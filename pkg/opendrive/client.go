@@ -70,6 +70,15 @@ type Request struct {
 	Query url.Values
 	// Body is marshalled as JSON. Use a map or a struct; nil sends no body.
 	Body any
+	// ContentType overrides the request content type. Set it together with a
+	// []byte Body to send bytes verbatim instead of JSON, which is what the
+	// multipart chunk upload needs (§2.4). The session cannot be placed in the
+	// body of such a request.
+	ContentType string
+	// NeedsSessionID marks an endpoint that refuses the OAUTH marker and
+	// requires a real session id. Only the chunk upload does
+	// (docs/discrepancies.md D38); everything else takes either form.
+	NeedsSessionID bool
 	// SessionParam overrides the name of the session parameter
 	// (DefaultSessionParam when empty; "session_key" for download/all.json).
 	SessionParam string
@@ -331,6 +340,25 @@ func (c *Client) attempt(ctx context.Context, r Request, out any) (Credentials, 
 			}
 			return creds, &APIError{Kind: KindUnauthorized, Op: op, Err: err}
 		}
+
+		// One endpoint will not accept the OAUTH marker at all, so it is given
+		// a real session id and no token (D38).
+		if r.NeedsSessionID && creds.AccessToken != "" {
+			provider, ok := c.auth.(SessionIDProvider)
+			if !ok {
+				return creds, &APIError{Kind: KindReauthRequired, Op: op,
+					UpstreamMsg: "this endpoint needs a real session id and the authenticator cannot supply one"}
+			}
+			session, err := provider.SessionID(ctx)
+			if err != nil {
+				var ae *APIError
+				if errors.As(err, &ae) {
+					return creds, ae
+				}
+				return creds, &APIError{Kind: KindReauthRequired, Op: op, Err: err}
+			}
+			creds = Credentials{SessionID: session}
+		}
 	}
 
 	u, payload, err := c.buildURL(r, creds)
@@ -359,6 +387,9 @@ func (c *Client) attempt(ctx context.Context, r Request, out any) (Credentials, 
 	req.Header.Set("Accept", accept)
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if r.ContentType != "" {
+		req.Header.Set("Content-Type", r.ContentType)
 	}
 
 	reqID := c.newReqID()
@@ -511,6 +542,9 @@ func (c *Client) buildURL(r Request, creds Credentials) (*url.URL, []byte, error
 func marshalBody(body any) ([]byte, error) {
 	if body == nil {
 		return nil, nil
+	}
+	if raw, ok := body.([]byte); ok {
+		return raw, nil
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {

@@ -109,6 +109,21 @@ type Authenticator interface {
 	AuthState() AuthState
 }
 
+// SessionIDProvider is implemented by authenticators that can supply a real
+// upstream session id.
+//
+// It exists because one endpoint refuses OAuth2 outright: the chunk upload is
+// served by a different front end that authenticates on the session id in the
+// URL path and never looks at the access token, answering a bare HTML 401
+// instead (docs/discrepancies.md D38). A request marked NeedsSessionID is given
+// a real session in place of the OAUTH marker.
+//
+// In OAuth2 mode the session is obtained with the stored password and cached,
+// so the user is still never involved (§2.2 #1).
+type SessionIDProvider interface {
+	SessionID(ctx context.Context) (string, error)
+}
+
 // StaleTokenRefresher is an optional Authenticator extension. When the client
 // replays a request after a 401 it reports which access token failed, so that
 // an authenticator can ignore refresh requests triggered by a token another

@@ -194,14 +194,26 @@ func (a *SessionAuth) AuthState() AuthState {
 	return a.gate.state
 }
 
-// SessionID returns the current session id, empty when there is none.
-func (a *SessionAuth) SessionID() string {
+// CurrentSessionID returns the session id held right now, empty when there is
+// none. It makes no network call.
+func (a *SessionAuth) CurrentSessionID() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.cred == nil {
 		return ""
 	}
 	return a.cred.SessionID
+}
+
+// SessionID implements SessionIDProvider, rebuilding the session first when
+// there is none. In session mode this is simply the session already in use
+// (docs/discrepancies.md D38).
+func (a *SessionAuth) SessionID(ctx context.Context) (string, error) {
+	creds, err := a.Credentials(ctx)
+	if err != nil {
+		return "", err
+	}
+	return creds.SessionID, nil
 }
 
 // Info returns the account information the last login response carried.

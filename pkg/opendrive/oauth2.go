@@ -154,6 +154,63 @@ func (a *OAuth2) EnsureFresh(ctx context.Context) error {
 	return asError(a.renewLocked(ctx))
 }
 
+// SessionID implements SessionIDProvider: it returns a real upstream session
+// id, minting one from the stored password when there is none yet.
+//
+// The chunk upload endpoint refuses the OAUTH marker (docs/discrepancies.md
+// D38), so an OAuth2 bridge still needs a session to upload. Since the password
+// is persisted for exactly this kind of silent recovery (§2.2 #1), the user is
+// never involved — unless they turned persistence off, which is reported as a
+// reauth_required with an explanation rather than a bare failure.
+func (a *OAuth2) SessionID(ctx context.Context) (string, error) {
+	a.mu.Lock()
+	if err := a.ensureLoaded(ctx); err != nil {
+		a.mu.Unlock()
+		return "", err
+	}
+	if a.cred != nil && a.cred.SessionID != "" {
+		id := a.cred.SessionID
+		a.mu.Unlock()
+		return id, nil
+	}
+	if a.cred == nil || a.cred.Password == "" {
+		a.mu.Unlock()
+		return "", reauthError("this operation needs an upstream session, which requires the " +
+			"account password; it is not stored because persist_password is off, so log in again")
+	}
+	username, password := a.cred.Username, a.cred.Password
+	a.mu.Unlock()
+
+	// The login is made outside the lock: it is an ordinary API call and must
+	// not block Credentials for its duration.
+	sa := NewSessionAuth(a.c, WithCredentialStore(nil), WithClock(a.cfg.now))
+	login, err := sa.login(ctx, username, password)
+	if err != nil {
+		return "", err
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cred != nil {
+		next := a.cred.Clone()
+		next.SessionID = login.SessionID
+		a.adopt(ctx, next)
+	}
+	return login.SessionID, nil
+}
+
+// InvalidateSessionID forgets the cached session so the next SessionID call
+// mints a fresh one, which is what an expired session needs.
+func (a *OAuth2) InvalidateSessionID(ctx context.Context) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cred != nil && a.cred.SessionID != "" {
+		next := a.cred.Clone()
+		next.SessionID = ""
+		a.adopt(ctx, next)
+	}
+}
+
 // Logout drops every credential, locally and in the store (§4.1).
 func (a *OAuth2) Logout(ctx context.Context) error {
 	a.mu.Lock()

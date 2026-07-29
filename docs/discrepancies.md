@@ -46,6 +46,11 @@ per-file SHA256 checksums.
 | [D32](#d32) | **resolved**, workaround for P3 | `file/verifypassword.json` is inert; the password gates the public route only |
 | [D33](#d33) | blocked on an owner account | the whole sharing module is closed to an account user |
 | [D34](#d34) | new endpoint, implemented | `users/userlogscursor.json` is keyset paging the PDF omits |
+| [D35](#d35) | **spec is wrong**, implemented | `TotalWritten` counts the chunk, not the running total |
+| [D36](#d36) | **spec is wrong**, implemented | a deduplicated upload must close *without* `temp_location` |
+| [D37](#d37) | confirmed, implemented | a wrong chunk offset is refused with the authoritative resume point |
+| [D38](#d38) | **OAuth2 not accepted**, implemented | the chunk upload endpoint requires a real session id |
+| [D39](#d39) | **re-diagnosed**, fixed | leaked test artefacts make writes fail with a permission error |
 
 ---
 
@@ -662,3 +667,144 @@ cursor endpoint is the correct one for anything longer than a glance.
 **Resolution:** both are bound — `Logs` for the numbered form and `LogsCursor`
 for the keyset form — with the doc comment steering callers to the latter.
 Covered by `TestUsersLogsCursorPagesByKeyset` and `TestSandboxUserLogs`.
+
+## D35 — `TotalWritten` counts the chunk, not the running total {#d35}
+
+Whitepaper §2.4 says to check `TotalWritten` against "本地已发送字节数" — the
+bytes sent so far — which reads as a running total. It is not. Uploading 1280
+bytes in three chunks:
+
+| chunk | bytes sent | `TotalWritten` |
+|---|---|---|
+| 1 | 426 | 426 |
+| 2 | 426 | **426** |
+| 3 | 428 | **428** |
+
+A cumulative reading would have expected 426 / 852 / 1280. The server does keep
+a running total — it appears in the offset-mismatch message of D37 — but the
+per-chunk reply reports only that chunk.
+
+**Consequence:** verifying it as a cumulative counter fails on the second chunk
+of every multi-chunk upload, and verifying nothing lets a short write through
+silently.
+
+**Resolution:** the pipeline compares `TotalWritten` with the length of the
+chunk it just sent. Covered by `TestUploadRejectsAShortChunkWrite` and
+`TestSandboxUploadCrossesChunkBoundary`.
+
+## D36 — a deduplicated upload must close *without* `temp_location` {#d36}
+
+When `create_file` answers `RequireHashOnly: 1`, §2.4 says to skip straight to
+`close_file_upload`. It does not say what to send, and three of the four
+plausible readings fail:
+
+| close call | result |
+|---|---|
+| with the `TempLocation` from `create_file` | 400 "Invalid upload file size. Total uploaded=0. File size=1280" |
+| after `open_file_upload`, with its `TempLocation` | 400, same message |
+| after sending a zero-length chunk | 400, same message |
+| **with no `temp_location` at all** | **200**, file created with the right size and hash |
+
+So the deduplicated close is the one call in the pipeline that must omit a
+parameter it otherwise always sends.
+
+**Resolution:** the dedupe branch closes without `temp_location` and without
+`file_compressed`. Covered by `TestUploadDeduplicates` (which asserts the field
+is absent) and `TestSandboxUploadDeduplicates`.
+
+## D37 — a wrong chunk offset is refused with the authoritative resume point {#d37}
+
+```
+POST /upload/upload_file_chunk2.json/{session}/{file_id}?chunk_offset=999999
+→ 400 {"error":{"code":400,"message":"Incorrect chunk offset: uploaded=0, chunk_offset=999999"}}
+```
+
+The refusal carries `uploaded=N`: exactly how many bytes upstream holds. That is
+the resume mechanism §2.4 asks for, and it is more useful than the per-chunk
+`TotalWritten`, because it survives a lost reply or a crash.
+
+**Resolution:** `sendChunkResuming` parses it and does one of three things —
+skip a chunk that already landed, re-send only the tail when a partial write
+landed (possible because the chunk is still buffered), or fail with a clear
+message when the offset is behind the current chunk and the source cannot
+rewind. Covered by `TestUploadResumesFromTheServerOffset`,
+`TestUploadResendsTheTailAfterAPartialWrite`,
+`TestUploadFailsWhenTheResumeOffsetIsUnreachable` and
+`TestSandboxUploadRejectsAWrongOffset`.
+
+## D38 — the chunk upload endpoint does not accept OAuth2 {#d38}
+
+Every other endpoint takes `session_id=OAUTH` plus `access_token` in the query
+(§2.2 B). `upload_file_chunk2.json` does not — and it does not answer like the
+API at all:
+
+| path segment | query | result |
+|---|---|---|
+| `OAUTH` | `access_token=…` | **401**, an nginx HTML page from openresty |
+| `OAUTH` | none | 401, same HTML |
+| the access token itself | none | 401, same HTML |
+| **a real session id** | none | **200** `{"TotalWritten":…}` |
+
+The HTML body gives it away: the chunk upload is served by a different front end
+that authenticates on the session id in the URL and never consults the token.
+`create_file`, `open_file_upload` and `close_file_upload` are all fine with
+OAuth2 — only the chunk transfer is affected.
+
+**Consequence:** an OAuth2 bridge cannot upload without also holding a session.
+
+**Resolution:** `Request.NeedsSessionID` marks such an endpoint, and the
+`SessionIDProvider` interface supplies one. In OAuth2 mode `OAuth2.SessionID`
+mints a session with the stored password and caches it in the credential store,
+so the user is never involved — which is precisely what persisting the password
+was for (§2.2 #1). With `persist_password: false` the upload reports
+`reauth_required` with an explanation rather than a bare 401.
+
+Also worth noting: because this front end is not the API, its errors are not the
+API's either. A bare HTML 401 classifies as `token_expired`, which would send the
+auth state machine chasing a token that was never the problem — another reason
+to send the right credential in the first place.
+
+## D39 — a crowded base folder makes writes fail with a permission error {#d39}
+
+Integration runs failed in a pattern that looked random: some `create_file` or
+`file.json` calls answered `403 "Your user access enables you only to view this
+folder"` while others in the same run succeeded, and every call succeeded when
+replayed by hand a moment later. A different test failed on each run.
+
+**First diagnosis (wrong).** The login burst was blamed, and sharing one login
+across the test binary seemed to fix it. It did not — the suite kept failing,
+and the same `-run TestSandbox` selection that passed in the morning failed
+consistently by the evening.
+
+**Actual cause: leaked test artefacts.** The capability probe created a copy
+(`<name>-copy`) and never removed it, so one folder leaked per run. Once about a
+dozen had accumulated in the base folder, writes into that folder began failing
+with the misleading permission message. Deleting the 16 leftovers made the suite
+pass again immediately, and it has passed on every run since the probe learned
+to clean up after itself.
+
+Ruled out along the way, each tested in isolation against the live account:
+
+| hypothesis | test | result |
+|---|---|---|
+| write rate limit | 14 rapid `create_file` | all 200 |
+| login burst | 6 logins, then writes | all 200 |
+| request volume | 120 mixed requests | all 200 |
+| new-folder permission lag | write into a just-created folder, 0–2 s delay | all 200 |
+| session/OAuth interference | session upload, then OAuth writes | all 200 |
+| accumulated artefacts | delete 16 leftover folders, rerun | **suite goes green** |
+
+**Consequences.**
+
+1. Integration tests must remove *every* artefact, including intermediate ones
+   like the copy a probe makes. `TestSandboxWriteCapabilities` now registers a
+   cleanup for the copy.
+2. More importantly for the bridge: upstream answers a resource-pressure
+   condition with a 403 whose text blames permissions. `§4.5` classifies it as
+   `upstream_error`, which is right in that it is not a credential problem, but
+   a bulk upload that trips it will surface "contact your administrator" to the
+   user. P3's job engine should treat a 403 carrying this message as
+   retryable-after-backoff rather than fatal, and the P4 error mapping should
+   not present it as a permission failure. Tracked for the transfer pipeline.
+
+Covered by `TestSandboxWriteCapabilities`.

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,9 +29,19 @@ import (
 	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
 )
 
-// newSandboxClient logs in with the credentials in the environment. It skips
-// the test rather than failing when they are absent, so a plain
-// `go test -tags=integration ./...` on a machine without credentials is quiet.
+// sandboxOnce guards the shared client. Every test reuses one login, as §6.2
+// asks, to stay clear of captcha throttling. (A login burst was once blamed for
+// the spurious permission errors in D39; the real cause turned out to be leaked
+// test artefacts, but sharing the login is still the right thing to do.)
+var (
+	sandboxOnce   sync.Once
+	sandboxClient *opendrive.Client
+	sandboxErr    error
+)
+
+// newSandboxClient returns the shared client, logging in once per test binary.
+// It skips rather than fails when credentials are absent, so a plain
+// `go test -tags=integration ./...` on a machine without them is quiet.
 func newSandboxClient(t *testing.T) (*opendrive.Client, context.Context) {
 	t.Helper()
 
@@ -39,20 +50,30 @@ func newSandboxClient(t *testing.T) (*opendrive.Client, context.Context) {
 		t.Skip("set ODB_SPEC_USER and ODB_SPEC_PASS (see scripts/integration-test.sh)")
 	}
 
-	c, err := opendrive.New()
-	if err != nil {
-		t.Fatalf("client: %v", err)
-	}
-	auth := opendrive.NewOAuth2(c)
-	c.SetAuthenticator(auth)
+	sandboxOnce.Do(func() {
+		c, err := opendrive.New()
+		if err != nil {
+			sandboxErr = err
+			return
+		}
+		auth := opendrive.NewOAuth2(c)
+		c.SetAuthenticator(auth)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := auth.Login(ctx, user, pass); err != nil {
+			sandboxErr = err
+			return
+		}
+		sandboxClient = c
+	})
+	if sandboxErr != nil {
+		t.Fatalf("login: %v", sandboxErr)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	t.Cleanup(cancel)
-
-	if err := auth.Login(ctx, user, pass); err != nil {
-		t.Fatalf("login: %v", err)
-	}
-	return c, ctx
+	return sandboxClient, ctx
 }
 
 // writableBase returns the folder new artefacts belong under. An account user
@@ -288,10 +309,23 @@ func TestSandboxWriteCapabilities(t *testing.T) {
 	report("create", nil)
 	_, renameErr := f.Rename(ctx, id, name+"-renamed")
 	report("rename", renameErr)
-	_, copyErr := f.MoveCopy(ctx, opendrive.MoveCopyParams{
+	copied, copyErr := f.MoveCopy(ctx, opendrive.MoveCopyParams{
 		FolderID: id, DstFolderID: base, Move: false, NewName: name + "-copy",
 	})
 	report("copy", copyErr)
+	// The copy is a second artefact and has to go too: leaked probe folders
+	// accumulate in the base folder and eventually make writes fail with a
+	// misleading 403 (docs/discrepancies.md D39).
+	if copyErr == nil && copied != nil {
+		if copyID := string(copied.FolderID); copyID != "" && copyID != id {
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+				defer cancel()
+				_ = f.Trash(ctx, []string{copyID})
+				_ = f.Remove(ctx, []string{copyID})
+			})
+		}
+	}
 	report("settings", f.UpdateSettings(ctx, id, opendrive.FolderSettings{
 		Description: "probe",
 	}))
