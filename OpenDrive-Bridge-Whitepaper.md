@@ -214,7 +214,11 @@ Upstream 提供两套并存的认证:
 
 ### 2.6 文档与线上规格的已知偏差 & 陷阱 Known Discrepancies & Gotchas
 
-> **v1.1 起的优先级声明**:本清单撰写于 v1.0(基于 PDF 与首次线上抓取)。P0/P1 实施后,已验证的实际差异记录在仓库 `docs/discrepancies.md`(截至本版 21 条),**凡与本节冲突,以 discrepancies.md 与存档规格为准**。已确认 PDF 有错的三例:面包屑端点线上拼写正确为 `breadcrumb.json`(本节 #3 相应作废);文件资源为 `/file.json` 而非 `/file/file.json`(D14);`download/all.json` 用的就是 `session_id`(本节 #2 的 `session_key` 说法来自 PDF,线上规格不同,D1);另有三个端点动词与 PDF 不符(D15)。
+> **v1.1 起的优先级声明**:本清单撰写于 v1.0(基于 PDF 与首次线上抓取)。P0/P1 实施后,已验证的实际差异记录在仓库 `docs/discrepancies.md`(截至本版 21 条),**凡与本节冲突,以 discrepancies.md 与存档规格为准**。已确认 PDF 有错的三例:面包屑端点线上拼写正确为 `breadcrumb.json`(本节 #3 相应作废);文件资源为 `/file.json` 而非 `/file/file.json`(D14);`download/all.json` 用的就是 `session_id`(本节 #2 的 `session_key` 说法来自 PDF,线上规格不同,D1,P3 已在真机复验:发 `session_key` 会被忽略并退回匿名,返回 403);另有三个端点动词与 PDF 不符(D15)。
+
+> **P3 起的第二次声明——本节已被取代。** 本节 14 条陷阱是「PDF 与线上规格的静态比对」,而 P3 实测发现真正的风险不在规格差异,而在**上游的状态码与文案经常描述的不是真实发生的事**:D38 的 HTML 401 与 token 无关,D39/D40 的 403 文案说权限、真实权限不足返回的文案与它逐字节相同,D42 的空归档带着 200 返回。这类"谎言"无法用静态清单穷举。
+>
+> 因此:**`docs/error-taxonomy.md` 是错误语义的现行权威**,它以 16 种"伪装形态"取代本节的 14 条,每一条都带实测的请求与响应、正确的 `Kind` 与判定依据;实现在 `pkg/opendrive/classify.go`(见 §4.5.1)。本节保留作为历史记录与 §6.3 测试用例的来源(14 条各有至少一个用例,该要求不变),但**遇到冲突一律以 taxonomy 为准**,新发现的形态写进 taxonomy 而不是本节。
 
 开发 AI 必须注意以下坑(均来自本次对 PDF、样本代码和线上 Swagger 的交叉比对):
 

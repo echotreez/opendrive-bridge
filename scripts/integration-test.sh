@@ -25,4 +25,7 @@ fi
 export ODB_SPEC_USER ODB_SPEC_PASS
 
 cd "$repo_root"
-exec go test -tags=integration -count=1 ./pkg/opendrive/ "$@"
+# -p 1 runs the packages one after another. Both write to the same sandbox
+# account, and upstream refuses concurrent writes often enough as it is
+# (docs/discrepancies.md D39) without two suites competing for the same folders.
+exec go test -tags=integration -count=1 -p 1 ./pkg/opendrive/ ./internal/jobs/ "$@"
