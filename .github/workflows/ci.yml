@@ -271,6 +271,21 @@ jobs:
             VERSION=ci-${{ github.sha }}
             COMMIT=${{ github.sha }}
 
+      # Scanned here as well as before publication, for the reason this project
+      # has now met four times: a gate that only runs at release time turns every
+      # slow-moving problem into a surprise on the day you want to ship. This one
+      # found twelve HIGH findings in the Go standard library compiled into the
+      # image, because the Dockerfile's builder had been left on an old Go while
+      # everything else moved on. Nothing in the code was wrong and no test could
+      # have said so.
+      - name: trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: opendrive-bridge:ci
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
       - name: The image is small enough to be worth shipping
         run: |
           set -euo pipefail

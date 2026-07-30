@@ -12,7 +12,30 @@
 #   docker buildx build --platform linux/amd64,linux/arm64 \
 #     -f deploy/docker/Dockerfile -t <registry>/opendrive-bridge:<version> --push .
 
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+# The Go version here is not a preference, it is the standard library that ends up
+# inside the shipped binary. This was golang:1.24-alpine while everything else in
+# the project built with the current toolchain, and trivy's first run found twelve
+# HIGH findings in stdlib v1.24.13 — all of them fixed months earlier in 1.25 and
+# 1.26. Nothing was wrong with our code; the container was simply built by an old
+# compiler and nobody had looked.
+#
+# govulncheck did not object, and was right not to: it reports vulnerabilities the
+# code actually reaches, using the toolchain running it. trivy reads the version
+# stamped into the binary and reports everything known about it. Both answers are
+# correct, which is why the release gate needs both.
+#
+# Deliberately unpinned, to match the policy the rest of the project already
+# follows: the six released binaries are built with `go-version: stable`, so a
+# pinned container was guaranteed to drift older than them, which is precisely
+# how this happened. Pinning the minor would have been the same bug with a
+# shorter fuse — and it could not be checked here anyway, since the newest 1.26
+# image is not necessarily the patch release a given CVE was fixed in.
+#
+# The risk of floating is a toolchain bump breaking the build; Go's compatibility
+# promise makes that unlikely, and CI would hit it at the same moment through
+# `stable`. trivy now scans the image on every change, so an old standard library
+# is caught by whatever change is in flight rather than at release time.
+FROM --platform=$BUILDPLATFORM golang:alpine AS builder
 
 # Cross-compilation targets come from buildx.
 ARG TARGETOS
