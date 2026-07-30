@@ -313,9 +313,14 @@ first page again.
 
 ## Appendix: what the security scanners say
 
-Every release runs `govulncheck`, `gosec`, `gitleaks` and `trivy`, and will not
-publish if any of them reports something high severity. Three medium findings are
-expected and reviewed, listed here so nobody has to rediscover them:
+`govulncheck` and `gosec` run on every change; `gitleaks` and `trivy` run before
+anything is published, and nothing is published if any of them objects.
+
+Three medium findings were expected and reviewed. Listing them here turned out
+not to be enough: the first real run of the release workflow failed on them,
+because a note in a document is not something a scanner can read. They now carry
+`#nosec` annotations in the code itself, with the reasons below, and the gate
+fails on anything medium or higher — so these three pass and a new one does not.
 
 | finding | why it is there |
 |---|---|

@@ -111,6 +111,11 @@ func (s *fileStore) Save(_ context.Context, cred *opendrive.StoredCredentials) e
 	if cred == nil {
 		return errors.New("keystore: refusing to store nil credentials")
 	}
+	// #nosec G117 -- reviewed: same deliberate decision as the keyring backend
+	// (whitepaper §9.2), and here the plaintext never leaves this function —
+	// s.encrypt seals it with AES-256-GCM under ODB_STATE_KEY before anything is
+	// written. This backend exists for machines with no vault at all, which is
+	// why it demands a key rather than inventing one.
 	plain, err := json.Marshal(cred)
 	if err != nil {
 		return fmt.Errorf("keystore: cannot encode credentials: %w", err)

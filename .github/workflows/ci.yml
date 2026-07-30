@@ -38,6 +38,38 @@ jobs:
         with: { go-version: 'stable' }
       - uses: golangci/golangci-lint-action@v8
 
+      # The security scanners run here, on every pull request, and not only in
+      # the release workflow. They used to run only there, which meant the
+      # earliest a finding could surface was the day someone wanted to ship — and
+      # that is exactly how it went: the first execution of release.yml failed on
+      # gosec, on code that had been on main for weeks.
+      #
+      # A gate that only runs when you are trying to release is not a gate, it is
+      # an ambush.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      # The exclusions are the ones this project has argued through: MD5 is
+      # required by OpenDrive's own upload protocol and never used for security
+      # (G401/G501), and the files the daemon opens are the ones its caller asked
+      # it to open (G304).
+      #
+      # Everything else must be either fixed or suppressed at the line with a
+      # reason, which is why this fails on medium as well as high: the three
+      # deliberate findings in internal/keystore now carry #nosec annotations
+      # explaining themselves, so any medium that appears here is a new one.
+      - name: gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec="$(go env GOPATH)/bin/gosec"
+          # For the record, everything it can see, including the low findings
+          # that do not fail the build.
+          "$gosec" -quiet -exclude=G401,G501,G304 -exclude-dir=testdata ./... || true
+          echo "--- the gate: medium and above ---"
+          "$gosec" -quiet -severity=medium -exclude=G401,G501,G304 -exclude-dir=testdata ./...
+
   # Every target compiles. Compiling is necessary and not sufficient, which is
   # what the smoke job below is for.
   crossbuild:

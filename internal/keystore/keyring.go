@@ -210,6 +210,13 @@ func (s *keyringStore) Delete(ctx context.Context) error {
 // of quotes and newlines, which matters because the macOS tool parses its input
 // as a command line.
 func encodePayload(cred *opendrive.StoredCredentials) (string, error) {
+	// #nosec G117 -- reviewed: the password is in this struct on purpose, and
+	// serialising it is the entire job of a credential store. Whitepaper §9.2
+	// records the decision and its cost: OpenDrive has no refresh token that
+	// outlives a password change, so silent unattended operation requires
+	// keeping the password, and `persist_password: false` is the way out for
+	// anyone who would rather sign in by hand. The destination is the OS vault,
+	// which is the only place this package will write it.
 	raw, err := json.Marshal(cred)
 	if err != nil {
 		return "", fmt.Errorf("keystore: cannot encode credentials: %w", err)
@@ -241,7 +248,18 @@ func runCommand(ctx context.Context, args []string, stdin string) (string, error
 	if len(args) == 0 {
 		return "", errors.New("keystore: empty command")
 	}
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...) //nolint:gosec // fixed binaries, arguments are not user input
+	// #nosec G204 -- reviewed: every caller in this file builds args from a
+	// constant binary name and constant flags. The only value that varies is the
+	// account name, and the secret itself never appears here at all: it goes in
+	// on stdin, because process arguments are readable by any other process on
+	// the machine (§9.2). The suppression is deliberate and narrow.
+	//
+	// This line previously carried //nolint:gosec, which is golangci-lint's
+	// directive. golangci-lint does not run gosec here — there is no
+	// .golangci.yml, and gosec is not in its default set — while gosec, which
+	// does run, ignores //nolint. The reason was written for the wrong tool and
+	// therefore silenced nothing.
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}

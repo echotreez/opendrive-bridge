@@ -48,10 +48,25 @@ jobs:
       # has argued through: MD5 is required by OpenDrive's own protocol and is
       # never used for security (G401/G501), and the file paths the daemon opens
       # are the ones its caller asked for (G304).
+      #
+      # The same two scanners now also run on every pull request, in ci.yml's
+      # lint job. They are kept here as well so that a release cannot be cut
+      # from a commit that never went through a pull request.
+      #
+      # `-severity=medium` is the gate rather than plain `gosec`, which fails on
+      # any finding at all. The first run of this workflow failed on three
+      # reviewed medium findings in internal/keystore — a deliberate subprocess
+      # and the deliberate password persistence of §9.2 — that had been listed
+      # in docs/deployment.md as expected but never suppressed in the code. They
+      # carry #nosec annotations with reasons now, so a medium finding here is
+      # something new and should stop a release.
       - name: gosec
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
-          "$(go env GOPATH)/bin/gosec" -exclude=G401,G501,G304 -exclude-dir=testdata ./...
+          gosec="$(go env GOPATH)/bin/gosec"
+          "$gosec" -quiet -exclude=G401,G501,G304 -exclude-dir=testdata ./... || true
+          echo "--- the gate: medium and above ---"
+          "$gosec" -quiet -severity=medium -exclude=G401,G501,G304 -exclude-dir=testdata ./...
 
       # Nothing that looks like a credential may be in the history. This project
       # keeps test credentials in the OS keychain precisely so that this passes.
