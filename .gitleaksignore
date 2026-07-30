@@ -1,0 +1,61 @@
+# Findings in git history that gitleaks is right to flag and that are not
+# actionable, one line each, with the reason.
+#
+# Only a fingerprint that has been looked at belongs here. Blanket-allowlisting
+# a path is what would make this gate worthless: testdata/fixtures/ is recorded
+# from the live API, so it is exactly where a real credential would hide, and it
+# is not excluded as a directory.
+#
+# Every entry appears twice because each change landed once on its branch and
+# once as the squashed commit on main.
+#
+# --------------------------------------------------------------------------
+# 1. A real access token, and the only entry here that was ever a credential.
+#
+# TestAWrappedTransportErrorCannotLeakACredential was written after a live token
+# leaked into an integration-test log through a wrapped *url.Error. The test used
+# the exact string that leaked, on the reasoning that a regression test should
+# reproduce what failed — which committed a live credential to the repository, in
+# a change whose subject was not leaking credentials.
+#
+# The token was a short-lived session token issued to the sandbox test account
+# and committed on 2026-07-29; it grants nothing now, and the account it belonged
+# to is a test account holding no real data. The working tree uses "deadbeef"
+# repeated instead, which is the same shape and obviously nobody's.
+#
+# History is deliberately not rewritten: every commit hash
+# would change, force-push would break the commit links in the merged pull
+# requests that document how this project reached its decisions, and the token
+# is long dead — the cost is real and the benefit is not.
+606479b418adeba3e538f65b8debc06ac270efa9:pkg/opendrive/classify_test.go:generic-api-key:612
+d56c88ff41a55b3ae79795f370ab0450d9042fa0:pkg/opendrive/classify_test.go:generic-api-key:605
+
+# --------------------------------------------------------------------------
+# 2. A hand-written fixture value that says REDACTED in it.
+#
+# testdata/fixtures/file/info.json carries a TempStreamingLink whose temp_auth
+# parameter is the marker file_test.go asserts gets redacted (§9.4). The file id
+# is base64 "ExampleFileID", the owner is "Tester Tester" and the hash is the MD5
+# of an empty string: the whole fixture is constructed, not recorded. Flagged for
+# entropy in a value that literally contains the word REDACTED.
+ff6d443391f5766d1366e1bb85336b860b6eacf9:testdata/fixtures/file/info.json:generic-api-key:17
+
+# --------------------------------------------------------------------------
+# 3. A password this test puts on a file it created and then deletes.
+#
+# TestSandboxPasswordDoesNotGateTheOwner sets a password on a throwaway file to
+# prove D32: the password gates the public web page only, and the owner is never
+# asked for it. It is not a credential for anything — no account, no session, no
+# file that outlives the test.
+f3899955f8fb7ca08efbd612059da4d21103bde1:pkg/opendrive/download_integration_test.go:generic-api-key:320
+0ab1cc8036d5027626952e0ace8616a352e3b2a6:pkg/opendrive/download_integration_test.go:generic-api-key:320
+
+# --------------------------------------------------------------------------
+# 4. A made-up token in a redaction test's input.
+#
+# TestUpstreamDetailIsRedacted feeds an upstream message containing
+# "access_token=..." and asserts the value does not reach the response body. The
+# value was hex digits in sequence; it is now a repeating pattern, for the same
+# reason as (1) — a test about not leaking credentials should not need one.
+64d251105879fa160a7158bcc9bc046c2ab9309f:internal/server/errors_test.go:generic-api-key:314
+5233a5d10559e775973ad8103d8ba5d9a986394c:internal/server/errors_test.go:generic-api-key:314

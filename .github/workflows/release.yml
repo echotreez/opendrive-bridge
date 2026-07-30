@@ -69,7 +69,14 @@ jobs:
           "$gosec" -quiet -severity=medium -exclude=G401,G501,G304 -exclude-dir=testdata ./...
 
       # Nothing that looks like a credential may be in the history. This project
-      # keeps test credentials in the OS keychain precisely so that this passes.
+      # keeps test credentials in the OS keychain precisely so that this passes —
+      # and on the first run of this workflow it did not pass: a regression test
+      # written to prove that tokens do not leak had committed the live token
+      # that leaked. See .gitleaksignore, which records every reviewed finding
+      # with its reason, including that one.
+      #
+      # This also runs on every pull request now (ci.yml), so a release is not
+      # the first place a credential can be noticed.
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:

@@ -56,7 +56,7 @@ func TestFileModelsDecodeRecordedResponses(t *testing.T) {
 	}
 	// §9.4: the temporary streaming link carries a temp_auth credential, so it
 	// must not survive redaction.
-	mustNotContain(t, RedactString(info.TempStreamingLink), "Or9w8IYu", "temp streaming link")
+	mustNotContain(t, RedactString(info.TempStreamingLink), "NOTAREALTOKEN", "temp streaming link")
 }
 
 // D30: the full-path endpoint answers in a field called DownloadLink and with

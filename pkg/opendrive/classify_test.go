@@ -607,8 +607,18 @@ func TestTheClassifierAloneDecidesRetries(t *testing.T) {
 
 // A wrapped transport error is not ours and quotes the full request URL. This
 // leaked a live access token into an integration-test log, which is exactly what
-// §9.4 forbids; the string below is the shape that did it.
+// §9.4 forbids.
+//
+// The constant below is deliberately not the token that leaked. This test was
+// first written with the real one, on the reasoning that a regression test
+// should use the exact string that failed — which put a live credential into
+// the repository, in a commit whose message was about not leaking credentials.
+// A token-shaped string proves the same thing: what is being tested is that a
+// URL query parameter never survives into the message, and redaction does not
+// know or care whether the value was ever valid.
 func TestAWrappedTransportErrorCannotLeakACredential(t *testing.T) {
+	// 40 hex characters, the shape of an OpenDrive access token, and readable
+	// at a glance as something no account ever issued.
 	const token = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 	wrapped := errors.New(`Post "https://dev.opendrive.com/api/v1/folder/remove.json?access_token=` +
 		token + `": context deadline exceeded`)

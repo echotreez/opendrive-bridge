@@ -317,7 +317,9 @@ func TestSandboxPasswordDoesNotGateTheOwner(t *testing.T) {
 	c, ctx := newSandboxClient(t)
 	scratch := fileScratch(t, ctx, c)
 
-	const password = "odb-test-pass-4721"
+	// Not a secret: a password this test puts on a file it just created and
+	// deletes, on a sandbox account, to prove the owner is never asked for it.
+	const password = "not-a-secret-file-password"
 	content := uploadPayload(512, fmt.Sprintf("pw-%d", time.Now().UnixNano()))
 	fileID, want := uploadForDownload(t, ctx, c, scratch,
 		fmt.Sprintf("odb-pw-%d.bin", time.Now().Unix()), content)

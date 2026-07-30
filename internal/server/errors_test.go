@@ -311,9 +311,9 @@ func TestRequestErrorsAreReportedAsTheirOwn(t *testing.T) {
 func TestUpstreamDetailIsRedacted(t *testing.T) {
 	_, got := renderError(t, &opendrive.APIError{
 		Kind:        opendrive.KindUpstreamError,
-		UpstreamMsg: `refused for https://x/api/v1/file.json?access_token=abcdef0123456789`,
+		UpstreamMsg: `refused for https://x/api/v1/file.json?access_token=aaaabbbbccccdddd`,
 	})
-	if got.Upstream != nil && strings.Contains(got.Upstream.Message, "abcdef0123456789") {
+	if got.Upstream != nil && strings.Contains(got.Upstream.Message, "aaaabbbbccccdddd") {
 		t.Errorf("a token reached the response body: %q", got.Upstream.Message)
 	}
 }

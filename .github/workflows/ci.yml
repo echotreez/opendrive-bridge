@@ -32,8 +32,24 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    # gitleaks asks GitHub which commits a pull request contains, which needs
+    # pull-requests: read. Without it the step fails with "Resource not
+    # accessible by integration" and a 403 — a message that says nothing about
+    # credentials, in a step whose only job is to find them. Anyone reading a red
+    # gitleaks tick would reasonably assume the worst, so it is worth naming
+    # here: this permission is why the step can tell the difference.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
+      # fetch-depth: 0 because gitleaks scans the commit range base^..head, and
+      # the default shallow checkout does not contain the base — git answers
+      # "ambiguous argument", gitleaks reports "no leaks found in partial scan",
+      # and the step fails anyway. A scanner that finds nothing because it looked
+      # at nothing is the worst of the three ways this step can go wrong, since
+      # the summary line is indistinguishable from a clean result.
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: actions/setup-go@v5
         with: { go-version: 'stable' }
       - uses: golangci/golangci-lint-action@v8
@@ -69,6 +85,22 @@ jobs:
           "$gosec" -quiet -exclude=G401,G501,G304 -exclude-dir=testdata ./... || true
           echo "--- the gate: medium and above ---"
           "$gosec" -quiet -severity=medium -exclude=G401,G501,G304 -exclude-dir=testdata ./...
+
+      # Also moved forward from the release workflow, and for a sharper reason
+      # than the other two: on its first run gitleaks found a real access token
+      # in the history — committed by a test written to prove that tokens do not
+      # leak. A scanner that only runs at release time would have let the next
+      # one sit there just as long. Reviewed findings are recorded, one line each
+      # with its reason, in .gitleaksignore, which gitleaks reads itself.
+      #
+      # Nothing here excludes testdata/fixtures as a directory. Fixtures are
+      # recorded from the live API, which makes them the likeliest hiding place
+      # for a real credential, so each one is allowlisted individually or not at
+      # all.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Every target compiles. Compiling is necessary and not sufficient, which is
   # what the smoke job below is for.

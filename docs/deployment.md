@@ -313,8 +313,15 @@ first page again.
 
 ## Appendix: what the security scanners say
 
-`govulncheck` and `gosec` run on every change; `gitleaks` and `trivy` run before
-anything is published, and nothing is published if any of them objects.
+`govulncheck`, `gosec` and `gitleaks` run on every change; `trivy` scans the
+container image before it is pushed. Nothing is published if any of them objects.
+
+`.gitleaksignore` in the repository root lists every finding that has been looked
+at and dismissed, one line each with the reason — including one that was not a
+false positive: a test written to prove that access tokens never leak had
+committed the live token that leaked. Nothing is allowlisted by directory,
+because recorded API fixtures are the likeliest place for a real credential to
+hide.
 
 Three medium findings were expected and reviewed. Listing them here turned out
 not to be enough: the first real run of the release workflow failed on them,
