@@ -430,11 +430,11 @@ func fetchJSON(ctx context.Context, hc *http.Client, endpoint string, s strategy
 // ---------------------------------------------------------------- archiving
 
 func (a *archive) write(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	for _, f := range a.Files {
-		if err := os.WriteFile(filepath.Join(dir, f.Name), f.data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, f.Name), f.data, 0o600); err != nil {
 			return err
 		}
 	}
@@ -443,7 +443,7 @@ func (a *archive) write(dir string) error {
 		return err
 	}
 	manifest = append(manifest, '\n')
-	return os.WriteFile(filepath.Join(dir, "manifest.json"), manifest, 0o644)
+	return os.WriteFile(filepath.Join(dir, "manifest.json"), manifest, 0o600)
 }
 
 // ---------------------------------------------------------------- redaction

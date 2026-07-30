@@ -395,7 +395,7 @@ func totalFromResponse(resp *StreamResponse, resumed bool, offset int64) int64 {
 }
 
 // filenameFromResponse reads the name upstream suggests. It arrives RFC 5987
-// encoded — attachment; filename*=UTF-8''probe.bin — which mime.ParseMediaType
+// encoded — attachment; filename*=UTF-8”probe.bin — which mime.ParseMediaType
 // decodes for us.
 func filenameFromResponse(resp *StreamResponse) string {
 	cd := resp.Header.Get("Content-Disposition")

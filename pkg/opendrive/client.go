@@ -3,6 +3,7 @@ package opendrive
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -158,7 +159,14 @@ func (p RetryPolicy) backoff(attempt int) time.Duration {
 		return p.Jitter(d)
 	}
 	// Full jitter: sleep for a random duration in [d/2, d].
-	return d/2 + time.Duration(rand.Int64N(int64(d/2)+1))
+	//
+	// math/rand is deliberate. Jitter exists to stop many clients retrying in
+	// lockstep, which needs spread rather than unpredictability; a
+	// cryptographic source would cost entropy for no benefit an attacker cares
+	// about. Flagged by gosec as a weak generator, which it is — for a purpose
+	// that does not need a strong one.
+	// #nosec G404 -- jitter needs spread, not unpredictability; see above.
+	return d/2 + time.Duration(rand.Int64N(int64(d/2)+1)) //nolint:gosec // spread, not secrecy
 }
 
 // Client is the HTTP core of the SDK: it builds requests, injects credentials,
@@ -871,10 +879,16 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// newRequestID makes an id for correlating log lines.
+//
+// It uses crypto/rand rather than math/rand. Correlation ids are not secrets, so
+// either would work — but a reader (and a scanner) has to stop and decide that
+// every time, and the cost here is nothing.
 func newRequestID() string {
 	var b [8]byte
-	for i := range b {
-		b[i] = byte(rand.IntN(256)) //nolint:gosec // ids are for log correlation only
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		// Never observed in practice; a time-based id still correlates.
+		return fmt.Sprintf("%016x", time.Now().UnixNano())
 	}
 	return fmt.Sprintf("%x", b)
 }

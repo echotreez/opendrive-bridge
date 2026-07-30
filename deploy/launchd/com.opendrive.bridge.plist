@@ -1,10 +1,60 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for the OpenDrive Bridge (whitepaper §8.2).
+
+  Install with `odctl daemon install`, or by hand:
+
+    cp com.opendrive.bridge.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.opendrive.bridge.plist
+
+  This is a LaunchAgent, not a LaunchDaemon, and deliberately so: an agent runs
+  inside your login session, which is what gives it access to your Keychain. A
+  LaunchDaemon would start earlier and run as root, and would then have no
+  Keychain to read — you would have to configure an encrypted file instead for no
+  benefit.
+
+  The first time it reads the stored password, macOS will ask whether to allow it.
+  Choose "Always Allow", or you will be asked again after every restart.
+-->
 <plist version="1.0">
 <dict>
-    <key>Label</key><string>com.opendrive.bridge</string>
-    <key>ProgramArguments</key><array><string>/usr/local/bin/opendrived</string></array>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
+    <key>Label</key>
+    <string>com.opendrive.bridge</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/opendrived</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Restart if it exits unexpectedly, but not if it exited because it was
+         told to stop, and not in a tight loop if it is failing to start. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- The Keychain is available in a login session, so the default
+             credential store works and needs no key. -->
+        <key>ODB_LOG_LEVEL</key>
+        <string>info</string>
+    </dict>
+
+    <!-- Both streams go to one file per stream under ~/Library/Logs, which is
+         where Console.app looks. Tokens are removed before anything is written. -->
+    <key>StandardOutPath</key>
+    <string>/tmp/opendrive-bridge.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/opendrive-bridge.log</string>
 </dict>
 </plist>

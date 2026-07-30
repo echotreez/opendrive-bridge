@@ -18,8 +18,8 @@ jobs:
       - run: go test -race -coverprofile=coverage.out ./...
         shell: bash
 
-  # Whitepaper §6.3: pkg/opendrive >= 85%, internal/* >= 75%. CI blocks a PR
-  # that drops below the gate.
+  # Whitepaper §6.3: pkg/opendrive >= 85%, internal/* >= 75%, each package on its
+  # own. CI blocks a PR that drops below the gate.
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -38,6 +38,8 @@ jobs:
         with: { go-version: 'stable' }
       - uses: golangci/golangci-lint-action@v8
 
+  # Every target compiles. Compiling is necessary and not sufficient, which is
+  # what the smoke job below is for.
   crossbuild:
     runs-on: ubuntu-latest
     strategy:
@@ -49,3 +51,243 @@ jobs:
       - uses: actions/setup-go@v5
         with: { go-version: 'stable' }
       - run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 go build ./...
+
+  # Prove the binaries run. A cross-compiled binary can build cleanly and then
+  # fail on its target for reasons no compiler sees, so each of these starts the
+  # real daemon against a mock OpenDrive and drives it with the real odctl.
+  #
+  # Five of the six targets have a hosted runner that can execute them natively.
+  # windows/arm64 has none, so it is covered by crossbuild and by the archive
+  # only — recorded here rather than left to be discovered.
+  #
+  # darwin/amd64 uses macos-15-intel. It was macos-13, which GitHub retired in
+  # December 2025; the job did not fail, it queued for a runner that no longer
+  # exists and would have sat there until the run timed out. A green tick on a
+  # job that never started is the same class of problem as a 200 that means
+  # nothing, so it is worth naming.
+  #
+  # macos-15-intel is the last x86_64 macOS image GitHub intends to offer, and
+  # support for it ends in autumn 2027. When it goes, darwin/amd64 joins
+  # windows/arm64 as compiled-and-archived-only unless Apple hardware is
+  # available to run it on.
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: linux/amd64 }
+          - { os: macos-latest, target: darwin/arm64 }
+          - { os: macos-15-intel, target: darwin/amd64 }
+          - { os: windows-latest, target: windows/amd64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: 'stable' }
+      - name: Build the binaries under test
+        shell: bash
+        run: |
+          mkdir -p smokebin
+          go build -o smokebin/ ./cmd/opendrived ./cmd/odctl ./tools/mockupstream
+      - name: Smoke ${{ matrix.target }}
+        shell: bash
+        run: ./scripts/smoke.sh smokebin
+
+  # linux/arm64 has no hosted x86 runner, so it runs under emulation. Slower, but
+  # it is the difference between "it compiled" and "it works".
+  smoke-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: 'stable' }
+      - uses: docker/setup-qemu-action@v3
+        with: { platforms: arm64 }
+      - name: Build for linux/arm64
+        run: |
+          mkdir -p smokebin
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o smokebin/ \
+            ./cmd/opendrived ./cmd/odctl ./tools/mockupstream
+      - name: Smoke linux/arm64 under emulation
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD:/work" -w /work \
+            debian:stable-slim ./scripts/smoke.sh smokebin
+
+  # The release archives are built on every pull request, not only on a tag, so
+  # a packaging mistake is found by the change that caused it.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v5
+        with: { go-version: 'stable' }
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --snapshot --clean --skip=publish
+      - name: Check what came out
+        run: |
+          set -euo pipefail
+          # Six archives and one checksum file, or the matrix has drifted.
+          archives=$(ls dist/*.tar.gz dist/*.zip | wc -l)
+          if [ "$archives" -ne 6 ]; then
+            echo "expected 6 archives, found $archives:"; ls dist/
+            exit 1
+          fi
+          ls dist/*SHA256SUMS >/dev/null
+          # Every archive must contain both programs and the deployment guide:
+          # a release that ships a daemon with no way to log in is not usable.
+          #
+          # The listing is taken once into a file rather than piped into grep.
+          # `tar tzf "$a" | grep -q x` looks equivalent and is not: grep exits at
+          # the first match, tar then dies writing to a closed pipe, and under
+          # `pipefail` the pipeline reports tar's failure. The check announced
+          # that the first archive was "missing opendrived" — an accurate status
+          # about the wrong thing, which is the mistake this project spends most
+          # of its time catching upstream.
+          for a in dist/*.tar.gz dist/*.zip; do
+            listing="$(mktemp)"
+            case "$a" in
+              *.zip)   unzip -Z1 "$a" > "$listing" ;;
+              *.tar.gz) tar tzf "$a" > "$listing" ;;
+            esac
+            for want in opendrived odctl docs/deployment.md; do
+              # Windows archives carry opendrived.exe, so match the prefix.
+              grep -q "^$want" "$listing" \
+                || { echo "$a is missing $want; it contains:"; cat "$listing"; exit 1; }
+            done
+            rm -f "$listing"
+          done
+          echo "6 archives, checksums present, contents complete"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-archives
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*SHA256SUMS
+          retention-days: 7
+
+  # The container image, built for both architectures and then actually run.
+  #
+  # The interesting assertions are the container-specific ones: a container has
+  # no keychain, so the "no persistence = configuration error" gate is the first
+  # thing a user meets, and what it says has to be a sentence naming the variable
+  # to set — not a stack trace (§9.2, §8.3).
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with: { platforms: arm64 }
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build both architectures
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            VERSION=ci-${{ github.sha }}
+            COMMIT=${{ github.sha }}
+
+      - name: Load the native image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: opendrive-bridge:ci
+          build-args: |
+            VERSION=ci-${{ github.sha }}
+            COMMIT=${{ github.sha }}
+
+      - name: The image is small enough to be worth shipping
+        run: |
+          set -euo pipefail
+          bytes=$(docker image inspect opendrive-bridge:ci --format '{{.Size}}')
+          mb=$((bytes / 1024 / 1024))
+          echo "image is ${mb}MB"
+          # §8.3 asks for under 25MB. Two static Go binaries and a CA bundle.
+          [ "$mb" -lt 25 ] || { echo "over the 25MB budget in §8.3"; exit 1; }
+
+      - name: It runs as a non-root user
+        run: |
+          set -euo pipefail
+          user=$(docker image inspect opendrive-bridge:ci --format '{{.Config.User}}')
+          echo "runs as: $user"
+          case "$user" in root|"") echo "the image runs as root"; exit 1 ;; esac
+
+      - name: Without a state key it refuses, in words
+        run: |
+          set -euo pipefail
+          # No ODB_STATE_KEY: a container has no keychain, so this is the very
+          # first thing a user will hit if they miss a line of the guide.
+          set +e
+          out=$(docker run --rm opendrive-bridge:ci 2>&1)
+          code=$?
+          set -e
+          echo "exit=$code"
+          echo "$out"
+
+          [ "$code" -ne 0 ] || { echo "it started without anywhere to keep credentials"; exit 1; }
+          # The message must name the variable to set...
+          echo "$out" | grep -q "ODB_STATE_KEY" || { echo "the message does not name ODB_STATE_KEY"; exit 1; }
+          # ...and must not be a crash.
+          echo "$out" | grep -qiE "panic|goroutine [0-9]+|\.go:[0-9]+" \
+            && { echo "a stack trace reached the user"; exit 1; }
+          echo "refused correctly, with something a person can act on"
+
+      - name: With a key but a public address and no API key, it still refuses
+        run: |
+          set -euo pipefail
+          set +e
+          out=$(docker run --rm -e ODB_STATE_KEY="$(openssl rand -base64 32)" opendrive-bridge:ci 2>&1)
+          code=$?
+          set -e
+          echo "exit=$code"; echo "$out"
+          [ "$code" -ne 0 ] || { echo "it exposed the account on 0.0.0.0 with no API key"; exit 1; }
+          echo "$out" | grep -qi "api key" || { echo "the refusal does not mention an API key"; exit 1; }
+
+      - name: Configured properly, it starts and answers
+        run: |
+          set -euo pipefail
+          docker run -d --name odb-ci \
+            -p 127.0.0.1:9750:9750 \
+            -e ODB_STATE_KEY="$(openssl rand -base64 32)" \
+            -e ODB_API_KEY=ci-key \
+            opendrive-bridge:ci
+          for _ in $(seq 1 40); do
+            curl -fsS -H 'Authorization: Bearer ci-key' \
+              http://127.0.0.1:9750/v1/auth/status >/tmp/status.json && break
+            sleep 0.5
+          done
+          cat /tmp/status.json
+          # Not signed in is the right answer for a fresh container, and it must
+          # come with the credential store it actually chose.
+          grep -q '"state":"not_configured"' /tmp/status.json
+          grep -q '"backend":"encrypted_file"' /tmp/status.json
+          echo "the container answers, using the encrypted-file store"
+
+      - name: The healthcheck reports healthy
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            health=$(docker inspect odb-ci --format '{{.State.Health.Status}}')
+            echo "health: $health"
+            [ "$health" = "healthy" ] && exit 0
+            [ "$health" = "unhealthy" ] && { docker logs odb-ci; exit 1; }
+            sleep 2
+          done
+          docker logs odb-ci
+          echo "the healthcheck never settled"
+          exit 1
+
+      - name: Logs, for the record
+        if: always()
+        run: docker logs odb-ci 2>&1 | tail -20 || true

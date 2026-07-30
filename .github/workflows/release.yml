@@ -1,0 +1,239 @@
+# Release, on a tag (whitepaper §8.4).
+#
+# The shape of this file is the requirement: nothing is published until
+# everything has passed. A partial release — binaries up but the image missing,
+# or an image up that failed a scan — is worse than no release, because somebody
+# will download the half of it that exists.
+#
+# So `verify` gates everything, `goreleaser` and `docker` both wait for it, and
+# the summary at the end fails if either did.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # A dry run against main, to find a packaging problem before tagging.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  # Everything that can say no, before anything is built for publication.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v5
+        with: { go-version: 'stable' }
+
+      - run: go vet ./...
+      - run: go vet -tags=integration ./...
+      - run: go test -race ./...
+
+      - name: Coverage gates
+        run: |
+          go test -coverprofile=coverage.out ./...
+          ./scripts/check-coverage.sh coverage.out
+
+      # Known vulnerabilities in anything we depend on.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      # Patterns that are usually bugs. The exclusions are the two the project
+      # has argued through: MD5 is required by OpenDrive's own protocol and is
+      # never used for security (G401/G501), and the file paths the daemon opens
+      # are the ones its caller asked for (G304).
+      - name: gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          "$(go env GOPATH)/bin/gosec" -exclude=G401,G501,G304 -exclude-dir=testdata ./...
+
+      # Nothing that looks like a credential may be in the history. This project
+      # keeps test credentials in the OS keychain precisely so that this passes.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Confirm the tag matches the version that will be built
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          echo "releasing $tag"
+          # A tag that is not SemVer would produce archives nobody can order.
+          echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
+            || { echo "$tag is not a SemVer tag like v1.2.3"; exit 1; }
+
+  binaries:
+    needs: verify
+    runs-on: macos-latest   # so that macOS signing is possible when configured
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v5
+        with: { go-version: 'stable' }
+
+      # Signing is optional and the absence of a certificate must not fail a
+      # release: an unsigned build plus the documented Gatekeeper workaround is a
+      # usable release, and pretending otherwise would block every release made
+      # without paid Apple membership.
+      - name: Import the macOS signing certificate, if there is one
+        id: signing
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CERT_P12:-}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No signing certificate configured; the macOS builds will be unsigned."
+            echo "docs/deployment.md tells users how to clear the quarantine flag."
+            exit 0
+          fi
+          echo "$CERT_P12" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions build.keychain
+          rm -f /tmp/cert.p12
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: >-
+            ${{ startsWith(github.ref, 'refs/tags/v')
+                && 'release --clean'
+                || 'release --snapshot --clean --skip=publish' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign and notarise the macOS binaries
+        if: steps.signing.outputs.available == 'true'
+        env:
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
+          NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for bin in dist/*darwin*/opendrived dist/*darwin*/odctl; do
+            codesign --force --options runtime --timestamp \
+              --sign "$SIGN_IDENTITY" "$bin"
+            codesign --verify --strict --verbose=2 "$bin"
+          done
+          # Notarisation works on archives, so the already-built ones are
+          # submitted rather than rebuilt.
+          for archive in dist/*darwin*.tar.gz; do
+            xcrun notarytool submit "$archive" --wait \
+              --apple-id "$NOTARY_APPLE_ID" \
+              --team-id "$NOTARY_TEAM_ID" \
+              --password "$NOTARY_PASSWORD"
+          done
+
+      - name: Verify every archive is complete
+        run: |
+          set -euo pipefail
+          count=$(ls dist/*.tar.gz dist/*.zip | wc -l)
+          [ "$count" -eq 6 ] || { echo "expected 6 archives, got $count"; ls dist/; exit 1; }
+          ls dist/*SHA256SUMS >/dev/null
+          echo "6 archives and checksums"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-archives
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*SHA256SUMS
+
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with: { platforms: arm64 }
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # Built and scanned before it is pushed: an image with a known high
+      # severity vulnerability must not reach the registry, where somebody would
+      # pull it before the scan result was read.
+      - name: Build for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: opendrive-bridge:scan
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+
+      - name: trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: opendrive-bridge:scan
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Push both architectures
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+
+  # The gate that makes "no partial releases" true rather than aspirational.
+  released:
+    needs: [binaries, image]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless everything succeeded
+        run: |
+          set -euo pipefail
+          binaries='${{ needs.binaries.result }}'
+          image='${{ needs.image.result }}'
+          echo "binaries: $binaries"
+          echo "image:    $image"
+          if [ "$binaries" != "success" ] || [ "$image" != "success" ]; then
+            echo
+            echo "This release is incomplete. Whatever did publish should be"
+            echo "deleted before anyone downloads half a release."
+            exit 1
+          fi
+          echo "Release complete: six archives, checksums, and a dual-architecture image."

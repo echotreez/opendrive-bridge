@@ -39,7 +39,7 @@ func newUploadCommand(o *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "up <local-file> <remote-path>",
 		Short:   "Upload a file",
-		Args:    cobra.ExactArgs(2),
+		Args:    remoteArgs(cobra.ExactArgs(2), 1),
 		Aliases: []string{"upload", "put"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			local, err := absLocal(args[0])
@@ -78,7 +78,7 @@ func newDownloadCommand(o *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "down <remote-path> [local-file]",
 		Short:   "Download a file",
-		Args:    cobra.RangeArgs(1, 2),
+		Args:    remoteArgs(cobra.RangeArgs(1, 2), 0),
 		Aliases: []string{"download", "get"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dest := localName(args[0])

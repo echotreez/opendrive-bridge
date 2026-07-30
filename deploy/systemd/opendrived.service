@@ -1,17 +1,77 @@
+# systemd unit for the OpenDrive Bridge (whitepaper §8.2).
+#
+# Install with `odctl daemon install`, or by hand:
+#   sudo install -m 0644 opendrived.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now opendrived
+#
+# One thing to know before you do: a system service has no desktop session, and
+# without one there is no keychain to unlock. If `odctl status` says the bridge
+# cannot reach its credential store, that is why — see the ODB_STATE_KEY note
+# below, and docs/deployment.md.
+
 [Unit]
 Description=OpenDrive Bridge daemon
+Documentation=https://github.com/StormRealm/opendrive-bridge/blob/main/docs/deployment.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
+Type=simple
 ExecStart=/usr/local/bin/opendrived
 Restart=on-failure
+RestartSec=5s
+
+# A throwaway account created for this service alone, with one writable
+# directory. Nothing here needs a real user.
 DynamicUser=yes
 StateDirectory=opendrive-bridge
-ProtectSystem=strict
-ProtectHome=read-only
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/opendrive-bridge
+
+# Where the credentials and the transfer state go. On a headless machine the
+# encrypted-file store is the right choice, and it needs a key:
+#
+#   sudo systemctl edit opendrived
+#   [Service]
+#   Environment=ODB_KEYSTORE=encrypted_file
+#   Environment=ODB_STATE_KEY=<openssl rand -base64 32>
+#
+# Keep that key somewhere safe. Without it the stored credentials cannot be read
+# back and you will have to sign in again.
+Environment=ODB_STATE_DIR=/var/lib/opendrive-bridge/jobs
+Environment=ODB_KEYSTORE_FILE=/var/lib/opendrive-bridge/credentials.enc
+
+# The daemon holds a password that unlocks somebody's whole cloud storage, so it
+# gets as little of the machine as it can work with. Every line below is
+# something a bug in this program could otherwise reach.
 NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
 PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+
+# It speaks HTTP to OpenDrive and listens on a local socket; nothing else.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Transfers are the point, so no memory or CPU ceiling — but a descriptor limit
+# still catches a runaway.
+LimitNOFILE=8192
 
 [Install]
 WantedBy=multi-user.target

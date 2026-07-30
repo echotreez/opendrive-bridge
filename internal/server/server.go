@@ -42,7 +42,12 @@ type Config struct {
 }
 
 // DefaultAddr binds the loopback interface only.
-const DefaultAddr = "127.0.0.1:7777"
+//
+// The port is the one whitepaper §8.3 documents. It was 7777 in the code and
+// 9750 in the document until P5; a port that differs between the deployment
+// guide and the binary is a support question waiting to happen, so the code
+// moved to match the contract.
+const DefaultAddr = "127.0.0.1:9750"
 
 // Auth is the slice of the SDK authenticator the daemon needs. It is an
 // interface so that /v1/auth/status can be tested without a network.

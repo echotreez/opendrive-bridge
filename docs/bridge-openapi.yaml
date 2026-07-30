@@ -23,7 +23,7 @@ info:
     where there is one, what to do about it. Clients that want to branch on the
     failure should use `error.code`, which is a stable enumeration.
 servers:
-  - url: http://127.0.0.1:7777
+  - url: http://127.0.0.1:9750
     description: The default loopback listener.
 
 security:

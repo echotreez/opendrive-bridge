@@ -1,0 +1,56 @@
+# A working starting point for running the bridge in a container.
+#
+#   openssl rand -base64 32 > .odb_state_key
+#   openssl rand -hex 32    > .odb_api_key
+#   docker compose up -d
+#   odctl --addr 127.0.0.1:9750 --api-key "$(cat .odb_api_key)" login you@example.com
+#
+# Two things to keep safe: the state key and the volume. Lose either and the
+# stored credentials cannot be read back, and you will have to sign in again.
+services:
+  opendrive-bridge:
+    image: ghcr.io/stormrealm/opendrive-bridge:latest
+    container_name: opendrive-bridge
+    restart: unless-stopped
+
+    # Published to loopback on purpose. The container binds 0.0.0.0 because
+    # inside a container loopback is unreachable from outside — but that does not
+    # mean the port should be open to your network.
+    ports:
+      - "127.0.0.1:9750:9750"
+
+    environment:
+      # Without this the bridge refuses to start, because a container has no
+      # keychain and it will not quietly use a store that forgets everything on
+      # restart. The error message names this variable.
+      ODB_STATE_KEY: ${ODB_STATE_KEY:?set ODB_STATE_KEY, e.g. openssl rand -base64 32}
+      # Required because the listen address is not loopback: anything that can
+      # reach the port could otherwise use the OpenDrive account behind it.
+      ODB_API_KEY: ${ODB_API_KEY:?set ODB_API_KEY, e.g. openssl rand -hex 32}
+      ODB_LOG_LEVEL: info
+
+    volumes:
+      # The encrypted credentials and the transfer state live here.
+      - odb-state:/data
+
+    # The image has no shell, so this runs the binary. It reports healthy as soon
+    # as the daemon answers — including when it is not signed in yet, which is a
+    # running daemon rather than a broken one.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/odctl", "--addr", "127.0.0.1:9750", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+    # Nothing in here needs to write outside /data or to gain privileges.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  odb-state:

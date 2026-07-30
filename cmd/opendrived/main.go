@@ -25,7 +25,13 @@ import (
 	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
 )
 
-var version = "0.0.0-dev"
+// Set by the linker at release time (see .goreleaser.yaml) so that a binary
+// can be traced back to the commit it came from.
+var (
+	version   = "0.0.0-dev"
+	commit    = "none"
+	buildDate = "unknown"
+)
 
 type options struct {
 	addr      string
@@ -48,24 +54,28 @@ func main() {
 func run() error {
 	var o options
 	fs := flag.NewFlagSet("opendrived", flag.ContinueOnError)
-	fs.StringVar(&o.addr, "addr", server.DefaultAddr,
-		"listen address; anything other than loopback requires an API key")
+	// ODB_LISTEN is what §8.3 uses to configure a container, where passing a
+	// flag means rewriting the image's command line.
+	fs.StringVar(&o.addr, "addr", envOr("ODB_LISTEN", server.DefaultAddr),
+		"listen address, or set ODB_LISTEN; anything other than loopback requires an API key")
 	fs.StringVar(&o.apiKey, "api-key", os.Getenv("ODB_API_KEY"),
 		"API key callers must present (or set ODB_API_KEY)")
-	fs.StringVar(&o.backend, "keystore", string(keystore.BackendAuto),
-		"credential store: auto, keyring, encrypted_file or ephemeral")
-	fs.StringVar(&o.statePath, "keystore-file", "",
+	fs.StringVar(&o.backend, "keystore", envOr("ODB_KEYSTORE", string(keystore.BackendAuto)),
+		"credential store: auto, keyring, encrypted_file or ephemeral (or set ODB_KEYSTORE)")
+	fs.StringVar(&o.statePath, "keystore-file", os.Getenv("ODB_KEYSTORE_FILE"),
 		"path to the encrypted credential file, when that backend is used")
-	fs.StringVar(&o.stateDir, "state-dir", "", "where transfer job state is kept")
+	fs.StringVar(&o.stateDir, "state-dir", os.Getenv("ODB_STATE_DIR"),
+		"where transfer job state is kept (or set ODB_STATE_DIR)")
 	fs.BoolVar(&o.ephemeral, "ephemeral", false,
 		"accept losing credentials on restart; required for the ephemeral store")
-	fs.StringVar(&o.logLevel, "log-level", "info", "debug, info, warn or error")
+	fs.StringVar(&o.logLevel, "log-level", envOr("ODB_LOG_LEVEL", "info"),
+		"debug, info, warn or error, or set ODB_LOG_LEVEL")
 	fs.BoolVar(&o.showVer, "version", false, "print the version and exit")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
 	if o.showVer {
-		fmt.Println("opendrived", version)
+		fmt.Printf("opendrived %s (commit %s, built %s)\n", version, commit, buildDate)
 		return nil
 	}
 
@@ -87,10 +97,20 @@ func run() error {
 	// One cache, shared: the client resolves paths through it and the server
 	// drops what a write invalidated (§10.3).
 	pathCache := cache.NewPathCache()
-	client, err := opendrive.New(
+	clientOpts := []opendrive.Option{
 		opendrive.WithLogger(log),
 		opendrive.WithPathCache(pathCache),
-	)
+	}
+	// ODB_BASE_URL points the daemon at something other than the live API. It
+	// exists for the release smoke test, which has to prove a freshly built
+	// binary runs on its target platform without depending on somebody's
+	// account — and it is the same seam anyone would need to test against a
+	// staging deployment.
+	if base := os.Getenv("ODB_BASE_URL"); base != "" {
+		log.Warn("using a non-default OpenDrive address", slog.String("base_url", base))
+		clientOpts = append(clientOpts, opendrive.WithBaseURL(base))
+	}
+	client, err := opendrive.New(clientOpts...)
 	if err != nil {
 		return err
 	}
@@ -146,6 +166,15 @@ func run() error {
 	}
 	log.Info("stopped")
 	return nil
+}
+
+// envOr reads an environment variable with a fallback, so a container can be
+// configured without a command line.
+func envOr(name, fallback string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func newEngine(c *opendrive.Client, o options, log *slog.Logger) (*jobs.Engine, error) {

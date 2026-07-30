@@ -1,24 +1,138 @@
-# Whitepaper §8.1 — full 6-platform matrix
+# Release build for opendrive-bridge (whitepaper §8.1).
+#
+# Six platforms, two binaries, one checksum file. The version comes from the git
+# tag rather than from a constant in the source, so `opendrived --version` and
+# the tag are the same string by construction — a binary can always be traced
+# back to the commit it was built from.
 version: 2
+
+project_name: opendrive-bridge
+
+before:
+  hooks:
+    # A release must not be the first place a problem shows up.
+    - go mod tidy
+    - go test ./...
+
 builds:
   - id: opendrived
     main: ./cmd/opendrived
     binary: opendrived
+    # No cgo anywhere. The credential vaults are reached through their own CLIs
+    # or through the Win32 API precisely so these cross-compile cleanly (§8.1).
     env: [CGO_ENABLED=0]
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
-    ldflags: ["-s -w -X main.version={{.Version}}"]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.FullCommit}}
+      - -X main.buildDate={{.CommitDate}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
   - id: odctl
     main: ./cmd/odctl
     binary: odctl
     env: [CGO_ENABLED=0]
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
-    ldflags: ["-s -w -X main.version={{.Version}}"]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.FullCommit}}
+      - -X main.buildDate={{.CommitDate}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
 archives:
-  - formats: [tar.gz]
+  # Both binaries travel together: odctl without a daemon is half a tool, and a
+  # daemon with no way to log in is none.
+  - id: default
+    ids: [opendrived, odctl]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - src: docs/deployment.md
+        dst: docs/deployment.md
+      - src: docs/bridge-openapi.yaml
+        dst: docs/bridge-openapi.yaml
+      - src: deploy/**/*
+        dst: deploy
+
 checksum:
-  name_template: checksums.txt
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^chore"
+      - "^ci"
+      - "^style"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Documentation
+      regexp: '^docs(\(.+\))?!?:'
+      order: 2
+    - title: Tests and internals
+      regexp: '^(test|refactor|perf)(\(.+\))?!?:'
+      order: 3
+
+release:
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+  header: |
+    ## opendrive-bridge {{ .Tag }}
+
+    A local REST API and command line for OpenDrive.com.
+
+    Unpack it, then:
+
+    ```
+    ./odctl login you@example.com
+    ./odctl ls /
+    ```
+
+    `docs/deployment.md` inside the archive covers running it as a background
+    service, and which credential store to use where.
+  footer: |
+    ### Checking what you downloaded
+
+    ```
+    sha256sum --check --ignore-missing {{ .ProjectName }}_{{ .Version }}_SHA256SUMS
+    ```
+
+    ### macOS
+
+    These builds are signed only when a certificate was available. If macOS
+    refuses to run them, `docs/deployment.md` explains why and what to do —
+    the short version is `xattr -d com.apple.quarantine ./opendrived ./odctl`.
+
+    ### Container
+
+    ```
+    docker pull ghcr.io/stormrealm/opendrive-bridge:{{ .Tag }}
+    ```
+
+    A container has no system keychain, so the image uses the encrypted-file
+    credential store and needs `ODB_STATE_KEY` set. It will tell you so plainly
+    if you forget.

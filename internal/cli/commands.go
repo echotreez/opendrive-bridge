@@ -179,7 +179,7 @@ func newListCommand(o *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls [path]",
 		Short:   "List a folder",
-		Args:    cobra.MaximumNArgs(1),
+		Args:    remoteArgs(cobra.MaximumNArgs(1), 0),
 		Aliases: []string{"list"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "/"
@@ -255,7 +255,7 @@ func newStatCommand(o *Options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stat <path>",
 		Short: "Show details of one file or folder",
-		Args:  cobra.ExactArgs(1),
+		Args:  remoteArgs(cobra.ExactArgs(1), 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var e entry
 			if err := client(o).Do(cmd.Context(), "GET", query("/v1/stat", "path", args[0]), nil, &e); err != nil {
@@ -280,7 +280,7 @@ func newMkdirCommand(o *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mkdir <path>",
 		Short: "Create a folder",
-		Args:  cobra.ExactArgs(1),
+		Args:  remoteArgs(cobra.ExactArgs(1), 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body := map[string]any{"path": args[0], "parents": parents}
 			if access != "" {
@@ -315,7 +315,7 @@ func srcDstCommand(o *Options, use, short, path, verb string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   use + " <source> <destination>",
 		Short: short,
-		Args:  cobra.ExactArgs(2),
+		Args:  remoteArgs(cobra.ExactArgs(2), 0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var out map[string]any
 			if err := client(o).Do(cmd.Context(), "POST", path, map[string]any{
@@ -338,7 +338,7 @@ func newRenameCommand(o *Options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "rename <path> <new-name>",
 		Short: "Rename in place",
-		Args:  cobra.ExactArgs(2),
+		Args:  remoteArgs(cobra.ExactArgs(2), 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var out map[string]any
 			if err := client(o).Do(cmd.Context(), "POST", "/v1/rename", map[string]any{
@@ -360,7 +360,7 @@ func newRemoveCommand(o *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "rm <path>",
 		Short:   "Move to the trash, or delete for good",
-		Args:    cobra.ExactArgs(1),
+		Args:    remoteArgs(cobra.ExactArgs(1), 0),
 		Aliases: []string{"remove"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var out map[string]any
@@ -426,7 +426,7 @@ func newVersionsCommand(o *Options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "versions <path>",
 		Short: "List earlier versions of a file",
-		Args:  cobra.ExactArgs(1),
+		Args:  remoteArgs(cobra.ExactArgs(1), 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var out struct {
 				Path     string           `json:"path"`
@@ -456,9 +456,12 @@ func newVersionsCommand(o *Options) *cobra.Command {
 
 func newShareCommand(o *Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "share <path>",
+		// A group, not a command: the work is in link, list and revoke. The
+		// usage line said "share <path>" and accepted one argument, which
+		// promised something it never did — `odctl share /x` printed help.
+		Use:   "share",
 		Short: "Make a link anyone can use",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.NoArgs,
 	}
 
 	var expires string
@@ -466,7 +469,7 @@ func newShareCommand(o *Options) *cobra.Command {
 	create := &cobra.Command{
 		Use:   "link <path>",
 		Short: "Create a share link",
-		Args:  cobra.ExactArgs(1),
+		Args:  remoteArgs(cobra.ExactArgs(1), 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body := map[string]any{"path": args[0]}
 			if expires != "" {
@@ -494,7 +497,7 @@ func newShareCommand(o *Options) *cobra.Command {
 	list := &cobra.Command{
 		Use:   "list <path>",
 		Short: "Show the link on a path, if there is one",
-		Args:  cobra.ExactArgs(1),
+		Args:  remoteArgs(cobra.ExactArgs(1), 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var out struct {
 				Path   string           `json:"path"`
@@ -521,7 +524,7 @@ func newShareCommand(o *Options) *cobra.Command {
 	revoke := &cobra.Command{
 		Use:   "revoke <path>",
 		Short: "Stop a share link working",
-		Args:  cobra.ExactArgs(1),
+		Args:  remoteArgs(cobra.ExactArgs(1), 0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var out map[string]any
 			if err := client(o).Do(cmd.Context(), "DELETE",

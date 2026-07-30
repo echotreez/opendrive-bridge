@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/StormRealm/opendrive-bridge/internal/server"
 )
 
 // Version is set at build time.
@@ -132,8 +134,8 @@ func NewRootCommand(opts *Options) *cobra.Command {
 		SilenceErrors: true,
 	}
 
-	root.PersistentFlags().StringVar(&opts.Addr, "addr", "127.0.0.1:7777",
-		"where the bridge is listening")
+	root.PersistentFlags().StringVar(&opts.Addr, "addr", defaultAddr(),
+		"where the bridge is listening (or set ODB_ADDR)")
 	root.PersistentFlags().StringVar(&opts.APIKey, "api-key", os.Getenv("ODB_API_KEY"),
 		"API key, when the bridge requires one")
 	root.PersistentFlags().DurationVar(&opts.Timeout, "timeout", 0,
@@ -166,6 +168,15 @@ func NewRootCommand(opts *Options) *cobra.Command {
 		newDaemonCommand(opts),
 	)
 	return root
+}
+
+// defaultAddr lets a container or a shell profile point odctl somewhere else
+// without repeating a flag on every command.
+func defaultAddr() string {
+	if v := os.Getenv("ODB_ADDR"); v != "" {
+		return v
+	}
+	return server.DefaultAddr
 }
 
 // usage is a mistake in the command itself, phrased for the person who made it.

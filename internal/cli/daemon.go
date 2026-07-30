@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/kardianos/service"
@@ -32,6 +33,24 @@ func daemonService(execPath string, args []string) (service.Service, error) {
 		Description: "Keeps your OpenDrive account available to local applications.",
 		Executable:  execPath,
 		Arguments:   args,
+		Option:      service.KeyValue{},
+	}
+
+	// On macOS this must be a LaunchAgent, not a LaunchDaemon, and the
+	// difference is not cosmetic: an agent runs inside the login session, which
+	// is what gives it a Keychain to read. Installed as a system daemon — which
+	// is the library's default — it would need root to install and would then
+	// have no credential store, so the bridge would start and immediately report
+	// that it cannot reach one.
+	//
+	// Linux and Windows go the other way. A machine running this as a service is
+	// usually a server with no desktop session, so a system service plus the
+	// encrypted-file store (see deploy/systemd/opendrived.service) is both what
+	// people want and the only thing that works there.
+	if runtime.GOOS == "darwin" {
+		cfg.Option["UserService"] = true
+		cfg.Option["KeepAlive"] = true
+		cfg.Option["RunAtLoad"] = true
 	}
 	return service.New(serviceProgram{}, cfg)
 }
