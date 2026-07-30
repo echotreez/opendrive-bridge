@@ -112,9 +112,15 @@ paths:
       operationId: list
       summary: List a folder.
       description: |
-        Folders and files are merged into one array. Paging past the first page
-        needs both `offset` and the previous response's `dir_update_time`:
-        OpenDrive quietly re-serves the first page without it.
+        Folders and files are merged into one array.
+
+        Paging past the first page needs **both** `offset` and the previous
+        response's `dir_update_time`. There is no page token: OpenDrive pages by
+        offset plus the timestamp of the listing being paged, and quietly
+        re-serves the first page when the timestamp is missing. Rather than let
+        a client loop over page one forever, this endpoint **refuses** an
+        `offset` sent without a `dir_update_time` — so a 400 here means the
+        paging call is incomplete, not that the folder is unreadable.
       parameters:
         - { $ref: "#/components/parameters/Path" }
         - name: offset
