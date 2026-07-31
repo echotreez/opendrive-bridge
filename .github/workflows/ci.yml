@@ -217,7 +217,7 @@ jobs:
               *.zip)   unzip -Z1 "$a" > "$listing" ;;
               *.tar.gz) tar tzf "$a" > "$listing" ;;
             esac
-            for want in opendrived odctl docs/deployment.md; do
+            for want in opendrived odctl docs/first-run.md docs/deployment.md; do
               # Windows archives carry opendrived.exe, so match the prefix.
               grep -q "^$want" "$listing" \
                 || { echo "$a is missing $want; it contains:"; cat "$listing"; exit 1; }

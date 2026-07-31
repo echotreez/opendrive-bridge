@@ -1,31 +1,102 @@
 # OpenDrive Bridge
 
-A local REST proxy (`opendrived`) and CLI (`odctl`) for the [OpenDrive.com](https://www.opendrive.com) cloud storage REST API, written in Go.
+A local REST proxy (`opendrived`) and command line (`odctl`) for
+[OpenDrive.com](https://www.opendrive.com) cloud storage, written in Go.
 
-把 OpenDrive 官方 REST API 封装为本地代理服务与命令行工具:内部处理 OAuth2 token 生命周期、四步分块上传、MD5 秒传、断点续传与重试,对外提供统一简化的现代 REST 接口。
+把 OpenDrive 官方 REST API 封装为本地代理服务与命令行工具:内部处理 OAuth2 token
+生命周期、四步分块上传、MD5 秒传、断点续传与重试,对外提供统一简化的现代 REST 接口。
 
-## 状态 Status
+You sign in once. After that the daemon keeps itself signed in through your
+operating system's own credential store, so your scripts and programs can work
+with your files without ever handling your password.
 
-**Phase P0 — 脚手架阶段。尚未实现功能。**
+## Five minutes
 
-开发的**唯一权威设计文档**是 [`OpenDrive-Bridge-Whitepaper.md`](./OpenDrive-Bridge-Whitepaper.md),包含:
+```bash
+# 1. Download the archive for your machine from the releases page, and check it
+sha256sum --check --ignore-missing opendrive-bridge_*_SHA256SUMS
 
-- 官方 API 深度分析(15 模块、认证体系、上传/下载管线、14 条已知陷阱)
-- 系统架构与仓库结构(§3)
-- Bridge 对外 REST 接口设计(§4)
-- 分阶段开发流程 P0–P6 与出口标准(§5)
-- 测试、QA、安全、性能、打包(6 平台 + Docker 双架构)要求(§6–§10)
+# 2. Unpack and install
+tar xzf opendrive-bridge_*_linux_amd64.tar.gz
+sudo install -m 0755 opendrived odctl /usr/local/bin/
 
-**开发 AI 请先完整阅读白皮书,并遵守其附录 D「执行须知」。**
+# 3. Run the daemon in one terminal
+opendrived
 
-## 仓库结构
+# 4. In another, sign in and upload something
+odctl login you@example.com
+odctl ls /
+odctl up ./report.pdf /Documents/report.pdf
+odctl down /Documents/report.pdf ./back.pdf
+```
+
+**On macOS, do [the quarantine step](./docs/first-run.md#macos) first** — macOS
+refuses unsigned downloads, and that is the first thing that stops people.
+
+**[docs/first-run.md](./docs/first-run.md)** is the same path written out
+properly, with a section per platform and one for Docker. It assumes you have
+never heard of OpenDrive's API, because you do not need to have.
+
+## Documentation
+
+| | |
+|---|---|
+| [docs/first-run.md](./docs/first-run.md) | download → first upload, per platform |
+| [docs/deployment.md](./docs/deployment.md) | running it permanently, choosing a credential store, troubleshooting |
+| [docs/bridge-openapi.yaml](./docs/bridge-openapi.yaml) | the HTTP API, for driving it from your own programs |
+| [OpenDrive-Bridge-Whitepaper.md](./OpenDrive-Bridge-Whitepaper.md) | design, architecture, phases and quality gates |
+
+## What it does about OpenDrive's API
+
+Most of the work here is not wrapping endpoints; it is refusing to pass on things
+upstream says that are not true. Forty-five of them are recorded in
+[docs/discrepancies.md](./docs/discrepancies.md), measured against the live API
+rather than the PDF, and
+[docs/bridge-boundary-audit.md](./docs/bridge-boundary-audit.md) checks each one
+against the Bridge API: every one is either stopped at the boundary or written
+down in the OpenAPI spec so a caller can plan for it.
+
+Three that shape the design:
+
+- **A 200 proves nothing.** `download/all.json` answers a request for files with
+  a valid, empty ZIP. `folder/info.json` still describes a folder you deleted.
+  `filesettings` accepts a misspelt parameter, changes nothing, and returns the
+  whole object. The bridge verifies effects, never statuses.
+- **The error text is not the error.** A 403 saying "permission" is byte-for-byte
+  identical whether the cause is a real denial or a transient refusal. Failures
+  go through one classification layer
+  ([docs/error-taxonomy.md](./docs/error-taxonomy.md)) that reads evidence —
+  status, body shape, content type, which endpoint — rather than taking
+  upstream's word for what happened.
+- **Your password is persisted, deliberately.** OpenDrive has no refresh token
+  that survives a password change, and unattended operation needs one or the
+  other. Whitepaper §9.2 records the decision and its cost, and
+  `persist_password: false` is the way out. It goes to the OS credential store
+  and nowhere else — never a config file, never a process argument.
+
+## Repository layout
 
 ```
-cmd/opendrived/   守护进程入口          pkg/opendrive/   Go SDK(核心)
-cmd/odctl/        CLI 入口              internal/        server / jobs / keystore / cache / config
-tools/fetch-spec/ 线上 Swagger 规格抓取  deploy/          docker / systemd / launchd / windows
-docs/             官方 API 指引 PDF 与官方样本(只读参考)+ Bridge OpenAPI 规格与部署手册(待生成)
+cmd/opendrived/   守护进程入口            pkg/opendrive/   Go SDK(核心)
+cmd/odctl/        CLI 入口                internal/        server / cli / jobs / keystore / cache
+tools/            mock upstream、线上 Swagger 规格抓取
+deploy/           docker / systemd / launchd
+docs/             使用指南、OpenAPI 规格,以及官方 API 参考资料(只读)
 ```
+
+## Building it yourself
+
+Go 1.22 or newer.
+
+```bash
+go test ./...                 # unit and contract tests, no network
+./scripts/check-coverage.sh   # per-package coverage gates
+./scripts/integration-test.sh # the live suite; needs sandbox credentials
+```
+
+Conventional Commits, tests with every change, and every gate that runs at
+release time also runs on every pull request — that last rule was earned rather
+than chosen, and [CLAUDE.md](./CLAUDE.md) says how.
 
 ## 参考资料 References
 
@@ -36,4 +107,5 @@ docs/             官方 API 指引 PDF 与官方样本(只读参考)+ Bridge Op
 
 ## License
 
-MIT (仓库自研代码)。`docs/OpenDrive_API_guide.pdf` 版权归 OpenDrive, Inc. 所有,仅作本项目内部开发参考,本仓库为私有仓库,请勿公开或转发该文件。
+MIT(仓库自研代码)。`docs/OpenDrive_API_guide.pdf` 版权归 OpenDrive, Inc. 所有,
+仅作本项目内部开发参考,本仓库为私有仓库,请勿公开或转发该文件。

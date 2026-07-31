@@ -58,6 +58,10 @@ archives:
     files:
       - README.md
       - LICENSE
+      # The first thing someone unpacking this needs is not the deployment
+      # guide, it is the five minutes that ends with a file in their account.
+      - src: docs/first-run.md
+        dst: docs/first-run.md
       - src: docs/deployment.md
         dst: docs/deployment.md
       - src: docs/bridge-openapi.yaml
@@ -105,15 +109,20 @@ release:
 
     A local REST API and command line for OpenDrive.com.
 
-    Unpack it, then:
+    Unpack it, start the daemon, then:
 
     ```
     ./odctl login you@example.com
     ./odctl ls /
+    ./odctl up ./report.pdf /Documents/report.pdf
     ```
 
-    `docs/deployment.md` inside the archive covers running it as a background
-    service, and which credential store to use where.
+    **On macOS, clear the quarantine flag first** — see below, it is the first
+    thing that stops people.
+
+    `docs/first-run.md` inside the archive is the five-minute version with a
+    section for each platform and one for Docker. `docs/deployment.md` covers
+    running it as a background service and which credential store to use where.
   footer: |
     ### Checking what you downloaded
 
