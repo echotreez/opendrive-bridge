@@ -2,7 +2,8 @@
 
 Per `CLAUDE.md` rule 3 and whitepaper §2.6/§12.2, the live Swagger specification
 (`https://dev.opendrive.com/api/v1/resources/*.json`) and real sandbox responses
-take precedence over `docs/OpenDrive_API_guide.pdf`. Every divergence found while
+take precedence over OpenDrive's REST API Guide, which is not in this repository
+(see `official-api-reference.md`). Every divergence found while
 implementing the Bridge is recorded here.
 
 **Baseline:** `testdata/spec/`, produced by `tools/fetch-spec` with the test

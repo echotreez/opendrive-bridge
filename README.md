@@ -100,12 +100,21 @@ than chosen, and [CLAUDE.md](./CLAUDE.md) says how.
 
 ## 参考资料 References
 
-- `docs/OpenDrive_API_guide.pdf` — 官方 REST API Guide v1.1.7
-- `docs/api-samples/` — 官方示例代码(MIT,© OpenDrive Inc.)
+- **[docs/official-api-reference.md](./docs/official-api-reference.md)** — 官方文档
+  从哪里取,以及为什么它不在本仓库里
 - 线上 API Explorer: https://dev.opendrive.com/api/explorer/
 - 线上机器可读规格: `https://dev.opendrive.com/api/v1/resources.json`
+- `docs/api-samples/` — OpenDrive 官方示例代码(PHP / C# / JavaScript),
+  由 OpenDrive, Inc. 以 **MIT** 许可发布,© OpenDrive, Inc.,原样保留并注明来源
+
+OpenDrive 的 REST API Guide(PDF)**不在本仓库中**,因为它的版权页写明未经书面
+许可不得以任何形式复制或传播,并且明确把"转换格式"也算作复制。本项目的所有结论
+来自对线上 API 的实测,记录在 `docs/discrepancies.md`(46 条)与
+`docs/error-taxonomy.md` 中 —— 那是运行结果的记录,不是文档的转述。
 
 ## License
 
-MIT(仓库自研代码)。`docs/OpenDrive_API_guide.pdf` 版权归 OpenDrive, Inc. 所有,
-仅作本项目内部开发参考,本仓库为私有仓库,请勿公开或转发该文件。
+MIT。仓库自研代码采用 MIT 许可,见 [LICENSE](./LICENSE)。
+
+`docs/api-samples/` 是 OpenDrive, Inc. 的官方示例代码,同样为 MIT 许可,版权归
+OpenDrive, Inc. 所有。

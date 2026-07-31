@@ -19,3 +19,11 @@ state/
 # IDE
 .idea/
 .vscode/
+
+# OpenDrive's own documentation. Keep your copy here if you have one — it is
+# useful to work alongside — but it must not be committed: it carries "no part
+# of this document may be reproduced or transmitted in any form or by any
+# means", and adds that reproducing includes translating into another format.
+# docs/official-api-reference.md says where to ask for it.
+docs/OpenDrive_API_guide.pdf
+docs/*_API_guide.pdf
