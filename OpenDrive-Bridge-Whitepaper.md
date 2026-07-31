@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| 文档版本 | 1.1(修订记录见附录 E) |
+| 文档版本 | 1.2(修订记录见附录 E) |
 | 日期 | 2026-07-25 |
 | 目标读者 | Claude Opus 5 / 其他代码开发 AI / 项目开发者 |
 | 依据资料 | OpenDrive REST API Guide v1.1.7 (10/2023)、官方 PHP/C# 代码样本、官方 API Explorer (https://dev.opendrive.com/api/explorer/) |
@@ -306,16 +306,15 @@ opendrive-bridge/
 
 ### 3.4 配置 Configuration
 
-优先级:CLI flags > 环境变量 (`ODB_*`) > 配置文件。配置文件位置:
-- Linux: `$XDG_CONFIG_HOME/opendrive-bridge/config.yaml`(默认 `~/.config/...`)
-- macOS: `~/Library/Application Support/opendrive-bridge/config.yaml`
-- Windows: `%APPDATA%\opendrive-bridge\config.yaml`
+优先级:CLI flags > 环境变量 (`ODB_*`) > 配置文件。**v1.2 起配置文件与 `.env` 同在解包目录**(`opendrive-bridge/config.yaml`),不再散落到三个平台各自的配置路径——原地运行的直接好处之一是"所有东西都在一个文件夹里"。`--dir` 可覆盖。
+
+`.env`(加密,§9.2)只放凭证与 API key;`config.yaml`(明文)放行为配置,二者分工不混:
 
 ```yaml
 listen: 127.0.0.1:9750        # 默认只绑 loopback
 auth_mode: oauth2             # oauth2 | session
-persist_password: true        # v1.1: 默认存密码到 keystore 以实现永久无缝(§2.2/§9.2)
-keystore: auto                # auto(keyring 优先) | keyring | encrypted_file;均不可用则拒绝启动
+persist_password: true        # v1.1: 默认存密码以实现永久无缝(§2.2/§9.2)
+env_file: .env                # v1.2: 唯一凭证来源;密钥在 .env.key
 upstream_base: https://dev.opendrive.com/api/v1
 transfers:
   chunk_size_mb: 50           # 官方样本值;可调 8–100
@@ -520,24 +519,36 @@ odctl daemon install|start|stop|uninstall  # 注册系统服务
 
 ### 8.1 构建矩阵 Build Matrix
 
-Go 交叉编译,`CGO_ENABLED=0`(keyring 在部分平台需 cgo 时,fallback 到加密文件存储,见 §9.2):
+Go 交叉编译,`CGO_ENABLED=0`(v1.2 起凭证只用加密 `.env`,不再有任何需要 cgo 的 keyring 路径,见 §9.2)。
+
+**v1.2 收窄为四个目标**,砍掉两个实际用户极少的组合,减少构建面与冒烟成本:
 
 | OS | Arch | 产物 |
 |---|---|---|
 | linux | amd64 | `opendrive-bridge_{ver}_linux_amd64.tar.gz` |
 | linux | arm64 | `..._linux_arm64.tar.gz` |
-| darwin (macOS) | amd64 | `..._darwin_amd64.tar.gz` |
 | darwin (macOS) | arm64 (Apple Silicon) | `..._darwin_arm64.tar.gz` |
 | windows | amd64 | `..._windows_amd64.zip` |
-| windows | arm64 | `..._windows_arm64.zip` |
 
-每个包内含 `opendrived`、`odctl`、LICENSE、README、服务安装文件。用 **goreleaser** 一条命令产出全矩阵 + checksums (SHA256) + 签名;版本号注入 `main.version`(SemVer,`git tag` 驱动)。macOS 产物做 codesign + notarization(无开发者证书时文档说明 `xattr -d com.apple.quarantine` 方案);Windows 产物条件允许时做 Authenticode 签名。
+已移除:`darwin/amd64`(Intel Mac)、`windows/arm64`。二者都只是从发布矩阵中去掉,代码仍可交叉编译——若日后 Windows on ARM(Snapdragon X 一类)用户出现,在 `.goreleaser.yaml` 加回一行即可,无需改代码。
 
-### 8.2 主机部署 Host Deployment
+**归档必须包裹目录(v1.2 新增,修复实测问题)**:goreleaser 设 `wrap_in_directory: true`,使 `tar xzf` 后在当前目录生成 `opendrive-bridge/` 并把所有文件放入其中。此前的归档是"tar 炸弹"——解包会把二进制、LICENSE、docs、deploy 一股脑摊在用户当前目录里,清理起来很麻烦。
 
-- **Linux**: `deploy/systemd/opendrived.service`(`DynamicUser=yes`、`ProtectSystem=strict`、`NoNewPrivileges=yes` 等硬化指令);`odctl daemon install` 自动写入。
-- **macOS**: launchd plist,`odctl daemon install` 装载到 `~/Library/LaunchAgents`。
-- **Windows**: 经 `kardianos/service` 注册 Windows Service,`odctl daemon install` 一键完成。
+每个包内含 `opendrived`、`odctl`、`.env.example`、LICENSE、README、`docs/`、`deploy/`。用 **goreleaser** 一条命令产出全矩阵 + checksums (SHA256);版本号注入 `main.version`(SemVer,`git tag` 驱动)。macOS 产物做 codesign + notarization(无开发者证书时文档说明 `xattr -d com.apple.quarantine` 方案);Windows 产物条件允许时做 Authenticode 签名。
+
+### 8.2 主机部署 Host Deployment(v1.2 改为原地运行)
+
+**不再复制二进制到 `/usr/local/bin`。** 程序就留在用户解包出来的 `opendrive-bridge/` 目录里运行,原因有三:免 sudo、卸载即删目录、`.env` 与二进制同目录便于用户自行维护和备份。
+
+`odctl daemon install` 的行为改为:
+
+1. 以**解包目录的绝对路径**写服务单元(systemd / launchd / Windows Service)。服务管理器不读 shell 配置,因此单元里必须是绝对路径,不能依赖 PATH。
+2. 打印一行 `export PATH="$PATH:<解包目录>"` 供用户加入 `~/.zshrc` 或 `~/.bashrc`;**默认只打印不写入**,加 `--modify-shell-profile` 才代写,并在写入前备份、写入内容用标记块包裹以便 `daemon uninstall` 精确移除。理由:擅自改用户的 shell 配置是侵入行为,而且写错会让用户开不了新终端。
+3. `daemon uninstall` 卸载服务单元、移除标记块,但**不删除 `.env` 与 `.env.key`**——凭证的删除必须是用户显式动作(`odctl logout` 或手工删文件)。
+
+- **Linux**: `deploy/systemd/opendrived.service`,用户级 (`systemctl --user`) 为默认,含 `ProtectSystem=strict`、`NoNewPrivileges=yes` 等硬化指令。注意 `DynamicUser=yes` 与"读取用户目录下的 `.env`"不兼容,v1.2 起改为以调用用户身份运行。
+- **macOS**: launchd plist 装载到 `~/Library/LaunchAgents`。
+- **Windows**: 经 `kardianos/service` 注册 Windows Service。
 - 三平台统一由 `odctl daemon start|stop|status` 管理,屏蔽差异。
 
 ### 8.3 Docker 部署
@@ -551,7 +562,7 @@ docker run -d -p 127.0.0.1:9750:9750 \
   <registry>/opendrive-bridge:1.0.0
 ```
 
-镜像内 keyring 不可用 → 自动切换加密文件 token store(密钥来自 `ODB_STATE_KEY` env 或挂载的 secret)。提供 `docker-compose.yaml` 样例与 healthcheck(`GET /v1/auth/status`)。
+容器与主机现在走**同一条**凭证路径(§9.2 的加密 `.env`),不再有"容器专用后端"这个概念:把 `.env` 与 `.env.key` 作为挂载卷或 secret 提供即可(`-v $PWD/.env:/data/.env:ro -v $PWD/.env.key:/data/.env.key:ro`)。镜像本身绝不包含任何凭证文件。提供 `docker-compose.yaml` 样例与 healthcheck(`GET /v1/auth/status`)。
 
 ### 8.4 发布流程 Release Flow
 
@@ -565,17 +576,50 @@ docker run -d -p 127.0.0.1:9750:9750 \
 
 Bridge 持有能完全控制用户云盘的 token,运行在用户主机上。主要威胁:token 泄漏(日志/磁盘/进程列表)、本机其他进程滥用 Bridge API、中间人攻击、恶意文件名/路径注入、供应链攻击。
 
-### 9.2 凭证与 Token 管理(v1.1 修订)
+### 9.2 凭证与 Token 管理(v1.2 重写——单一加密 `.env`)
 
-**CredentialStore**(`internal/keystore`)统一保存四类凭证:username、password、OAuth token(access+refresh)、SessionID。
+**CredentialStore**(`internal/keystore`)统一保存五类凭证:username、password、OAuth token(access+refresh)、SessionID、Bridge API key。
 
-**凭证永远只存在用户本机**:Bridge 是纯本地软件,没有云端组件,凭证仅在调用 OpenDrive 官方 API 时经 HTTPS 发往上游,绝不发往任何第三方。三大平台均使用 OS 原生加密凭证库——macOS Keychain、**Windows Credential Manager(DPAPI,绑定用户账户)**、**Linux Secret Service(GNOME Keyring / KWallet)**。它们的共同性质是"随用户登录会话自动解锁、磁盘上加密存放":用户正常使用电脑时 Bridge 完全静默,设备丢失或他人账户则读不出凭证——这就是安全与便利的平衡点。仅在无 keyring 的环境(headless Linux、Docker)才使用显式配置的加密文件后端。
+**凭证永远只存在用户本机**:Bridge 是纯本地软件,没有云端组件,凭证仅在调用 OpenDrive 官方 API 时经 HTTPS 发往上游,绝不发往任何第三方。
 
-- **默认后端 OS keyring**(macOS Keychain / Windows Credential Manager / Linux Secret Service);不可用时(Docker、headless Linux)须**显式配置** AES-256-GCM 加密文件后端,密钥由环境变量/挂载 secret 提供,文件权限 0600。无任何持久化后端可用时,daemon **拒绝以默认模式启动**并明确报错(`--ephemeral` 旗标可显式选择内存模式,仅供测试;内存模式绝不静默成为默认,防止"看似登录了、重启后凭证蒸发"。SDK 的 `MemoryTokenStore` 仅限测试代码使用)。
-- **密码持久化是有意的设计偏离**:官方 OAuth2 条款要求应用不存储密码,但 refresh_token 仅 30 天且只在使用时滚动,无法满足"初始设定后永久无缝"的产品硬需求(§2.2)。缓解:密码只进 keyring/加密文件,永不出现在配置文件、日志、错误信息、进程参数中;`persist_password: false` 配置项供合规敏感用户关闭(代价:长期停机后需重新登录,status 标记 `seamless:false`)。
-- 密码**永不入日志**:§9.4 的脱敏正则覆盖 `passwd`/`password` 字段,且 CredentialStore 的调试输出只打印字段存在性,不打印值。
-- refresh_token 滚动更新必须原子持久化(先写新值成功再作废旧值的本地副本),防止刷新到一半崩溃导致永久掉登录;静默重登取得的新 token 同样原子落盘。
-- keyring 锁定/不可读时进入 `keystore_unavailable` 状态(§4.5):不发起任何上游请求,后台低频探测 keystore 恢复。
+#### 9.2.1 为什么放弃 OS keyring(v1.2 决策)
+
+v1.1 用三套平台原生凭证库(macOS Keychain / Windows Credential Manager / Linux Secret Service),各自一条代码路径、一套 CI 真机测试。实际部署暴露三个问题:
+
+1. **并非人人都有**。headless Linux、容器、精简发行版没有 Secret Service,这些环境本来就要退回加密文件——等于始终维护两条路径。
+2. **部署步骤因平台而异**,文档和排障各写三遍,用户体验不统一。
+3. **耦合了会变的东西**。凭证存储方式绑定 OS 供应商的行为,官方认证方式一旦变化,要在三个后端同步改。
+
+v1.2 统一为**唯一后端:AES-256-GCM 加密的 `.env` 文件**。这不是新代码——原 `BackendFile` 已经在 Docker 路径上服役,现在升为唯一实现;keyring / credman / secret-service 三条路径连同其测试一并删除(约 1000 行)。
+
+#### 9.2.2 文件布局与密钥
+
+| 文件 | 内容 | 权限 |
+|---|---|---|
+| `.env.example` | 模板,随发布包分发,进版本库 | 0644 |
+| `.env` | 用户凭证与 API key,**加密后**存放 | 0600 |
+| `.env.key` | 32 字节随机数据密钥,首次运行自动生成 | 0600(Windows 用 ACL 收紧,复用 `perm_windows.go`) |
+
+- 部署前:`cp .env.example .env`,填入 OpenDrive 用户名与密码(此刻为明文)。
+- 首次运行:daemon 生成 `.env.key`,生成随机 Bridge API key,把全部凭证加密写回 `.env`(明文密码在此刻消失)。用户**从不需要**手动输入或管理 API key。
+- 此后所有读取凭证与 API key 的操作一律经 CredentialStore 从 `.env` 解密读取,没有第二条路径。
+- 加密格式采用 openssl 兼容封装(`Salted__` + PBKDF2 + AES-256-GCM),用户可用标准 `openssl enc -d` 自行查验,不被 Bridge 绑架。
+- `.env` 与 `.env.key` 必须在 `.gitignore` 内,且发布包与容器镜像都不得包含它们。
+
+#### 9.2.3 这个方案防住了什么,没防住什么(诚实边界)
+
+密钥文件与密文同在一台机器上,是"无缝静默运行"这条硬需求(§2.2)的直接后果:任何需要开机输入口令的方案都会让 daemon 无法自启和崩溃自恢复。因此:
+
+- **防住**:误提交进 git、备份/网盘同步泄漏、录屏与旁人看屏、明文出现在日志或进程参数、随手 `cat .env`。
+- **防不住**:已能以该用户身份读取文件的攻击者——他同时拿得到密钥文件。相较 OS keyring 的"锁屏即不可读",这是一次**有意识的安全性让步**,换取跨平台一致性与部署简化。
+- 对单用户本地工具而言这个权衡是合理的;若部署在多用户主机或高敏感环境,应改用系统级手段(全盘加密、专用服务账户、最小权限)补足,文档须写明这一点。
+
+#### 9.2.4 不变的约束
+
+- **密码持久化仍是有意的设计偏离**:官方 OAuth2 条款要求应用不存储密码,但 refresh_token 仅 30 天且只在使用时滚动,无法满足"初始设定后永久无缝"(§2.2)。`persist_password: false` 逃生口保留(代价:长期停机后需重新登录,status 标记 `seamless:false`)。
+- **密码与密钥永不入日志**:§9.4 脱敏正则覆盖 `passwd`/`password`;CredentialStore 的调试输出只打印字段存在性。
+- **原子写**:refresh_token 滚动更新与静默重登取得的新 token 必须原子落盘(先写成功再作废旧副本),防止刷新中途崩溃导致永久掉登录。
+- **"无持久化 = 配置错误"门禁保留**:`.env` 不可读、`.env.key` 缺失或解密失败时进入 `keystore_unavailable`(§4.5),**不发起任何上游请求**,后台低频重试;报错必须一句话说清缺什么、怎么补。`--ephemeral` 内存模式仅供测试,绝不静默成为默认。
 
 ### 9.3 Bridge API 自身防护
 
@@ -631,11 +675,28 @@ Upstream 要求 `access_token` 放 URL query,这会出现在各种日志里。�
 
 | 版本 | 内容 |
 |---|---|
-| v1.0 | 本白皮书第一版范围(核心存储 + daemon + CLI + 6 平台 + Docker) |
-| v1.1 | Users 写操作、Account Users 管理、User Groups(role=2 管理场景) |
-| v1.2 | Secure Folders(两阶段授权)、文件/文件夹密码保护全流程、Stats 带宽/用量报表 |
-| v1.3 | Notes 与 Tasks/Projects 模块(若有实际需求) |
+| v1.0 | 核心存储 + daemon + CLI + Docker(已发布 v0.1.0) |
+| **v1.1** | **凭证与打包重构(本次 v1.2 白皮书修订的落地内容)**:加密 `.env` 取代 OS keyring、四平台矩阵、归档包裹目录、原地运行部署 |
+| **v1.2** | **桌面 GUI(macOS + Windows)**:见下方 §12.1.1 |
+| v1.3 | Users 写操作、Account Users 管理、User Groups(role=2 管理场景) |
+| v1.4 | Secure Folders(两阶段授权)、文件/文件夹密码保护全流程、Stats 带宽/用量报表 |
+| v1.5 | Notes 与 Tasks/Projects 模块(若有实际需求) |
 | v2.0 候选 | **WebDAV / FUSE 挂载前端**(把 OpenDrive 挂成本地盘)、**rclone backend 贡献**、S3 兼容网关、双向同步引擎(基于 DirUpdateTime 增量) |
+
+#### 12.1.1 桌面 GUI(v1.2 规划)
+
+**范围**:macOS 与 Windows 提供图形界面;**Linux 不做 GUI**(其典型部署是 headless 服务器,CLI + REST 已足够)。
+
+GUI 是 Bridge REST API 的**又一个客户端**,与 `odctl` 平级——不得绕过 daemon 直接调用 SDK,否则会出现两条凭证路径和两套错误措辞,前五个阶段建立的边界纪律会在这里破功。
+
+功能:
+
+1. **服务状态**:daemon 是否运行、`/v1/auth/status` 的账号与认证状态、配额用量(注意 D45 的单位换算已在 Bridge 层完成)。
+2. **凭证管理**:修改 OpenDrive 用户名/密码并写回加密 `.env`;密码被改后进入 `reauth_required` 时,这里是用户最自然的补救入口。
+3. **传输速率曲线**:消费 `/v1/jobs` 的 `speed` 字段绘制实时曲线。
+4. **Job 监控窗口**:列出进行中与历史任务的 state / bytes_done / bytes_total / error,支持取消。
+
+技术选型待定,倾向系统托盘常驻 + 轻量 webview(复用 REST 与 JSON,避免引入重型 GUI 框架并保持 `CGO_ENABLED=0` 的交叉编译优势);若必须引入 cgo,则 GUI 单独成一个可选产物,不影响 daemon 与 CLI 的构建矩阵。
 
 ### 12.2 API 漂移监控 Upstream Drift Watch
 
@@ -699,6 +760,17 @@ odctl share /Finance/2026/report.xlsx --expires 7d --max-uses 10
 5. 所有公开函数写 godoc;错误信息面向使用者,不泄漏内部路径与 token。
 
 ### E. 修订记录 Changelog
+
+**v1.2 (2026-07-31)** — v0.1.0 实机试用后的部署与凭证重构(Derek 亲自走通首次部署后提出):
+
+1. §9.2 重写:**删除 OS keyring 三后端,统一为加密 `.env` + `.env.key`**。理由是跨平台一致、部署统一、解耦于 OS 供应商行为;代价是安全性从"锁屏即不可读"降为"文件权限 + 防误泄漏",§9.2.3 诚实写明边界。密钥文件方案是"无缝静默运行"硬需求的必然结果(口令方案会让 daemon 无法自启)。Bridge API key 改为首次运行自动生成并加密存入 `.env`,用户从不需要手动管理。
+2. §8.1:发布矩阵由六个收窄为**四个**(去掉 darwin/amd64 与 windows/arm64);归档改为 `wrap_in_directory`,修复"tar 炸弹"问题。
+3. §8.2:**不再安装到 `/usr/local/bin`**,程序原地运行于解包目录;服务单元写绝对路径,PATH 默认只打印不代写(`--modify-shell-profile` 才写入,带标记块以便精确卸载)。`DynamicUser=yes` 与读取用户目录 `.env` 不兼容,改为以调用用户身份运行。
+4. §8.3:容器与主机走同一条凭证路径,不再有"容器专用后端"。
+5. §3.4:配置文件移入解包目录,与 `.env` 同处一地;`.env` 管凭证、`config.yaml` 管行为,分工不混。
+6. §12.1:路线图重排,新增 **v1.2 桌面 GUI(macOS/Windows,Linux 不做)**,并规定 GUI 是 REST API 的又一个客户端,不得绕过 daemon。
+
+
 
 **v1.1 (2026-07-25)** — P1 完成后的凭证生命周期修订(源自 Opus 5 开发备忘 + Derek 的产品要求"初始设定后永久无缝、静默运行"):
 
