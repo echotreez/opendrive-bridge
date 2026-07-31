@@ -102,6 +102,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Transfer performance, against the 1 GB baseline of whitepaper §10.
+  #
+  # The gate compares a ratio — pipeline ns/op over an MD5 of the same bytes,
+  # both measured in this run — rather than MB/s. A hosted runner's throughput
+  # varies by more than the 15% tolerance between mornings, so an absolute
+  # threshold would fail for reasons unrelated to the code, and a gate that
+  # cries wolf gets switched off. scripts/check-bench.sh explains it in full.
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: 'stable' }
+      - name: 1GB upload and download
+        run: ./scripts/check-bench.sh
+
   # Every target compiles. Compiling is necessary and not sufficient, which is
   # what the smoke job below is for.
   crossbuild:

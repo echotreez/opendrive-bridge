@@ -407,7 +407,12 @@ func ValidateName(name string) error {
 	switch {
 	case name == "":
 		return &APIError{Kind: KindInvalidName, UpstreamMsg: "name must not be empty"}
-	case name == "." || name == "..":
+	// Compared after trimming, because upstream trims a name before storing it
+	// (D46): ". " and " .." are accepted here only to arrive upstream as "."
+	// and "..", which are not names at all. The padded forms are the same hole
+	// that let " .. " past the traversal check in NormalizeFolderPath, one layer
+	// lower down, and a fuzzer found this one too.
+	case strings.TrimSpace(name) == "." || strings.TrimSpace(name) == "..":
 		return &APIError{Kind: KindInvalidName, UpstreamMsg: fmt.Sprintf("%q is not a usable name", name)}
 	case len(name) > MaxNameLength:
 		return &APIError{Kind: KindInvalidName, UpstreamMsg: fmt.Sprintf("name is %d bytes, the limit is %d", len(name), MaxNameLength)}

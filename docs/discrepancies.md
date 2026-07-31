@@ -1099,3 +1099,63 @@ thing. The conversion is one named constant (`bytesPerMB` in
 place.
 
 Covered by `TestQuotaLimitsAreNormalisedToBytes`.
+
+---
+
+## D46 — upstream trims whitespace off the ends of a name, silently
+
+**Where:** `POST /folder.json` (and every endpoint that takes a name).
+**Found by:** a fuzzer, indirectly. `FuzzNormalizeFolderPath` reported that
+normalising was not idempotent — `"0 /"` became `"/0 "`, and normalising *that*
+gave `"/0"`. Chasing why led to the question of what a trailing space in a name
+even means to upstream, which nobody had asked.
+
+**Measured on the live API**, creating folders and reading the names back out of
+the parent listing:
+
+| sent | stored |
+|---|---|
+| `"odbspace1 "` | `"odbspace1"` |
+| `" odbspace2"` | `"odbspace2"` |
+| `"odbspace3  x"` | `"odbspace3  x"` |
+
+Surrounding whitespace is removed; interior whitespace is kept. Upstream reports
+success and returns a `FolderID` either way, so nothing in the response says the
+name was changed — the only way to see it is to read the name back.
+
+**Consequences, both of which were live bugs:**
+
+1. A path asking for `"/a "` could never match anything, because upstream cannot
+   store a folder called `"a "`. The bridge would have resolved it to "no such
+   folder" while the user was looking straight at the folder in the web client.
+   Both `NormalizeFolderPath` and the Bridge's `normalisePath` now trim each
+   **segment**, which is what upstream does.
+
+2. Trimming has to happen *before* the traversal check. `" .. "` is not `".."`
+   to a string comparison, but it is to upstream, which trims the name first.
+   The check ran first and let it through as an ordinary segment name, so a
+   request would have gone out for a name upstream reads as `..`. Now the
+   segments are trimmed first and the check sees what upstream would see.
+
+The earlier code trimmed the path *as a whole* instead, which produced (1) and
+(2) and additionally made normalisation non-idempotent: the trailing space came
+off the last name whenever the path had no trailing slash, so two spellings of
+one path resolved to two different folders and the answer changed the second
+time it was asked.
+
+3. The same disguise works one layer lower. `ValidateName` rejected `"."` and
+   `".."` by exact comparison, so `". "` was accepted — and upstream would have
+   stored it as `"."`. Fuzzing the Bridge's `joinPath` found it: a rename to
+   `". "` produced the response path `"/."`, which is the parent, not the new
+   child. `ValidateName` now compares the trimmed form. Names that merely
+   contain dots (`.hidden`, `report.pdf`) are unaffected.
+
+4. `joinPath` in the Bridge trims the name it is given, for the same reason: a
+   listing entry called `" report"` describes a folder upstream knows as
+   `"report"`, and a path built from the padded form would be a cache key no
+   lookup could ever match.
+
+Covered by `TestNormalizeFolderPathTrimsEachSegmentNotThePath`,
+`TestNormalizeFolderPathRefusesPaddedTraversal`,
+`TestValidateNameRejectsPaddedDotNames`, and the fuzz corpus entry that found
+the first of them.

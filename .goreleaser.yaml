@@ -79,6 +79,11 @@ snapshot:
 changelog:
   use: git
   sort: asc
+  # Without this every line of the release notes begins with a 40-character
+  # commit hash, which is the least useful part of the line and pushes the
+  # subject — the part someone is reading the notes for — off to the right.
+  # -1 removes it; the commit is one click away in the compare view anyway.
+  abbrev: -1
   filters:
     exclude:
       - "^chore"

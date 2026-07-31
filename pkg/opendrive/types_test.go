@@ -339,3 +339,20 @@ func TestPaginationProtocol(t *testing.T) {
 		t.Fatal("negative limit must be rejected")
 	}
 }
+
+// A name upstream would trim into "." or ".." is not a name. Found by fuzzing
+// the Bridge's joinPath, which turned an accepted ". " into the path "/." —
+// the parent, not a child (D46).
+func TestValidateNameRejectsPaddedDotNames(t *testing.T) {
+	for _, name := range []string{". ", " .", " . ", ".. ", " ..", "\t..\t", ".\n"} {
+		if err := ValidateName(name); err == nil {
+			t.Errorf("ValidateName(%q) allowed a name upstream would store as a dot segment", name)
+		}
+	}
+	// Ordinary names that merely contain a dot are unaffected.
+	for _, name := range []string{".hidden", "a.b", "..hidden", "report.pdf", "v1.2..3"} {
+		if err := ValidateName(name); err != nil {
+			t.Errorf("ValidateName(%q) = %v, want nil", name, err)
+		}
+	}
+}

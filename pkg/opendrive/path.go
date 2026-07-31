@@ -54,13 +54,39 @@ func NormalizeFolderPath(p string) (string, error) {
 	}
 	// Upstream is a POSIX-style namespace; a backslash is a legal character in
 	// a name, never a separator (§2.6 #10 lists it as illegal in names).
-	trimmed := strings.TrimSpace(p)
-	if trimmed == "" || trimmed == "/" || trimmed == "." {
+	if strings.TrimSpace(p) == "" || p == "/" || p == "." {
 		return "/", nil
 	}
+	trimmed := p
 	if !strings.HasPrefix(trimmed, "/") {
 		trimmed = "/" + trimmed
 	}
+
+	// Whitespace is trimmed per segment, not off the path as a whole, and it is
+	// done before anything else reads the segments. Both halves of that matter,
+	// and a fuzzer found the first one:
+	//
+	// Trimming the whole string took the trailing space off the *last name*
+	// whenever the path had no trailing slash, so "0 /" normalised to "/0 " and
+	// normalising that gave "/0" — two spellings of one path pointing at two
+	// different folders, and an answer that changed the second time it was
+	// asked. That is the exact failure this function exists to prevent.
+	//
+	// Per-segment is also what upstream does: measured on the live API, a
+	// folder created as "odbspace1 " is stored as "odbspace1", while interior
+	// spaces are kept (D46). So a path asking for "a " could only ever match the
+	// folder upstream calls "a", and treating them as different names would have
+	// meant sending requests for something that cannot exist.
+	//
+	// Doing it first closes a hole the traversal check could not see: " .. " is
+	// not ".." to a string comparison, but it is to upstream, which trims the
+	// name before storing it. Trimming first means the check below sees what
+	// upstream would see.
+	segments := strings.Split(trimmed, "/")
+	for i, seg := range segments {
+		segments[i] = strings.TrimSpace(seg)
+	}
+	trimmed = strings.Join(segments, "/")
 
 	// A ".." is refused outright rather than resolved. Resolving it would be
 	// safe — path.Clean cannot escape the root — but it would silently point a

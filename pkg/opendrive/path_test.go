@@ -383,3 +383,45 @@ func mustContainString(t *testing.T, haystack []string, needle string) {
 	}
 	t.Fatalf("%v does not contain %q", haystack, needle)
 }
+
+// Both cases below came out of the fuzzer and a probe against the live API, and
+// both were wrong in ways no example-based test had thought to ask about.
+func TestNormalizeFolderPathTrimsEachSegmentNotThePath(t *testing.T) {
+	// The fuzzer's finding: trimming the whole string took the trailing space
+	// off the last name whenever there was no trailing slash, so these two
+	// spellings of one path disagreed, and normalising twice changed the answer.
+	for _, p := range []string{"0 /", "/0 ", "/0", "0/"} {
+		got, err := NormalizeFolderPath(p)
+		if err != nil {
+			t.Fatalf("NormalizeFolderPath(%q): %v", p, err)
+		}
+		if got != "/0" {
+			t.Errorf("NormalizeFolderPath(%q) = %q, want %q", p, got, "/0")
+		}
+		twice, err := NormalizeFolderPath(got)
+		if err != nil || twice != got {
+			t.Errorf("normalising %q twice gave %q, %v", got, twice, err)
+		}
+	}
+
+	// Interior spaces are a real part of a name and must survive: upstream keeps
+	// them, and a folder called "My Documents" is ordinary.
+	got, err := NormalizeFolderPath("/My Documents/Q1 report ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "/My Documents/Q1 report" {
+		t.Errorf("got %q, want %q", got, "/My Documents/Q1 report")
+	}
+}
+
+// Trimming has to happen before the traversal check, or a segment can arrive
+// disguised: " .. " is not ".." to a string comparison, but upstream trims the
+// name before storing it, so to upstream they are the same thing.
+func TestNormalizeFolderPathRefusesPaddedTraversal(t *testing.T) {
+	for _, p := range []string{"/a/ .. /b", "/a/.. ", "/ ../b", "/a/  ..  "} {
+		if got, err := NormalizeFolderPath(p); err == nil {
+			t.Errorf("NormalizeFolderPath(%q) = %q, want a refusal", p, got)
+		}
+	}
+}

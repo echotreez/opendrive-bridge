@@ -69,6 +69,22 @@ func normalisePath(p string) (string, error) {
 	if !strings.HasPrefix(p, "/") {
 		return "", BadRequest("Paths must start with a slash, for example /Documents/report.pdf.")
 	}
+
+	// Each segment is trimmed before anything else looks at it, matching the
+	// SDK and matching upstream: measured on the live API, a folder created as
+	// "report " is stored as "report", while interior spaces survive (D46). A
+	// caller who pastes a path with a stray space is asking for a folder that
+	// upstream cannot have, so trimming here is the difference between finding
+	// their folder and being told it does not exist.
+	//
+	// It happens before the traversal check because " .. " is not ".." to a
+	// string comparison but is to upstream, which trims the name first.
+	segments := strings.Split(p, "/")
+	for i, seg := range segments {
+		segments[i] = strings.TrimSpace(seg)
+	}
+	p = strings.Join(segments, "/")
+
 	for _, seg := range strings.Split(p, "/") {
 		if seg == ".." {
 			return "", BadRequest("Paths cannot contain '..'. Give the full path from the top, " +
@@ -250,7 +266,17 @@ func timePtr(t opendrive.UnixTime) *string {
 	return &s
 }
 
+// joinPath builds the path of a child, and the result is always in the form
+// normalisePath produces — every caller here hands it straight back to a caller
+// of the API or uses it as a path-cache key, and a key that does not match the
+// one a lookup would compute is a cache that never hits.
+//
+// The name is trimmed for the reason in D46: upstream removes surrounding
+// whitespace from names, so a listing entry called " report" describes a folder
+// upstream knows as "report", and building "/ report" from it would produce a
+// path that resolves to nothing. A fuzzer found this by joining "/" and " 0".
 func joinPath(dir, name string) string {
+	name = strings.TrimSpace(name)
 	if dir == "/" {
 		return "/" + name
 	}
