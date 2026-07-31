@@ -11,23 +11,32 @@ import (
 )
 
 // TestCredentialFileACLIsOwnerOnly is the Windows replacement for the POSIX
-// 0600 assertion. NTFS ignores the mode bits Go's Chmod pretends to set, so
+// 0600 assertion, and it covers .env.key as well as .env — since v1.2 the key
+// sits beside the ciphertext, so a readable key file is exactly as bad as a
+// readable credential file. NTFS ignores the mode bits Go's Chmod pretends to set, so
 // without an explicit ACL the credential file inherits whatever the parent
 // directory allows — on a default profile that includes Administrators, and in
 // a shared location it can include Users (§9.2).
 func TestCredentialFileACLIsOwnerOnly(t *testing.T) {
 	ctx := context.Background()
-	s := newTestFileStore(t)
+	s := newTestStore(t)
 	if err := s.Save(ctx, sampleCredentials()); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	out, err := exec.Command("icacls", s.path).CombinedOutput()
+	for _, path := range []string{s.path, s.keyPath} {
+		checkOwnerOnlyACL(t, path)
+	}
+}
+
+func checkOwnerOnlyACL(t *testing.T, path string) {
+	t.Helper()
+	out, err := exec.Command("icacls", path).CombinedOutput()
 	if err != nil {
-		t.Fatalf("icacls %s: %v\n%s", s.path, err, out)
+		t.Fatalf("icacls %s: %v\n%s", path, err, out)
 	}
 	acl := string(out)
-	t.Logf("icacls:\n%s", acl)
+	t.Logf("icacls %s:\n%s", path, acl)
 
 	// Inheritance must be broken, otherwise the entries below are only half
 	// the story.
@@ -62,7 +71,7 @@ func TestCredentialFileACLIsOwnerOnly(t *testing.T) {
 // can quietly come back (§9.2).
 func TestCredentialFileACLSurvivesRotation(t *testing.T) {
 	ctx := context.Background()
-	s := newTestFileStore(t)
+	s := newTestStore(t)
 	if err := s.Save(ctx, sampleCredentials()); err != nil {
 		t.Fatalf("first Save: %v", err)
 	}
