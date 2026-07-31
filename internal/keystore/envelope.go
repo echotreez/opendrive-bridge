@@ -39,17 +39,29 @@ const (
 	opensslMagic = "Salted__"
 	// saltLen is what OpenSSL uses, and is not ours to change.
 	saltLen = 8
-	// pbkdf2Iterations is deliberately far above OpenSSL's default of 10000.
+	// shippedIterations is deliberately far above OpenSSL's default of 10000.
 	// The cost is paid once per daemon start, and the key file is 32 random
 	// bytes rather than a human passphrase, so this is belt and braces — but a
 	// user who copies a weak passphrase into .env.key gets the benefit.
 	//
 	// It has to be passed to openssl explicitly (-iter 600000). Documented
 	// everywhere the command appears.
-	pbkdf2Iterations = 600000
-	keyLen           = 32 // AES-256
-	ivLen            = aes.BlockSize
+	shippedIterations = 600000
+	keyLen            = 32 // AES-256
+	ivLen             = aes.BlockSize
 )
+
+// pbkdf2Iterations is what seal and open actually use. It is a variable for one
+// reason: 600000 iterations is right for a daemon that derives a key once at
+// start-up and wrong for a test suite that seals a file forty times — under the
+// race detector this package went from 8 seconds to 130, per platform, on every
+// run. Slow tests get deleted eventually, which is a worse outcome than a
+// variable.
+//
+// The shipped value is asserted by TestTheShippedIterationCountIsWhatWeDocument,
+// so lowering it outside a test is a visible change rather than a quiet one, and
+// the openssl compatibility tests deliberately use the real number.
+var pbkdf2Iterations = shippedIterations
 
 var errNotEncrypted = errors.New("keystore: this is not an encrypted file")
 

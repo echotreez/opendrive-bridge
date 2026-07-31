@@ -17,6 +17,29 @@ import (
 // This is also what makes the hand-written PBKDF2 safe to keep: a mistake in it
 // would show up here as openssl and this package disagreeing.
 
+// cheapKDF lowers the iteration count for tests that are about the .env format
+// rather than about the KDF. The openssl compatibility tests do not call it:
+// they have to derive the key the same way the documented command does.
+func cheapKDF(t *testing.T) {
+	t.Helper()
+	previous := pbkdf2Iterations
+	pbkdf2Iterations = 1000
+	t.Cleanup(func() { pbkdf2Iterations = previous })
+}
+
+// The number in the documentation and the number in the code have to be the
+// same, or the recovery command in .env.example and docs/first-run.md would not
+// work — and that command is the whole reason for this file format.
+func TestTheShippedIterationCountIsWhatWeDocument(t *testing.T) {
+	if shippedIterations != 600000 {
+		t.Fatalf("the shipped iteration count is %d; every documented openssl "+
+			"command says -iter 600000", shippedIterations)
+	}
+	if pbkdf2Iterations != shippedIterations {
+		t.Fatalf("pbkdf2Iterations is %d outside a test", pbkdf2Iterations)
+	}
+}
+
 func opensslPath(t *testing.T) string {
 	t.Helper()
 	path, err := exec.LookPath("openssl")
@@ -100,6 +123,7 @@ func TestWeCanDecryptWhatOpensslWrites(t *testing.T) {
 // would disagree, which is the point of having both.
 
 func TestRoundTripWithoutOpenssl(t *testing.T) {
+	cheapKDF(t)
 	password := []byte("key material")
 	for _, plain := range []string{
 		"", "a", "exactly-sixteen!", "ODB_PASSWORD=p\n", strings.Repeat("x", 5000),
@@ -119,6 +143,7 @@ func TestRoundTripWithoutOpenssl(t *testing.T) {
 }
 
 func TestTheWrongKeyIsRefusedRatherThanGuessedAt(t *testing.T) {
+	cheapKDF(t)
 	sealed, err := seal([]byte("ODB_PASSWORD=secret\n"), []byte("the right key"))
 	if err != nil {
 		t.Fatal(err)
@@ -132,6 +157,7 @@ func TestTheWrongKeyIsRefusedRatherThanGuessedAt(t *testing.T) {
 // malleable, which is exactly why the plaintext is checked after decryption
 // rather than trusted; this test pins the first half of that argument.
 func TestAlteredCiphertextDoesNotDecryptCleanly(t *testing.T) {
+	cheapKDF(t)
 	password := []byte("key material")
 	sealed, err := seal([]byte("ODB_USERNAME=derek\nODB_PASSWORD=secret\n"), password)
 	if err != nil {
@@ -156,6 +182,7 @@ func TestAlteredCiphertextDoesNotDecryptCleanly(t *testing.T) {
 }
 
 func TestIsEncryptedTellsAFreshEnvFromASealedOne(t *testing.T) {
+	cheapKDF(t)
 	sealed, err := seal([]byte("ODB_USERNAME=derek\n"), []byte("k"))
 	if err != nil {
 		t.Fatal(err)

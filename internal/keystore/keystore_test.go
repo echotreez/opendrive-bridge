@@ -30,6 +30,7 @@ func sampleCredentials() *opendrive.StoredCredentials {
 
 func newTestStore(t *testing.T) *envStore {
 	t.Helper()
+	cheapKDF(t)
 	s, err := newEnvStore(filepath.Join(t.TempDir(), EnvFileName), nil)
 	if err != nil {
 		t.Fatalf("newEnvStore: %v", err)
@@ -102,6 +103,7 @@ func TestTheFileIsEncryptedAndPrivate(t *testing.T) {
 // their password in the clear, and starting the daemon once takes it away again.
 func TestFirstRunSealsThePlaintextTheUserWrote(t *testing.T) {
 	ctx := context.Background()
+	cheapKDF(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, EnvFileName)
 
@@ -307,6 +309,7 @@ func TestAnAlteredFileIsRefused(t *testing.T) {
 // written. That is how a container gets one (§8.3) without a writable directory.
 func TestAKeyFromTheEnvironmentNeedsNoKeyFile(t *testing.T) {
 	ctx := context.Background()
+	cheapKDF(t)
 	dir := t.TempDir()
 	t.Setenv(DefaultKeyEnv, "a configured passphrase")
 
@@ -354,6 +357,7 @@ func TestOpenRejectsAnUnknownBackendAndNamesTheChoices(t *testing.T) {
 }
 
 func TestAutoAndFileAreTheSameStore(t *testing.T) {
+	cheapKDF(t)
 	dir := t.TempDir()
 	for _, backend := range []Backend{BackendAuto, BackendFile, ""} {
 		s, err := Open(Config{Backend: backend, Path: filepath.Join(dir, EnvFileName)})
@@ -399,6 +403,7 @@ func TestValuesSurviveTheirAwkwardCharacters(t *testing.T) {
 // refresh would silently delete the user's own lines.
 func TestUnknownLinesSurviveAWrite(t *testing.T) {
 	ctx := context.Background()
+	cheapKDF(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, EnvFileName)
 	if err := os.WriteFile(path, []byte("ODB_USERNAME=derek\nSOMETHING_ELSE=keep me\n"), 0o600); err != nil {

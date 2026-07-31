@@ -84,6 +84,10 @@ func TestSeamlessAcrossRestarts(t *testing.T) {
 		return c.Do(ctx, opendrive.Request{Method: http.MethodGet, Path: opendrive.EndpointUsersInfo}, &out)
 	}
 
+	// The KDF is slowed to 600000 iterations in production and this test seals
+	// the file a dozen times; the format is not what it is checking.
+	cheapKDF(t)
+
 	// The credential store is a real encrypted file, as it would be in Docker.
 	t.Setenv(DefaultKeyEnv, "a configured passphrase")
 	path := filepath.Join(t.TempDir(), "credentials.enc")
