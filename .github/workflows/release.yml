@@ -197,10 +197,19 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          # `latest` was a raw tag enabled for any ref beginning with v, which
+          # would have pointed it at the first release candidate — somebody
+          # typing `docker pull …:latest` would get a build made to be thrown
+          # away. `latest=auto` is the action's own rule and knows what a
+          # prerelease is: 0.1.0 becomes latest, 0.1.0-rc.1 does not.
+          #
+          # The semver patterns need no such guard: {{version}} gives the full
+          # 0.1.0-rc.1, and {{major}}.{{minor}} is skipped for prereleases, so a
+          # candidate never takes over the 0.1 tag either.
+          flavor: latest=auto
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       # Built and scanned before it is pushed: an image with a known high
       # severity vulnerability must not reach the registry, where somebody would
