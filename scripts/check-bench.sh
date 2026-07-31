@@ -30,6 +30,13 @@
 # 1.411x and 1.673x on consecutive days, and the third of those tripped a 15%
 # gate that had nothing to report.
 #
+# The baseline is measured on a CI runner, because that is where the gate runs.
+# Removing the loopback HTTP server made download machine-independent (0.999x on
+# CI against 1.001x on a laptop) but upload still moves 50 MB chunks through a
+# buffer and a multipart writer, and memory bandwidth differs between an M2 and a
+# four-core cloud vCPU by more than the tolerance. So --update from a CI run, and
+# expect a local run to look comfortably fast rather than exactly equal.
+#
 # Usage:
 #   scripts/check-bench.sh                 compare against the baseline
 #   scripts/check-bench.sh --update        record the current numbers as the baseline

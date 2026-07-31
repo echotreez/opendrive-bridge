@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -43,15 +44,23 @@ func daemonService(execPath string, args []string) (service.Service, error) {
 	// have no credential store, so the bridge would start and immediately report
 	// that it cannot reach one.
 	//
-	// Linux and Windows go the other way. A machine running this as a service is
-	// usually a server with no desktop session, so a system service plus the
-	// encrypted-file store (see deploy/systemd/opendrived.service) is both what
-	// people want and the only thing that works there.
-	if runtime.GOOS == "darwin" {
+	// Linux joins it since v1.2, for a reason that is the same shape: the
+	// credentials are an encrypted .env in the directory the user unpacked, and
+	// a system unit with DynamicUser=yes runs as a user that cannot read the
+	// user's home. §8.2 settles it — a user service, started with
+	// `systemctl --user`, running as whoever installed it.
+	//
+	// Windows keeps a machine service: it has no per-user service manager worth
+	// the name, and the Service Manager reads the absolute path below.
+	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
 		cfg.Option["UserService"] = true
 		cfg.Option["KeepAlive"] = true
 		cfg.Option["RunAtLoad"] = true
 	}
+	// The working directory is where .env lives, and it is set explicitly
+	// because no service manager inherits the shell's. Without it the daemon
+	// would start in / and look for credentials that are not there.
+	cfg.WorkingDirectory = filepath.Dir(execPath)
 	return service.New(serviceProgram{}, cfg)
 }
 
@@ -65,20 +74,21 @@ func newDaemonCommand(o *Options) *cobra.Command {
 	}
 
 	var execPath, addr string
+	var modifyProfile bool
 	install := &cobra.Command{
 		Use:   "install",
 		Short: "Register the bridge to start automatically",
-		Args:  cobra.NoArgs,
+		Long: "Registers the bridge with this machine's service manager, running it from\n" +
+			"the folder you unpacked. Nothing is copied anywhere: the programs, your .env\n" +
+			"and your .env.key stay together, and uninstalling is deleting the folder.",
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			path := execPath
-			if path == "" {
-				found, err := exec.LookPath("opendrived")
-				if err != nil {
-					return usage("Cannot find 'opendrived' on this machine. " +
-						"Install it alongside odctl, or point at it with --exec.")
-				}
-				path = found
+			path, err := resolveDaemonPath(execPath)
+			if err != nil {
+				return err
 			}
+			dir := filepath.Dir(path)
+
 			args := []string{}
 			if addr != "" {
 				args = append(args, "--addr", addr)
@@ -92,12 +102,37 @@ func newDaemonCommand(o *Options) *cobra.Command {
 				return serviceError(err)
 			}
 			_, _ = fmt.Fprintf(o.Out(), "The bridge is installed and will start when you log in.\n"+
-				"Start it now with: odctl daemon start\n")
+				"It runs from %s, where your .env lives.\n"+
+				"Start it now with: odctl daemon start\n", dir)
+
+			// The PATH suggestion. Printed by default; written only when asked.
+			if !modifyProfile {
+				_, _ = fmt.Fprintf(o.Out(), "\nTo run odctl from anywhere, add this to your shell profile:\n"+
+					"  %s\n"+
+					"Or re-run with --modify-shell-profile and it will be added for you,\n"+
+					"in a marked block that uninstall removes again.\n", pathLine(dir))
+				return nil
+			}
+			profile, changed, err := addToShellProfile(dir)
+			if err != nil {
+				// The service is installed; this part failing is worth saying
+				// plainly rather than unwinding the whole command.
+				_, _ = fmt.Fprintf(o.Err(), "\nThe bridge is installed, but your shell profile was not changed: %v\n", err)
+				return nil
+			}
+			if changed {
+				_, _ = fmt.Fprintf(o.Out(), "\nAdded %s to %s. Open a new terminal for it to take effect.\n",
+					dir, profile)
+			} else {
+				_, _ = fmt.Fprintf(o.Out(), "\n%s already has the block; nothing to change.\n", profile)
+			}
 			return nil
 		},
 	}
-	install.Flags().StringVar(&execPath, "exec", "", "path to the opendrived binary")
+	install.Flags().StringVar(&execPath, "exec", "", "path to the opendrived binary; defaults to the one beside odctl")
 	install.Flags().StringVar(&addr, "addr", "", "address for the daemon to listen on")
+	install.Flags().BoolVar(&modifyProfile, "modify-shell-profile", false,
+		"add the folder to your shell profile's PATH, in a block uninstall can remove")
 
 	control := func(use, short, done string, action func(service.Service) error) *cobra.Command {
 		return &cobra.Command{
@@ -125,10 +160,7 @@ func newDaemonCommand(o *Options) *cobra.Command {
 		control("stop", "Stop the background bridge",
 			"The bridge has stopped. Transfers in progress were cancelled cleanly.",
 			func(s service.Service) error { return s.Stop() }),
-		control("uninstall", "Remove the bridge from this machine's services",
-			"The bridge will no longer start on its own. Your credentials are untouched; "+
-				"run 'odctl logout' if you want those gone too.",
-			func(s service.Service) error { return s.Uninstall() }),
+		uninstallCommand(o),
 	)
 	return cmd
 }
@@ -187,4 +219,84 @@ func readPassword(o *Options, prompt string) (string, error) {
 			"or pass --password.")
 	}
 	return strings.TrimSpace(line), nil
+}
+
+// resolveDaemonPath finds opendrived, preferring the copy beside odctl.
+//
+// §8.2: the programs run from the folder they were unpacked into, so the one
+// next to this binary is almost always the right one — and looking there first
+// means a user who has an older copy somewhere on their PATH does not silently
+// install that instead.
+func resolveDaemonPath(override string) (string, error) {
+	if override != "" {
+		abs, err := filepath.Abs(override)
+		if err != nil {
+			return "", usage("Cannot work out the full path of %s: %v", override, err)
+		}
+		if _, err := os.Stat(abs); err != nil {
+			return "", usage("There is no opendrived at %s.", abs)
+		}
+		return abs, nil
+	}
+
+	if self, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(self); err == nil {
+			self = resolved
+		}
+		candidate := filepath.Join(filepath.Dir(self), daemonBinaryName())
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	if found, err := exec.LookPath("opendrived"); err == nil {
+		abs, absErr := filepath.Abs(found)
+		if absErr == nil {
+			return abs, nil
+		}
+		return found, nil
+	}
+	return "", usage("Cannot find 'opendrived'. It should be in the same folder as odctl — " +
+		"if you moved one of them, point at it with --exec.")
+}
+
+func daemonBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "opendrived.exe"
+	}
+	return "opendrived"
+}
+
+// uninstallCommand removes the service and the PATH block, and deliberately
+// leaves the credentials alone.
+//
+// §8.2: deleting .env and .env.key must be something the user asks for, not a
+// side effect of removing a service. Somebody uninstalling to reinstall a newer
+// version would otherwise have to sign in again for no reason.
+func uninstallCommand(o *Options) *cobra.Command {
+	return &cobra.Command{
+		Use:   "uninstall",
+		Short: "Remove the bridge from this machine's services",
+		Args:  cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			svc, err := daemonService("", nil)
+			if err != nil {
+				return serviceError(err)
+			}
+			if err := svc.Uninstall(); err != nil {
+				return serviceError(err)
+			}
+			_, _ = fmt.Fprintln(o.Out(), "The bridge will no longer start on its own.")
+
+			if profile, changed, err := removeFromShellProfile(); err != nil {
+				_, _ = fmt.Fprintf(o.Err(), "Your shell profile was left alone: %v\n", err)
+			} else if changed {
+				_, _ = fmt.Fprintf(o.Out(), "Removed the PATH block from %s.\n", profile)
+			}
+
+			_, _ = fmt.Fprintln(o.Out(),
+				"Your .env and .env.key are untouched, so reinstalling will not ask you to\n"+
+					"sign in again. Delete the folder if you want them gone.")
+			return nil
+		},
+	}
 }

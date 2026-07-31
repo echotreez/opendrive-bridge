@@ -1,9 +1,14 @@
 # Release build for opendrive-bridge (whitepaper §8.1).
 #
-# Six platforms, two binaries, one checksum file. The version comes from the git
+# Four platforms, two binaries, one checksum file. The version comes from the git
 # tag rather than from a constant in the source, so `opendrived --version` and
 # the tag are the same string by construction — a binary can always be traced
 # back to the commit it was built from.
+#
+# v1.2 dropped darwin/amd64 and windows/arm64 from the *release matrix* only.
+# Both still cross-compile and CI still builds them, so restoring either is one
+# line here and no code change — which is the point of removing them this way
+# rather than by narrowing the code.
 version: 2
 
 project_name: opendrive-bridge
@@ -23,6 +28,9 @@ builds:
     env: [CGO_ENABLED=0]
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
+    ignore:
+      - { goos: darwin, goarch: amd64 }
+      - { goos: windows, goarch: arm64 }
     flags: [-trimpath]
     ldflags:
       - -s -w
@@ -37,6 +45,9 @@ builds:
     env: [CGO_ENABLED=0]
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
+    ignore:
+      - { goos: darwin, goarch: amd64 }
+      - { goos: windows, goarch: arm64 }
     flags: [-trimpath]
     ldflags:
       - -s -w
@@ -51,6 +62,16 @@ archives:
   - id: default
     ids: [opendrived, odctl]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Unpacking must create opendrive-bridge/ and put everything inside it.
+    # Without this the archive is a tar bomb: `tar xzf` scatters two binaries,
+    # LICENSE, README, docs/ and deploy/ across whatever directory the user
+    # happened to be in, and they have to pick them out by hand to undo it.
+    # Found by unpacking a real release rather than by reading the config.
+    #
+    # It also matters more now than it would have before: the programs run from
+    # the directory they were unpacked into, and .env lives beside them (§8.2),
+    # so "the folder" is a real thing a user keeps and backs up.
+    wrap_in_directory: opendrive-bridge
     formats: [tar.gz]
     format_overrides:
       - goos: windows

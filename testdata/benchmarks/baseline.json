@@ -1,8 +1,8 @@
 {
-  "note": "ns/op divided by BenchmarkReferenceMD5, same machine, same run",
+  "note": "ns/op divided by BenchmarkReferenceMD5, same machine, same run. Measured on a GitHub ubuntu-latest runner, which is where the gate runs: a baseline taken on a developer laptop is a different machine class and upload is memory-bandwidth sensitive enough for that to matter (1.04x on an M2 against 1.21x on a four-core runner). Update it from a CI run, not a local one.",
   "ratios": {
-    "BenchmarkTransferDownload": 1.0009,
-    "BenchmarkTransferUpload": 1.0367
+    "BenchmarkTransferDownload": 0.999,
+    "BenchmarkTransferUpload": 1.214
   },
   "tolerance_percent": 15.0
 }
