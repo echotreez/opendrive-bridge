@@ -14,8 +14,21 @@ text = sys.stdin.read()
 
 # Benchmark<name>-<cpus>  <iterations>  <ns> ns/op  <mb> MB/s
 pattern = re.compile(r"^(Benchmark\S+?)(?:-\d+)?\s+\d+\s+([\d.]+)\s+ns/op\s+([\d.]+)\s+MB/s", re.M)
-runs = {m.group(1): {"ns": float(m.group(2)), "mbps": float(m.group(3))}
-        for m in pattern.finditer(text)}
+
+# The fastest run of each benchmark. Noise only ever adds time, so the minimum
+# is the best estimate of the cost of the code; see check-bench.sh for why this
+# matters more than it looks.
+runs = {}
+samples = {}
+for m in pattern.finditer(text):
+    name, ns, mbps = m.group(1), float(m.group(2)), float(m.group(3))
+    samples.setdefault(name, []).append(ns)
+    if name not in runs or ns < runs[name]["ns"]:
+        runs[name] = {"ns": ns, "mbps": mbps}
+for name, xs in sorted(samples.items()):
+    if len(xs) > 1:
+        spread = (max(xs) - min(xs)) / min(xs) * 100
+        print("%-28s %d runs, spread %.1f%%" % (name, len(xs), spread))
 
 ref = runs.get("BenchmarkReferenceMD5")
 if not ref:

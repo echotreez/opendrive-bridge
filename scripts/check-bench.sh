@@ -17,6 +17,19 @@
 # property of the code: it moves when the pipeline does more work per byte, and
 # stays put when the machine is having a bad day.
 #
+# Each benchmark runs several times and the *fastest* run is used, which is not
+# cherry-picking: benchmark noise is one-sided — scheduling, GC and a noisy
+# neighbour can only ever add time — so the minimum is the closest estimate of
+# what the code actually costs.
+#
+# That correction was earned. The ratio alone removed clock-speed differences
+# but not contention, and the upload pipeline feels contention far more than the
+# yardstick does: it moves 50 MB chunks through an HTTP server, a multipart
+# writer and the garbage collector, while the reference is one tight hashing
+# loop. On a four-core shared runner the same unchanged code measured 1.319x,
+# 1.411x and 1.673x on consecutive days, and the third of those tripped a 15%
+# gate that had nothing to report.
+#
 # Usage:
 #   scripts/check-bench.sh                 compare against the baseline
 #   scripts/check-bench.sh --update        record the current numbers as the baseline
@@ -36,7 +49,7 @@ if [ "${1:-}" = "--update" ]; then UPDATE=1; fi
 echo "running the transfer benchmarks (${SIZE:-1GiB} per iteration)..."
 raw="$(ODB_BENCH_SIZE="$SIZE" go test ./pkg/opendrive/ \
         -run '^$' -bench '^(BenchmarkReferenceMD5|BenchmarkTransfer)' \
-        -benchtime=1x -timeout 20m)"
+        -benchtime=1x -count="${ODB_BENCH_COUNT:-5}" -timeout 30m)"
 echo "$raw"
 
 printf %s "$raw" | python3 scripts/bench-compare.py "$BASELINE" "$TOLERANCE" "$UPDATE"
