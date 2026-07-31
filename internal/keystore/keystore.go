@@ -169,7 +169,12 @@ func Open(cfg Config) (Store, error) {
 		return nil, ErrNoBackend
 
 	default:
-		return nil, fmt.Errorf("%w: %q", ErrUnsupportedBackend, cfg.Backend)
+		// Naming the alternatives is the difference between a message that ends
+		// the problem and one that starts a search: "file" is the name people
+		// reach for, and the backend is called "encrypted_file".
+		return nil, fmt.Errorf("%w: %q (choose one of: %s, %s, %s, %s)",
+			ErrUnsupportedBackend, cfg.Backend,
+			BackendAuto, BackendKeyring, BackendFile, BackendEphemeral)
 	}
 }
 
