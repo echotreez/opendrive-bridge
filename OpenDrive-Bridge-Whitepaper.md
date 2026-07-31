@@ -540,6 +540,8 @@ Go 交叉编译,`CGO_ENABLED=0`(v1.2 起凭证只用加密 `.env`,不再有任�
 
 **不再复制二进制到 `/usr/local/bin`。** 程序就留在用户解包出来的 `opendrive-bridge/` 目录里运行,原因有三:免 sudo、卸载即删目录、`.env` 与二进制同目录便于用户自行维护和备份。
 
+> **本节只约束主机部署(Linux / macOS / Windows),不约束容器。** 容器的情形恰好相反:镜像本身就是不可变的部署单元,由 Dockerfile 一次构建、随时可丢弃重建,既没有 sudo 顾虑也没有"卸载残留"问题。因此容器内**仍按 FHS 把二进制放在 `/usr/local/bin`**,结构更清晰;唯独 `.env` 与 `.env.key` 例外——它们是运行时挂载进来的用户数据,绝不进镜像。详见 §8.3。
+
 `odctl daemon install` 的行为改为:
 
 1. 以**解包目录的绝对路径**写服务单元(systemd / launchd / Windows Service)。服务管理器不读 shell 配置,因此单元里必须是绝对路径,不能依赖 PATH。
@@ -562,7 +564,31 @@ docker run -d -p 127.0.0.1:9750:9750 \
   <registry>/opendrive-bridge:1.0.0
 ```
 
-容器与主机现在走**同一条**凭证路径(§9.2 的加密 `.env`),不再有"容器专用后端"这个概念:把 `.env` 与 `.env.key` 作为挂载卷或 secret 提供即可(`-v $PWD/.env:/data/.env:ro -v $PWD/.env.key:/data/.env.key:ro`)。镜像本身绝不包含任何凭证文件。提供 `docker-compose.yaml` 样例与 healthcheck(`GET /v1/auth/status`)。
+容器与主机走**同一条**凭证路径(§9.2 的加密 `.env`),不再有"容器专用后端"这个概念。
+
+**但容器不遵循 §8.2 的"原地运行"约定(v1.2 明确)**。两者的差异是本质的:
+
+| | 主机安装 | 容器 |
+|---|---|---|
+| 部署单元 | 用户解压的一个目录 | 镜像本身 |
+| 为什么原地运行 | 免 sudo、卸载即删目录、便于用户维护备份 | 三条理由都不成立:镜像不可变、丢弃重建即"卸载" |
+| 二进制位置 | 解包目录 | **`/usr/local/bin`(FHS,结构更清晰)** |
+| 凭证位置 | 解包目录内的 `.env` / `.env.key` | `/data/.env` / `/data/.env.key`,**运行时挂载** |
+
+```dockerfile
+COPY --from=builder /out/opendrived /usr/local/bin/opendrived
+COPY --from=builder /out/odctl     /usr/local/bin/odctl
+WORKDIR /data
+ENTRYPOINT ["/usr/local/bin/opendrived"]
+```
+
+```bash
+docker run -d -p 127.0.0.1:9750:9750 \
+  -v $PWD/.env:/data/.env -v $PWD/.env.key:/data/.env.key \
+  <registry>/opendrive-bridge:1.1.0
+```
+
+`.env` 需要可写(首次运行要把加密结果写回,token 轮换也要落盘),因此**不能挂成 `:ro`**;`.env.key` 可以只读。镜像里绝不包含任何凭证文件,`.dockerignore` 必须覆盖 `.env` 与 `.env.key`。提供 `docker-compose.yaml` 样例与 healthcheck(`GET /v1/auth/status`)。
 
 ### 8.4 发布流程 Release Flow
 
@@ -766,7 +792,7 @@ odctl share /Finance/2026/report.xlsx --expires 7d --max-uses 10
 1. §9.2 重写:**删除 OS keyring 三后端,统一为加密 `.env` + `.env.key`**。理由是跨平台一致、部署统一、解耦于 OS 供应商行为;代价是安全性从"锁屏即不可读"降为"文件权限 + 防误泄漏",§9.2.3 诚实写明边界。密钥文件方案是"无缝静默运行"硬需求的必然结果(口令方案会让 daemon 无法自启)。Bridge API key 改为首次运行自动生成并加密存入 `.env`,用户从不需要手动管理。
 2. §8.1:发布矩阵由六个收窄为**四个**(去掉 darwin/amd64 与 windows/arm64);归档改为 `wrap_in_directory`,修复"tar 炸弹"问题。
 3. §8.2:**不再安装到 `/usr/local/bin`**,程序原地运行于解包目录;服务单元写绝对路径,PATH 默认只打印不代写(`--modify-shell-profile` 才写入,带标记块以便精确卸载)。`DynamicUser=yes` 与读取用户目录 `.env` 不兼容,改为以调用用户身份运行。
-4. §8.3:容器与主机走同一条凭证路径,不再有"容器专用后端"。
+4. §8.3:容器与主机走同一条凭证路径,不再有"容器专用后端"。**容器不适用 §8.2 的原地运行约定**——镜像本身就是部署单元,二进制仍按 FHS 放 `/usr/local/bin`,只有 `.env` / `.env.key` 是运行时挂载的用户数据(Derek 2026-07-31 补充)。
 5. §3.4:配置文件移入解包目录,与 `.env` 同处一地;`.env` 管凭证、`config.yaml` 管行为,分工不混。
 6. §12.1:路线图重排,新增 **v1.2 桌面 GUI(macOS/Windows,Linux 不做)**,并规定 GUI 是 REST API 的又一个客户端,不得绕过 daemon。
 

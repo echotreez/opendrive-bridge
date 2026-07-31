@@ -2,11 +2,18 @@
 #
 # Two things shape it. First, there is nothing in the runtime layer but the two
 # programs and a set of CA certificates — no shell, no package manager, nothing
-# for an intruder to pick up. Second, a container has no system keychain, so the
-# bridge uses its encrypted-file credential store here and needs a key; if one is
-# missing it refuses to start and says which environment variable to set. That
-# refusal is the "no persistence = configuration error" rule of §9.2 doing its
-# job, not a rough edge.
+# for an intruder to pick up. Second, the container takes exactly the same
+# credential path as a host install (§8.3, v1.2): an encrypted .env with its key
+# beside it. There is no container-specific backend any more — you mount the two
+# files in and the daemon reads them the way it would on a laptop.
+#
+# .env must be mounted writable. The first run rewrites it encrypted, and every
+# token rotation writes it again; mounted read-only, the bridge would work until
+# the first refresh and then start failing in a way that looks like an OpenDrive
+# problem. .env.key is only ever read, so that one can be :ro.
+#
+# Neither file is in the image. .dockerignore keeps them out of the build
+# context, and CI asserts it on every change.
 #
 # Build both architectures with:
 #   docker buildx build --platform linux/amd64,linux/arm64 \
@@ -82,7 +89,10 @@ EXPOSE 9750
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD ["/usr/local/bin/odctl", "--addr", "127.0.0.1:9750", "status"]
 
+# The binaries stay in /usr/local/bin: §8.2's "run in place" is about host
+# installs, and an image is already an immutable deployment unit — there is no
+# sudo to avoid and nothing to uninstall. Only .env and .env.key are user data,
+# and they arrive as mounts.
 ENTRYPOINT ["/usr/local/bin/opendrived", \
-            "--keystore", "encrypted_file", \
-            "--keystore-file", "/data/credentials.enc", \
+            "--keystore-file", "/data/.env", \
             "--state-dir", "/data/jobs"]

@@ -686,7 +686,7 @@ components:
         keystore:
           type: object
           properties:
-            backend: { type: string, enum: [keyring, encrypted_file, ephemeral, auto] }
+            backend: { type: string, enum: [encrypted_file, ephemeral, auto] }
             available: { type: boolean }
         quota:
           type: [object, "null"]

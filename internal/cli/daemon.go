@@ -27,6 +27,13 @@ type serviceProgram struct{}
 func (serviceProgram) Start(service.Service) error { return nil }
 func (serviceProgram) Stop(service.Service) error  { return nil }
 
+// newDaemonService is a variable so that tests can substitute one. What needs
+// testing here is not kardianos/service — it is the part around it: which binary
+// is chosen, what the user is told, and whether the shell profile is touched.
+// Reaching that through a real Install() would mean writing to the machine
+// running the tests.
+var newDaemonService = daemonService
+
 func daemonService(execPath string, args []string) (service.Service, error) {
 	cfg := &service.Config{
 		Name:        "opendrive-bridge",
@@ -94,7 +101,7 @@ func newDaemonCommand(o *Options) *cobra.Command {
 				args = append(args, "--addr", addr)
 			}
 
-			svc, err := daemonService(path, args)
+			svc, err := newDaemonService(path, args)
 			if err != nil {
 				return serviceError(err)
 			}
@@ -140,7 +147,7 @@ func newDaemonCommand(o *Options) *cobra.Command {
 			Short: short,
 			Args:  cobra.NoArgs,
 			RunE: func(_ *cobra.Command, _ []string) error {
-				svc, err := daemonService("", nil)
+				svc, err := newDaemonService("", nil)
 				if err != nil {
 					return serviceError(err)
 				}
@@ -278,7 +285,7 @@ func uninstallCommand(o *Options) *cobra.Command {
 		Short: "Remove the bridge from this machine's services",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			svc, err := daemonService("", nil)
+			svc, err := newDaemonService("", nil)
 			if err != nil {
 				return serviceError(err)
 			}

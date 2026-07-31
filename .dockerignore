@@ -1,0 +1,34 @@
+# Keep the build context free of anything that is not needed to compile, and
+# above all of anything secret.
+#
+# The Dockerfile's builder stage runs `COPY . .`, so every file here would
+# otherwise land in a layer. The final image is distroless and copies only the
+# two binaries out, but the builder layer still exists in the local cache and is
+# pushed whenever a registry cache is configured. A developer who has run the
+# daemon in this directory has a real .env sitting next to the Dockerfile, and
+# this project has already had one credential reach a place it did not belong
+# (docs/discrepancies.md is not the only record worth keeping).
+
+# Credentials — never, under any circumstances.
+.env
+.env.key
+*.pem
+*.key
+
+# Local state the daemon writes.
+state/
+dist/
+coverage.out
+coverage.html
+
+# Not needed to build, and large.
+.git
+.github
+docs/api-samples
+testdata/fuzz
+*.pdf
+
+# Editor and OS noise.
+.idea/
+.vscode/
+.DS_Store

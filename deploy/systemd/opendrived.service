@@ -1,13 +1,31 @@
-# systemd unit for the OpenDrive Bridge (whitepaper §8.2).
+# systemd unit for the OpenDrive Bridge — a *user* unit (whitepaper §8.2).
 #
-# Install with `odctl daemon install`, or by hand:
-#   sudo install -m 0644 opendrived.service /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now opendrived
+# `odctl daemon install` writes this for you, with the real paths filled in.
+# To do it by hand, replace /path/to/opendrive-bridge below with the folder you
+# unpacked the release into, then:
 #
-# One thing to know before you do: a system service has no desktop session, and
-# without one there is no keychain to unlock. If `odctl status` says the bridge
-# cannot reach its credential store, that is why — see the ODB_STATE_KEY note
-# below, and docs/deployment.md.
+#   mkdir -p ~/.config/systemd/user
+#   cp opendrived.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now opendrived
+#   systemctl --user status opendrived
+#
+# No sudo anywhere. That is the point of §8.2: the programs run from the folder
+# you unpacked, your .env sits beside them, and uninstalling is deleting the
+# folder.
+#
+# If you want the bridge to keep running when you are not logged in:
+#
+#   sudo loginctl enable-linger $USER
+#
+# WHY THIS IS NOT A SYSTEM UNIT ANY MORE
+#
+# It was, with DynamicUser=yes — a throwaway account with one writable
+# directory. That is a good shape for a service with no user data and the wrong
+# one here: the credentials are an encrypted .env in the user's own folder, and
+# a dynamic user cannot read it. Neither could ProtectHome=yes, which was also
+# in the old file. The hardening and the credential design were pulling in
+# opposite directions, and the hardening would have won by breaking the daemon.
 
 [Unit]
 Description=OpenDrive Bridge daemon
@@ -17,61 +35,56 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/opendrived
+
+# Absolute paths, both of them. A service manager does not read your shell
+# configuration, so PATH is of no use here, and without WorkingDirectory the
+# daemon would start in / and look for a .env that is not there.
+ExecStart=/path/to/opendrive-bridge/opendrived
+WorkingDirectory=/path/to/opendrive-bridge
+
 Restart=on-failure
 RestartSec=5s
 
-# A throwaway account created for this service alone, with one writable
-# directory. Nothing here needs a real user.
-DynamicUser=yes
-StateDirectory=opendrive-bridge
-StateDirectoryMode=0700
-WorkingDirectory=/var/lib/opendrive-bridge
-
-# Where the credentials and the transfer state go. On a headless machine the
-# encrypted-file store is the right choice, and it needs a key:
-#
-#   sudo systemctl edit opendrived
-#   [Service]
-#   Environment=ODB_KEYSTORE=encrypted_file
-#   Environment=ODB_STATE_KEY=<openssl rand -base64 32>
-#
-# Keep that key somewhere safe. Without it the stored credentials cannot be read
-# back and you will have to sign in again.
-Environment=ODB_STATE_DIR=/var/lib/opendrive-bridge/jobs
-Environment=ODB_KEYSTORE_FILE=/var/lib/opendrive-bridge/credentials.enc
-
 # The daemon holds a password that unlocks somebody's whole cloud storage, so it
-# gets as little of the machine as it can work with. Every line below is
-# something a bug in this program could otherwise reach.
+# gets as little of the machine as it can work with.
+#
+# What follows is a shorter list than the system unit had, and the difference is
+# not carelessness. About half of systemd's sandboxing directives either do
+# nothing in a user unit or stop it starting:
+#
+#   - ProtectKernelTunables, ProtectKernelModules, ProtectKernelLogs,
+#     ProtectControlGroups, ProtectClock, RemoveIPC — these need privileges a
+#     user service does not have, and systemd documents them as having no effect
+#     for user units. Left in, they are decoration that reads like protection.
+#   - ProtectHome=yes — actively wrong here: it hides /home, which is where .env
+#     is. This one line would have broken the credential store.
+#   - DynamicUser, StateDirectory — system-unit concepts, and both at odds with
+#     "the user's own folder".
+#
+# What is left is the part that works unprivileged: seccomp filters, resource
+# limits, and a namespace that keeps the rest of the filesystem read-only.
 NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-PrivateDevices=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
-ProtectClock=yes
-ProtectHostname=yes
-ProtectProc=invisible
-RestrictNamespaces=yes
-RestrictRealtime=yes
-RestrictSUIDSGID=yes
-LockPersonality=yes
-MemoryDenyWriteExecute=yes
-RemoveIPC=yes
 
-# It speaks HTTP to OpenDrive and listens on a local socket; nothing else.
+# Everything outside the unpacked folder is read-only. ReadWritePaths has to
+# name that folder explicitly — strict mode makes even $HOME read-only, and the
+# daemon writes .env on first run and again on every token rotation.
+ProtectSystem=strict
+ReadWritePaths=/path/to/opendrive-bridge
+PrivateTmp=yes
+
+# It speaks HTTPS to OpenDrive and listens on a local socket; nothing else.
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
 
 # Transfers are the point, so no memory or CPU ceiling — but a descriptor limit
 # still catches a runaway.
 LimitNOFILE=8192
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

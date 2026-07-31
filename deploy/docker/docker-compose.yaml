@@ -1,12 +1,16 @@
-# A working starting point for running the bridge in a container.
+# A working starting point for running the bridge in a container (§8.3).
 #
-#   openssl rand -base64 32 > .odb_state_key
-#   openssl rand -hex 32    > .odb_api_key
+# The container takes the same two files as a host install. There is no
+# container-specific credential backend any more:
+#
+#   cp ../../.env.example .env     # then fill in your OpenDrive credentials
 #   docker compose up -d
-#   odctl --addr 127.0.0.1:9750 --api-key "$(cat .odb_api_key)" login you@example.com
 #
-# Two things to keep safe: the state key and the volume. Lose either and the
-# stored credentials cannot be read back, and you will have to sign in again.
+# The first start rewrites .env encrypted and creates .env.key beside it, then
+# prints nothing further about credentials — the same first run as on a laptop.
+#
+# Two things to keep safe, and keep together: .env and .env.key. Either one on
+# its own is useless.
 services:
   opendrive-bridge:
     image: ghcr.io/stormrealm/opendrive-bridge:latest
@@ -20,18 +24,26 @@ services:
       - "127.0.0.1:9750:9750"
 
     environment:
-      # Without this the bridge refuses to start, because a container has no
-      # keychain and it will not quietly use a store that forgets everything on
-      # restart. The error message names this variable.
-      ODB_STATE_KEY: ${ODB_STATE_KEY:?set ODB_STATE_KEY, e.g. openssl rand -base64 32}
       # Required because the listen address is not loopback: anything that can
       # reach the port could otherwise use the OpenDrive account behind it.
+      #
+      # On a host install the bridge generates this itself and puts it in .env.
+      # Here it is explicit, because a container's .env is often built by
+      # something else and this way the value is under your control. Leave it
+      # unset and the daemon will refuse to start and say so.
       ODB_API_KEY: ${ODB_API_KEY:?set ODB_API_KEY, e.g. openssl rand -hex 32}
       ODB_LOG_LEVEL: info
 
     volumes:
-      # The encrypted credentials and the transfer state live here.
-      - odb-state:/data
+      # .env is mounted WRITABLE, and that is not an oversight. The first run
+      # rewrites it encrypted, and every token rotation writes it again. Mounted
+      # read-only the bridge would work until the first refresh and then start
+      # failing in a way that looks like an OpenDrive outage.
+      - ./.env:/data/.env
+      # .env.key is only ever read.
+      - ./.env.key:/data/.env.key:ro
+      # Transfer state: job progress, resume points.
+      - odb-state:/data/jobs
 
     # The image has no shell, so this runs the binary. It reports healthy as soon
     # as the daemon answers — including when it is not signed in yet, which is a
@@ -43,14 +55,12 @@ services:
       retries: 3
       start_period: 5s
 
-    # Nothing in here needs to write outside /data or to gain privileges.
+    # Nothing in the image needs to write outside /data, and nothing needs extra
+    # privileges.
     read_only: true
-    tmpfs:
-      - /tmp
+    cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
 
 volumes:
   odb-state:

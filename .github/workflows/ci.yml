@@ -173,6 +173,72 @@ jobs:
         shell: bash
         run: ./scripts/smoke.sh smokebin
 
+  # The systemd unit, installed for real with `systemctl --user`.
+  #
+  # This job exists because the unit had been wrong for a release and nothing
+  # noticed: DynamicUser=yes and ProtectHome=yes both survived the move of
+  # credentials into the user's own folder, and either one stops the daemon
+  # reading its .env. A unit file is not documentation, it is the thing that
+  # runs, and the only way to know it works is to start it.
+  systemd-user-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: 'stable' }
+
+      - name: Build and lay out a release directory
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/opendrive-bridge"
+          go build -o "$HOME/opendrive-bridge/" ./cmd/opendrived ./cmd/odctl ./tools/mockupstream
+          cp .env.example "$HOME/opendrive-bridge/.env"
+          # A username is enough to exercise the credential path; the mock
+          # upstream does not check it.
+          printf 'ODB_USERNAME=ci@example.com\nODB_PASSWORD=not-a-real-password\n' \
+            > "$HOME/opendrive-bridge/.env"
+
+      - name: Install the unit exactly as the file says to
+        run: |
+          set -euo pipefail
+          dir="$HOME/opendrive-bridge"
+          mkdir -p ~/.config/systemd/user
+          sed -e "s#/path/to/opendrive-bridge#$dir#g" \
+            deploy/systemd/opendrived.service > ~/.config/systemd/user/opendrived.service
+          systemd-analyze verify ~/.config/systemd/user/opendrived.service
+          systemctl --user daemon-reload
+
+      - name: Start it, and prove it can read its own .env
+        run: |
+          set -euo pipefail
+          dir="$HOME/opendrive-bridge"
+          "$dir/mockupstream" --addr 127.0.0.1:9799 --port-file "$dir/upstream.addr" &
+          for _ in $(seq 1 50); do [ -s "$dir/upstream.addr" ] && break; sleep 0.2; done
+          systemctl --user set-environment ODB_BASE_URL="http://$(cat "$dir/upstream.addr")/api/v1"
+          systemctl --user start opendrived
+          for _ in $(seq 1 50); do
+            "$dir/odctl" status >/dev/null 2>&1 && break
+            sleep 0.2
+          done
+          systemctl --user is-active opendrived
+          "$dir/odctl" status
+
+          # The credential file must have been sealed by that first start, and
+          # the key created beside it. This is the assertion the whole job is
+          # for: ProtectHome or DynamicUser coming back would fail here.
+          test -f "$dir/.env.key" || { echo ".env.key was not created"; exit 1; }
+          grep -q "Salted__" <(base64 -d < "$dir/.env" 2>/dev/null | head -c 8) \
+            || { echo ".env was not encrypted by the first run"; exit 1; }
+          ! grep -q "not-a-real-password" "$dir/.env" \
+            || { echo "the plaintext password is still in .env"; exit 1; }
+
+      - name: Stop and remove it
+        if: always()
+        run: |
+          systemctl --user stop opendrived || true
+          systemctl --user disable opendrived || true
+          journalctl --user -u opendrived --no-pager -n 40 || true
+
   # linux/arm64 has no hosted x86 runner, so it runs under emulation. Slower, but
   # it is the difference between "it compiled" and "it works".
   smoke-linux-arm64:

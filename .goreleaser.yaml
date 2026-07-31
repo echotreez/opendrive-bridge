@@ -140,7 +140,8 @@ release:
     Unpack it, start the daemon, then:
 
     ```
-    ./odctl login you@example.com
+    cp .env.example .env      # then fill in your OpenDrive username and password
+    ./opendrived              # once: this encrypts .env and creates .env.key
     ./odctl ls /
     ./odctl up ./report.pdf /Documents/report.pdf
     ```
@@ -170,6 +171,5 @@ release:
     docker pull ghcr.io/stormrealm/opendrive-bridge:{{ .Tag }}
     ```
 
-    A container has no system keychain, so the image uses the encrypted-file
-    credential store and needs `ODB_STATE_KEY` set. It will tell you so plainly
-    if you forget.
+    The container takes the same two files as a host install: mount `.env`
+    writable and `.env.key` read-only. Neither is in the image.

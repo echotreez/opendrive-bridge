@@ -9,11 +9,22 @@ speaks to your OpenDrive account for you. `odctl` is a command that talks to it.
 Once you sign in the first time, the daemon keeps itself signed in, so scripts
 and other programs can use your files without ever handling your password.
 
-**Where your password goes.** Into your operating system's own credential store
-— macOS Keychain, GNOME Keyring or KWallet on Linux, Credential Manager on
-Windows. Never into a config file. On a server or in a container, where there is
-no such store, you supply an encryption key instead and the bridge keeps an
-encrypted file; that is covered under [Containers](#containers).
+**Where your password goes.** Into a file called `.env`, in the same folder as
+the programs, encrypted with a key in `.env.key` beside it. You put it there in
+the clear once; the first run of the daemon encrypts the file and the plaintext
+is gone. The same two files are used on every platform and in containers — there
+is nothing to choose.
+
+**What that protects you from, and what it does not.** It protects you from
+committing your password to git, from syncing it to a cloud backup in the clear,
+from someone reading it over your shoulder, and from it appearing in a log or a
+process listing. It does **not** protect you from someone who can already read
+your files as you, because `.env.key` sits next to `.env` and they would get
+both. That is the price of a daemon that restarts on its own without anybody
+typing a passphrase. On a shared machine, use full-disk encryption and a separate
+account rather than relying on this.
+
+Back up `.env` and `.env.key` together, or neither is any use.
 
 ---
 
@@ -30,12 +41,16 @@ sha256sum --check --ignore-missing opendrive-bridge_1.0.0_SHA256SUMS
 On macOS use `shasum -a 256 -c` instead. If the check does not say `OK`, stop and
 download again.
 
-Unpack it and put the two programs somewhere on your `PATH`:
+Unpack it. The archive creates a folder called `opendrive-bridge/` and the
+programs run from there — nothing is copied into `/usr/local/bin`, so there is no
+`sudo` anywhere in this guide and uninstalling is deleting the folder:
 
 ```bash
-tar xzf opendrive-bridge_1.0.0_linux_amd64.tar.gz
-sudo install -m 0755 opendrived odctl /usr/local/bin/
+tar xzf opendrive-bridge_1.1.0_linux_amd64.tar.gz
+cd opendrive-bridge
 ```
+
+Put that folder somewhere permanent: your credentials are about to live in it.
 
 ### macOS will probably refuse the first time
 
@@ -55,31 +70,41 @@ none of this.
 
 ## 2. Sign in
 
-Start the daemon in a terminal, just to see it work:
+Copy the template and put your OpenDrive username and password in it:
 
 ```bash
-opendrived
+cp .env.example .env
+$EDITOR .env
 ```
 
-In another terminal:
+Now start the daemon once. This is the moment the plaintext goes away: it creates
+`.env.key`, generates the bridge's own API key, and rewrites `.env` encrypted.
 
 ```bash
-odctl login you@example.com
-odctl status
+./opendrived
 ```
 
-`status` should say `Signed in as you@example.com.` From here on the daemon keeps
+In another terminal, in the same folder:
+
+```bash
+./odctl status
+```
+
+It should say `Signed in as you@example.com.` From here on the daemon keeps
 itself signed in; you will only be asked again if you change your OpenDrive
-password.
+password somewhere else.
 
 Try a couple of things:
 
 ```bash
-odctl ls /
-odctl up ./report.pdf /Documents/report.pdf
-odctl ls /Documents
-odctl down /Documents/report.pdf ./copy.pdf
+./odctl ls /
+./odctl up ./report.pdf /Documents/report.pdf
+./odctl ls /Documents
+./odctl down /Documents/report.pdf ./copy.pdf
 ```
+
+If typing `./` grates, `odctl daemon install` prints the one line to add to your
+shell profile, or adds it for you with `--modify-shell-profile`.
 
 Then stop the daemon with Ctrl-C and set it up properly.
 
@@ -87,53 +112,62 @@ Then stop the daemon with Ctrl-C and set it up properly.
 
 ## 3. Run it in the background
 
+From inside the folder you unpacked:
+
 ```bash
-odctl daemon install
-odctl daemon start
-odctl status
+./odctl daemon install
+./odctl daemon start
+./odctl status
 ```
 
 That registers the daemon with whatever your system uses — systemd, launchd or
-the Windows Service Manager — so it starts when you log in. `odctl daemon stop`
-and `odctl daemon uninstall` undo it. If it says the machine will not let you
-change its services, run the same command with administrator rights.
+the Windows Service Manager — so it starts when you log in. It runs **from this
+folder**, with the absolute path written into the service definition, because no
+service manager reads your shell configuration.
+
+`odctl daemon stop` and `odctl daemon uninstall` undo it. Uninstalling leaves
+`.env` and `.env.key` alone: removing a service is not the same as throwing away
+your sign-in, and reinstalling a newer version should not ask you to do it again.
+
+`install` also prints the one line that puts this folder on your `PATH`. It does
+not write it unless you pass `--modify-shell-profile`, in which case it backs the
+file up first and wraps its addition in a marked block that `uninstall` removes
+again. Your shell profile is yours.
 
 The rest of this section is only interesting if you want to know what it did, or
-you would rather do it by hand.
+would rather do it by hand.
 
-### Linux (systemd)
+### Linux (systemd, as your own user)
 
-`deploy/systemd/opendrived.service` is the unit file. It runs the daemon under a
-throwaway user account with most of the filesystem read-only, which limits what a
-bug in this program could reach:
-
-```bash
-sudo install -m 0644 deploy/systemd/opendrived.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now opendrived
-systemctl status opendrived
-journalctl -u opendrived -f      # the log
-```
-
-**One thing to know about servers.** A systemd service usually has no desktop
-session, and without one there is no credential store to unlock. If
-`odctl status` reports that the bridge cannot reach its credential store, that is
-why — use the encrypted-file store instead:
+`deploy/systemd/opendrived.service` is the unit. It is a **user** unit — no
+`sudo`, no system-wide install:
 
 ```bash
-# 32 random bytes, base64. Keep a copy somewhere safe: without it the
-# stored credentials cannot be read back.
-openssl rand -base64 32
-sudo systemctl edit opendrived
+mkdir -p ~/.config/systemd/user
+sed "s#/path/to/opendrive-bridge#$PWD#g" \
+  deploy/systemd/opendrived.service > ~/.config/systemd/user/opendrived.service
+systemctl --user daemon-reload
+systemctl --user enable --now opendrived
+systemctl --user status opendrived
+journalctl --user -u opendrived -f      # the log
 ```
 
-and add:
+Two paths are substituted there and both matter: `ExecStart`, and the
+`ReadWritePaths` that lets the daemon write `.env` when a token rotates.
 
-```ini
-[Service]
-Environment=ODB_STATE_KEY=<the value you generated>
-Environment=ODB_KEYSTORE=encrypted_file
+It used to be a system unit with `DynamicUser=yes`, which is a good shape for a
+service with no user data and the wrong one here — a throwaway account cannot
+read a `.env` in your home directory. `ProtectHome=yes` was in that file too, and
+would have hidden the credentials from the daemon just as effectively.
+
+**If you want it running when you are not logged in**, ask systemd to keep your
+user manager alive:
+
+```bash
+sudo loginctl enable-linger $USER
 ```
+
+That is the only `sudo` on this page, and it is optional.
 
 ### macOS (launchd)
 
@@ -142,78 +176,99 @@ cp deploy/launchd/com.opendrive.bridge.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.opendrive.bridge.plist
 ```
 
-A LaunchAgent runs inside your login session, so it can use the Keychain and
-nothing extra is needed. The first time it reads the stored password macOS will
-ask you to allow it; choose **Always Allow** or you will be asked on every
-restart.
+Edit the plist first: it needs the full path to `opendrived` in the folder you
+unpacked. A LaunchAgent runs as you, which is what lets it read `.env`. A
+LaunchDaemon would start earlier, run as root, and be looking for a file it has
+no business reading. Nothing prompts you for anything — macOS is not holding the
+credentials.
 
 ### Windows
 
-`odctl daemon install` from an Administrator prompt registers a Windows Service.
-`deploy/windows/README.txt` has the manual equivalent. Credentials go to
-Credential Manager, and the encrypted file — if you use one — is locked down with
-`icacls` so that only your account can read it.
+`odctl daemon install` from an Administrator prompt registers a Windows Service,
+pointed at the folder you unpacked. `deploy/windows/README.txt` has the manual
+equivalent.
+
+`.env` and `.env.key` live in that folder like everywhere else. NTFS ignores the
+POSIX mode bits Go sets, so the bridge tightens the access control list with
+`icacls` instead: both files end up readable by your account and nobody else,
+including Administrators.
 
 ---
 
 ## 4. Containers
 
-The image is on `ghcr.io/stormrealm/opendrive-bridge`. It is built for both
-Intel and ARM, runs as a non-root user, and contains nothing but the two
-programs and a set of CA certificates.
+The image is on `ghcr.io/stormrealm/opendrive-bridge`. It is built for both Intel
+and ARM, runs as a non-root user, and contains nothing but the two programs and a
+set of CA certificates.
 
-**A container has no keychain,** so you must give the bridge a key to encrypt its
-credential file with. If you do not, it refuses to start and says so — that is
-deliberate. A bridge that started, looked configured, and forgot your password on
-the next restart would be worse than one that never started.
+**The container takes the same two files as a host install.** There is no
+container-specific credential backend any more: you prepare `.env` exactly as you
+would on a laptop and mount it in.
 
 ```bash
+cp .env.example .env      # then fill in your OpenDrive username and password
+
 docker run -d --name opendrive-bridge \
   -p 127.0.0.1:9750:9750 \
-  -e ODB_LISTEN=0.0.0.0:9750 \
-  -e ODB_STATE_KEY="$(openssl rand -base64 32)" \
   -e ODB_API_KEY="$(openssl rand -hex 32)" \
-  -v odb-state:/data \
-  ghcr.io/stormrealm/opendrive-bridge:1.0.0
+  -v "$PWD/.env:/data/.env" \
+  -v odb-state:/data/jobs \
+  ghcr.io/stormrealm/opendrive-bridge:1.1.0
 ```
 
-Then sign in once, from your own machine:
-
-```bash
-odctl --addr 127.0.0.1:9750 --api-key <the ODB_API_KEY value> login you@example.com
-```
+The first start rewrites `.env` encrypted and creates `.env.key` beside it, on
+your host, through the mount. After that both files are yours to back up.
 
 `deploy/docker/docker-compose.yaml` is the same thing written down, with a
-healthcheck.
+healthcheck and `.env.key` mounted read-only.
 
-Three things worth getting right:
+Four things worth getting right:
 
-- **Keep `ODB_STATE_KEY` somewhere safe and unchanged.** Change it and the stored
-  credentials become unreadable; you will need to sign in again.
-- **Keep the volume.** `/data` is where the encrypted credentials and the
-  transfer state live. Without it, every restart is a fresh install.
-- **`ODB_LISTEN=0.0.0.0:9750` is required inside a container** — the default
-  listens on loopback, which inside a container means "nothing outside can reach
-  it". Because that address is not loopback, the daemon **will not start without
-  `ODB_API_KEY`.** Publish the port to `127.0.0.1` as above so only your machine
-  can reach it.
+- **`.env` must be mounted writable.** The first run rewrites it, and so does
+  every token rotation. Mounted `:ro` the bridge works until the first refresh
+  and then starts failing in a way that looks like an OpenDrive outage. `.env.key`
+  is only ever read, so that one can be `:ro`.
+- **Back up `.env` and `.env.key` together.** Either alone is useless.
+- **Keep the `/data/jobs` volume** if you care about resuming interrupted
+  transfers across restarts.
+- **`ODB_API_KEY` is required here.** The image binds `0.0.0.0`, because inside a
+  container loopback means "nothing outside can reach it" — and since that is not
+  loopback, the daemon insists on a key. On a host install it generates one into
+  `.env` itself and you never see it. Publish the port to `127.0.0.1` as above so
+  only your machine can reach it.
 
 ---
 
-## 5. Choosing a credential store
+## 5. The credential files
 
-| where you are running | store | what you need |
+Two files, in the folder you unpacked, on every platform:
+
+| file | what it is | permissions |
 |---|---|---|
-| your own desktop or laptop | your OS keychain (the default) | nothing |
-| a Linux server with no desktop session | `encrypted_file` | `ODB_STATE_KEY` |
-| a container | `encrypted_file` | `ODB_STATE_KEY` and a volume for `/data` |
-| a throwaway test run | `ephemeral` | `--ephemeral`, and expect to sign in again after every restart |
+| `.env.example` | the template that ships in the archive | 0644 |
+| `.env` | your credentials and the bridge's API key, encrypted | 0600 |
+| `.env.key` | the 32 random bytes that decrypt it, made on first run | 0600 |
 
-Set it with `--keystore` or `ODB_KEYSTORE`. `auto` — the default — uses your OS
-keychain and falls back to the encrypted file only when you have supplied a key.
+You are not locked in to this program. `.env` is written in OpenSSL's own
+format, so you can always read your credentials back yourself:
 
-The bridge will not silently pick a store that forgets everything on restart. If
-none is usable it stops and tells you which of the above to choose.
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -pass file:.env.key -in .env
+```
+
+That command is checked against the real `openssl` in this project's test suite,
+in both directions, because a claim like that is only worth making if something
+proves it.
+
+**The one thing that can go permanently wrong** is losing `.env.key`. It is not a
+password you can reset — without it the credentials in `.env` cannot be read, and
+you would have to start again from `.env.example`. No data in OpenDrive is at
+risk either way; it is your sign-in that goes.
+
+`--ephemeral` keeps everything in memory and forgets it on exit. It exists for
+tests and one-off runs, and the bridge will never choose it for you: a daemon
+that looks configured and forgets on reboot is worse than one that refuses to
+start.
 
 ---
 
@@ -231,7 +286,7 @@ even when OpenDrive is unreachable, and it will say which of these you are in:
 | Signed in as … | nothing; it is working |
 | Your saved password is no longer accepted | you changed it on the website; `odctl login` again |
 | OpenDrive is asking for a captcha | sign in once at opendrive.com, then retry |
-| The bridge cannot reach its credential store | unlock your keychain, or see §5 for servers |
+| The bridge cannot reach its credential store | `.env.key` is missing, or `.env` cannot be decrypted with it — see §5 |
 
 **Exit codes**, for scripts:
 
@@ -324,18 +379,22 @@ committed the live token that leaked. Nothing is allowlisted by directory,
 because recorded API fixtures are the likeliest place for a real credential to
 hide.
 
-Three medium findings were expected and reviewed. Listing them here turned out
-not to be enough: the first real run of the release workflow failed on them,
+A few findings are expected and reviewed. Listing them in a document turned out
+not to be enough — the first real run of the release workflow failed on them,
 because a note in a document is not something a scanner can read. They now carry
 `#nosec` annotations in the code itself, with the reasons below, and the gate
-fails on anything medium or higher — so these three pass and a new one does not.
+fails on anything medium or higher, so these pass and a new one does not.
 
 | finding | why it is there |
 |---|---|
-| `G204` — subprocess with variable arguments (`internal/keystore/keyring.go`) | reading your keychain means running `security` or `secret-tool`. The secret goes in on **stdin**, never as an argument, because arguments are visible to every process on the machine. |
-| `G117` × 2 — a struct field named `Password` is serialised | that is the point: the credential store persists your password so the bridge can stay signed in. It goes to your OS keychain, or to an AES-256-GCM encrypted file. Whitepaper §9.2 records this as a deliberate deviation from "never store a password". |
+| `G101` × several — "hardcoded credentials" in `internal/keystore/env.go` | they are the *names* of the fields in `.env` (`ODB_PASSWORD`, `ODB_ACCESS_TOKEN`), not values. A constant naming a field looks exactly like a constant holding one. |
+| `G117` — a struct field called `Password` is serialised | that is the point: the credential store persists your password so the bridge can stay signed in without you. Whitepaper §9.2 records this as a deliberate deviation from "never store a password", and `persist_password: false` is the way out. |
+| `G115` — an int converted to a byte in the PKCS#7 padding | the value is bounded to 1–255 by a check three lines above; the analyser cannot follow it. |
 
-One finding is suppressed at the call site with a stated reason: the retry backoff
-uses a non-cryptographic random source for jitter. Jitter exists so that many
-clients do not retry in lockstep, which needs spread rather than
-unpredictability.
+One more is suppressed at the call site: the retry backoff uses a
+non-cryptographic random source for jitter. Jitter exists so that many clients do
+not retry in lockstep, which needs spread rather than unpredictability.
+
+The three OS keyring backends that used to appear here are gone — v1.2 removed
+them along with about a thousand lines of code and the CI jobs that tested each
+vault on its own runner.

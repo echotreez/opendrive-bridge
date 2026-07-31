@@ -8,13 +8,13 @@
     launchctl load ~/Library/LaunchAgents/com.opendrive.bridge.plist
 
   This is a LaunchAgent, not a LaunchDaemon, and deliberately so: an agent runs
-  inside your login session, which is what gives it access to your Keychain. A
-  LaunchDaemon would start earlier and run as root, and would then have no
-  Keychain to read — you would have to configure an encrypted file instead for no
-  benefit.
+  as you, which is what lets it read the .env in the folder you unpacked. A
+  LaunchDaemon starts earlier and runs as root, and would be looking at a file it
+  has no business reading — and, since v1.2 puts the credentials beside the
+  binaries rather than in a system directory, would not find one at all.
 
-  The first time it reads the stored password, macOS will ask whether to allow it.
-  Choose "Always Allow", or you will be asked again after every restart.
+  Nothing prompts you for anything. The credentials are in .env, encrypted with
+  .env.key beside it; macOS is not involved.
 -->
 <plist version="1.0">
 <dict>
@@ -44,8 +44,8 @@
 
     <key>EnvironmentVariables</key>
     <dict>
-        <!-- The Keychain is available in a login session, so the default
-             credential store works and needs no key. -->
+        <!-- Credentials come from the .env beside the binary; nothing else is
+             needed here. -->
         <key>ODB_LOG_LEVEL</key>
         <string>info</string>
     </dict>
