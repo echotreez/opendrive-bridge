@@ -28,7 +28,7 @@
 # is base64 "ExampleFileID", the owner is "Tester Tester" and the hash is the MD5
 # of an empty string: the whole fixture is constructed, not recorded. Flagged for
 # entropy in a value that literally contains the word REDACTED.
-609e759545564aa7ccf1a367bd49486765f7ec0d:testdata/fixtures/file/info.json:generic-api-key:17
+30d6a0d10e0b4524c8dccd243d1551c17722d8c2:testdata/fixtures/file/info.json:generic-api-key:17
 
 # --------------------------------------------------------------------------
 # 2. A password this test puts on a file it created and then deletes.
@@ -38,7 +38,7 @@
 # asked for it. It is not a credential for anything — no account, no session, no
 # file that outlives the test. The working tree now uses an obviously synthetic
 # value; this entry covers the commit where it did not.
-6d531181b9b6ddf133f0c1dbe783411b4ca14ec1:pkg/opendrive/download_integration_test.go:generic-api-key:320
+2de0a74a272da655fa3039f08b0a2e41195895ad:pkg/opendrive/download_integration_test.go:generic-api-key:320
 
 # --------------------------------------------------------------------------
 # 3. A made-up token in a redaction test's input.
@@ -47,4 +47,4 @@
 # "access_token=..." and asserts the value does not reach the response body. The
 # value was hex digits in sequence; it is a repeating pattern now, because a test
 # about not leaking credentials should not need anything that looks like one.
-19703dbf7a0122fed49838fcd9e2fd208932fa18:internal/server/errors_test.go:generic-api-key:314
+ed26619bc6907af87ad351a00c3eab70977cb97a:internal/server/errors_test.go:generic-api-key:314
