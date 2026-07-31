@@ -435,11 +435,42 @@ func TestFollowReportsAFailedJobInItsOwnWords(t *testing.T) {
 	})
 
 	code, _, errOut := b.run("up", local, "/Docs/x")
-	if code != ExitUpstream {
-		t.Errorf("exit code = %d, want %d", code, ExitUpstream)
+	// A full account is not a "try again later" failure, and this used to exit 4
+	// as though it were, because the exit code ignored the retryable flag the
+	// daemon had just worked out. The fixture has said "retryable": false since
+	// the day it was written; only the assertion was wrong.
+	if code != ExitRefused {
+		t.Errorf("exit code = %d, want %d", code, ExitRefused)
 	}
 	if !strings.Contains(errOut, "out of storage space") {
 		t.Errorf("the daemon's reason did not reach the user: %q", errOut)
+	}
+}
+
+// The other half of the same rule: a failure the daemon says may be retried must
+// still exit 4, or a script would stop on something that clears up by itself.
+func TestFollowExitsRetryableForATransientFailure(t *testing.T) {
+	b := newFakeBridge(t)
+	local := filepath.Join(t.TempDir(), "payload.bin")
+	if err := os.WriteFile(local, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base := b.srv.Config.Handler
+	b.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/jobs/") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"job1","kind":"upload","state":"failed",
+				"bytes_done":0,"bytes_total":1,"speed":0,"remote_path":"/Docs/x",
+				"error":{"code":"upstream_error","message":"OpenDrive turned this request away for a moment.",
+				"retryable":true}}`)
+			return
+		}
+		base.ServeHTTP(w, r)
+	})
+
+	code, _, _ := b.run("up", local, "/Docs/x")
+	if code != ExitUpstream {
+		t.Errorf("exit code = %d, want %d", code, ExitUpstream)
 	}
 }
 

@@ -509,3 +509,49 @@ func TestAFailedJobReportsTheClassifiersMessage(t *testing.T) {
 		t.Errorf("the reported code drifted: %v vs %v", errObj["code"], job.Error.Code)
 	}
 }
+
+// A failed job must reach the caller in the Bridge's words, not the
+// classifier's. The engine records the diagnosis verbatim — evidence for whoever
+// reads a log — and turning that into something a user can act on is this
+// boundary's job. It was only being done for synchronous failures, and every
+// upload and download is a job, so the most common failure a new user meets was
+// the one that got the engineer's sentence.
+func TestAFailedJobIsReportedInTheBridgesWords(t *testing.T) {
+	diagnosis := "the credential is working and upstream refused this twice, so it is a real " +
+		"restriction on this operation rather than a credential problem"
+	job := &jobs.Job{
+		ID: "j1", Kind: jobs.KindUpload, State: jobs.StateFailed,
+		Error: &jobs.Error{
+			Code: string(opendrive.KindUpstreamError), Message: diagnosis,
+			Retryable: false, HTTPStatus: 403,
+		},
+	}
+	s := &Server{}
+	got := s.readable(job)
+
+	if got.Error.Message == diagnosis {
+		t.Fatal("the classifier's diagnosis reached the caller unchanged")
+	}
+	assertUserReadable(t, got.Error.Message)
+	if got.Error.Retryable {
+		t.Error("a real restriction was reported as retryable")
+	}
+	// The engine's own copy must not have been touched: it is still using it.
+	if job.Error.Message != diagnosis {
+		t.Error("the engine's job was mutated")
+	}
+}
+
+// A job that failed for a reason the Bridge has no better wording for keeps the
+// message it has. Replacing it with something vague would be worse.
+func TestAFailedJobWithNoBetterWordingKeepsIts(t *testing.T) {
+	job := &jobs.Job{
+		ID: "j2", Kind: jobs.KindDownload, State: jobs.StateFailed,
+		Error: &jobs.Error{Code: "quota_exceeded",
+			Message: "Your OpenDrive account is out of storage space."},
+	}
+	s := &Server{}
+	if got := s.readable(job).Error.Message; got != job.Error.Message {
+		t.Errorf("message was rewritten to %q", got)
+	}
+}

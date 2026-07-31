@@ -45,6 +45,11 @@ const (
 	ExitNotFound = 5
 	// ExitUnavailable means the daemon could not be reached at all.
 	ExitUnavailable = 6
+	// ExitRefused means OpenDrive refused this and will refuse it again: an
+	// account that is not allowed to write where it was asked to, a quota that
+	// is full. Separate from ExitUpstream because that one tells a script to
+	// come back later, and coming back later will not help here.
+	ExitRefused = 7
 )
 
 // APIError is a failure the Bridge reported, carrying its own wording.
@@ -52,6 +57,11 @@ type APIError struct {
 	Code    string `json:"code"`
 	HTTP    int    `json:"http"`
 	Message string `json:"message"`
+	// Retryable is the Bridge's verdict on whether trying again could work. A
+	// pointer because absent and false are different: an endpoint that does not
+	// say leaves the decision to the code, while an explicit false is the
+	// classification layer stating that this will fail the same way next time.
+	Retryable *bool `json:"retryable,omitempty"`
 	// Upstream is kept for --verbose; it is never printed by default, because
 	// it holds the wording the Bridge deliberately did not show.
 	Upstream *struct {
@@ -72,6 +82,14 @@ func (e *APIError) ExitCode() int {
 	case "reauth_required", "captcha_required", "keystore_unavailable", "unauthorized":
 		return ExitAuth
 	default:
+		// The Bridge already decided whether this can be retried, using evidence
+		// the CLI does not have. Ignoring that and returning ExitUpstream — "try
+		// later" — for a permanent refusal tells a script to loop forever on a
+		// folder its account will never be allowed to write to. Found by
+		// following docs/first-run.md on such an account.
+		if e.Retryable != nil && !*e.Retryable {
+			return ExitRefused
+		}
 		return ExitUpstream
 	}
 }

@@ -216,8 +216,14 @@ func follow(ctx context.Context, o *Options, id, label string) error {
 					Message: "The transfer was stopped before it finished."}
 			default:
 				if j.Error != nil {
-					// The daemon's wording, unchanged.
-					return &APIError{Code: j.Error.Code, HTTP: 502, Message: j.Error.Message}
+					// The daemon's wording, unchanged — and its retry verdict
+					// with it, so that a permanent refusal exits differently
+					// from a transient one. Without this every failed transfer
+					// exited 4, "trying later is reasonable", including the ones
+					// where it is not.
+					retryable := j.Error.Retryable
+					return &APIError{Code: j.Error.Code, HTTP: 502,
+						Message: j.Error.Message, Retryable: &retryable}
 				}
 				return &APIError{Code: "upstream_error", HTTP: 502,
 					Message: "The transfer failed and the bridge gave no reason."}

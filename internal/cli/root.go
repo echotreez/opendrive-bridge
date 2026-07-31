@@ -128,7 +128,8 @@ func NewRootCommand(opts *Options) *cobra.Command {
 			"  3  the bridge needs you to sign in again\n" +
 			"  4  OpenDrive failed; trying later is reasonable\n" +
 			"  5  there is nothing at that path\n" +
-			"  6  no bridge is running to talk to",
+			"  6  no bridge is running to talk to\n" +
+			"  7  OpenDrive refused this and will refuse it again",
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,

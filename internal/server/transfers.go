@@ -307,6 +307,46 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 
 // ---------------------------------------------------------------- jobs
 
+// readable rewrites a failed job's message for the person who will read it.
+//
+// The engine copies the classifier's diagnosis verbatim and is right to: that
+// text is evidence, written for whoever is reading a log, and the engine is not
+// the place to decide how it should sound. But turning that into something a
+// user can act on is this boundary's job, and it was only being done for
+// synchronous failures. Every upload and download is a job, so the most common
+// failure a new user meets was arriving as
+//
+//	the credential is working and upstream refused this twice, so it is a real
+//	restriction on this operation rather than a credential problem
+//
+// — accurate, and addressed to the wrong reader. Found by following
+// docs/first-run.md as written, on an account whose root is read-only.
+//
+// The diagnosis is still in the daemon's log for whoever needs it.
+func (s *Server) readable(job *jobs.Job) *jobs.Job {
+	if job == nil || job.Error == nil || job.Error.Message == "" {
+		return job
+	}
+	wording := userWordingFor(opendrive.Kind(job.Error.Code), job.Error.Message)
+	if wording == "" {
+		return job
+	}
+	// Copied, not mutated: the engine owns that struct and is still using it.
+	clone := *job
+	e := *job.Error
+	e.Message = wording
+	clone.Error = &e
+	return &clone
+}
+
+func (s *Server) readableAll(list []*jobs.Job) []*jobs.Job {
+	out := make([]*jobs.Job, 0, len(list))
+	for _, j := range list {
+		out = append(out, s.readable(j))
+	}
+	return out
+}
+
 func (s *Server) handleJobList(w http.ResponseWriter, r *http.Request) {
 	if s.engine == nil {
 		WriteError(w, r, transfersUnavailable())
@@ -314,7 +354,7 @@ func (s *Server) handleJobList(w http.ResponseWriter, r *http.Request) {
 	}
 	// The engine's own struct is the §4.3 schema; a second shape here would be
 	// a second thing to keep in step.
-	writeJSON(w, r, http.StatusOK, map[string]any{"jobs": s.engine.List()})
+	writeJSON(w, r, http.StatusOK, map[string]any{"jobs": s.readableAll(s.engine.List())})
 }
 
 func (s *Server) handleJobGet(w http.ResponseWriter, r *http.Request) {
@@ -327,7 +367,7 @@ func (s *Server) handleJobGet(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, jobNotFound(err))
 		return
 	}
-	writeJSON(w, r, http.StatusOK, job)
+	writeJSON(w, r, http.StatusOK, s.readable(job))
 }
 
 func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request) {
@@ -345,7 +385,7 @@ func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, jobNotFound(err))
 		return
 	}
-	writeJSON(w, r, http.StatusOK, job)
+	writeJSON(w, r, http.StatusOK, s.readable(job))
 }
 
 func jobNotFound(err error) error {

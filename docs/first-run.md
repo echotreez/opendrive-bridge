@@ -273,6 +273,10 @@ OpenDrive does not, and it will say which situation you are in:
 | OpenDrive is asking for a captcha | sign in once at opendrive.com in a browser, then retry |
 | The bridge cannot reach its credential store | unlock your keychain, or see the Docker section above |
 
+A transfer that exits **7** was refused by OpenDrive for good — most often an
+account that is not allowed to write where it was asked to. Retrying will not
+help; the account's administrator controls it.
+
 `no bridge is running to talk to` means `opendrived` is not started, or is
 listening somewhere other than where `odctl` is looking — check `--addr` and
 `ODB_ADDR`.

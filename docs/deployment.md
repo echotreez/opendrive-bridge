@@ -243,6 +243,7 @@ even when OpenDrive is unreachable, and it will say which of these you are in:
 | 4 | OpenDrive failed; trying later is reasonable |
 | 5 | there is nothing at that path |
 | 6 | no bridge is running to talk to |
+| 7 | OpenDrive refused this and will refuse it again; retrying will not help |
 
 **On Windows, if you use Git Bash.** Git Bash changes any argument that starts
 with a slash into a Windows path before `odctl` ever runs, so
