@@ -76,9 +76,52 @@ func (z *zeroes) Read(p []byte) (int, error) {
 // holding a chunk in memory. The production mock in testing_test.go reads every
 // body with io.ReadAll, which is right for asserting on requests and wrong here:
 // at 50 MB a chunk it would measure the test harness.
-func benchUpstream(tb testing.TB, size int64) *httptest.Server {
+//
+// It is a RoundTripper rather than an httptest.Server, and that change is the
+// difference between a gate that works and one that does not. Over a real
+// loopback socket the upload benchmark also measured the kernel, net/http's
+// server goroutines and the garbage they make, and those dominate on a shared
+// four-core runner: the same unchanged code came out at 1.41x, 1.61x and 1.67x
+// of the reference on consecutive CI runs while measuring 1.28x on a laptop.
+// A regression gate cannot live with a 19% spread it does not control.
+//
+// What remains is ours: reading the source, hashing it, chunking it, and
+// building the multipart body. Those are the things a change to the transfer
+// path would make slower, and they are what the gate is for.
+type benchTransport struct {
+	size    int64
+	handler http.HandlerFunc
+}
+
+func (t benchTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	// The file content is streamed rather than recorded. httptest.NewRecorder
+	// buffers everything written to it, which for a 1 GB download would mean
+	// holding the whole file in memory and measuring the allocator instead of
+	// the pipeline.
+	if strings.Contains(r.URL.Path, EndpointDownloadFile) && r.URL.Query().Get("test") != "1" {
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			Status:        "200 OK",
+			Proto:         "HTTP/1.1",
+			Header:        http.Header{"Content-Type": {"application/octet-stream"}},
+			ContentLength: t.size,
+			Body:          io.NopCloser(newZeroes(t.size)),
+			Request:       r,
+		}, nil
+	}
+	rec := httptest.NewRecorder()
+	t.handler(rec, r)
+	if r.Body != nil {
+		_ = r.Body.Close()
+	}
+	resp := rec.Result()
+	resp.Request = r
+	return resp, nil
+}
+
+func benchUpstream(tb testing.TB, size int64) benchTransport {
 	tb.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return benchTransport{size: size, handler: func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		path := r.URL.Path
 
@@ -115,25 +158,21 @@ func benchUpstream(tb testing.TB, size int64) *httptest.Server {
 				_, _ = io.WriteString(w, `{"result":true,"dl_stream_status":true,"BWExceeded":false}`)
 				return
 			}
-			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-			w.WriteHeader(http.StatusOK)
-			_, _ = io.CopyN(w, newZeroes(size), size)
+			// Content is handled in RoundTrip, above, so that it streams.
+			w.WriteHeader(http.StatusInternalServerError)
 
 		default:
 			w.WriteHeader(http.StatusNotImplemented)
 			_, _ = io.WriteString(w, `{"error":{"code":501,"message":"not part of the benchmark"}}`)
 		}
-	}))
-	tb.Cleanup(srv.Close)
-	return srv
+	}}
 }
 
-func benchClient(tb testing.TB, srv *httptest.Server) *Client {
+func benchClient(tb testing.TB, upstream benchTransport) *Client {
 	tb.Helper()
 	c, err := New(
-		WithBaseURL(srv.URL+"/api/v1"),
-		WithHTTPClient(srv.Client()),
+		WithBaseURL("http://bench.invalid/api/v1"),
+		WithHTTPClient(&http.Client{Transport: upstream}),
 		WithAuthenticator(&stubAuth{creds: Credentials{SessionID: "bench-session"}}),
 	)
 	if err != nil {

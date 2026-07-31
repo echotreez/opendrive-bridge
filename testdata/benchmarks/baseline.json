@@ -1,8 +1,8 @@
 {
   "note": "ns/op divided by BenchmarkReferenceMD5, same machine, same run",
   "ratios": {
-    "BenchmarkTransferDownload": 1.2338,
-    "BenchmarkTransferUpload": 1.2757
+    "BenchmarkTransferDownload": 1.0009,
+    "BenchmarkTransferUpload": 1.0367
   },
   "tolerance_percent": 15.0
 }
