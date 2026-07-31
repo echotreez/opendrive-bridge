@@ -216,7 +216,7 @@ func TestStatusReportsTheConfiguredAccount(t *testing.T) {
 		identity: opendrive.Identity{Username: "derek@example.com", UserID: "2125533",
 			AccType: 1, AuthMode: opendrive.AuthModeOAuth2, Seamless: true},
 	}
-	srv := newTestServer(t, auth, WithKeystore(&fakeStore{backend: keystore.BackendKeyring}))
+	srv := newTestServer(t, auth, WithKeystore(&fakeStore{backend: keystore.BackendFile}))
 
 	_, body := do(t, srv, http.MethodGet, "/v1/auth/status", "")
 	account := body["account"].(map[string]any)
@@ -227,20 +227,21 @@ func TestStatusReportsTheConfiguredAccount(t *testing.T) {
 		t.Errorf("seamless = %v state = %v", body["seamless"], body["state"])
 	}
 	ks := body["keystore"].(map[string]any)
-	if ks["backend"] != "keyring" || ks["available"] != true {
+	if ks["backend"] != "encrypted_file" || ks["available"] != true {
 		t.Errorf("keystore = %v", ks)
 	}
 }
 
-// A locked keyring outranks whatever the authenticator last managed: nothing
-// can be renewed until it comes back, and no upstream request may be attempted
-// meanwhile (§4.5).
+// An unreadable credential store outranks whatever the authenticator last
+// managed: nothing can be renewed until it comes back, and no upstream request
+// may be attempted meanwhile (§4.5). Since v1.2 that means a missing .env.key or
+// an undecryptable .env rather than a locked vault.
 func TestStatusReportsALockedKeystoreAndMakesNoRequest(t *testing.T) {
 	auth := &fakeAuth{
 		state:    opendrive.StateAuthenticated,
 		identity: opendrive.Identity{Username: "derek@example.com", AuthMode: opendrive.AuthModeOAuth2},
 	}
-	store := &fakeStore{backend: keystore.BackendKeyring, available: errors.New("the keyring is locked")}
+	store := &fakeStore{backend: keystore.BackendFile, available: errors.New("the keyring is locked")}
 	srv := newTestServer(t, auth, WithKeystore(store))
 
 	_, body := do(t, srv, http.MethodGet, "/v1/auth/status", "")
@@ -279,7 +280,7 @@ func TestStatusReportsTokenExpiry(t *testing.T) {
 
 func TestLoginStoresAndReportsStatus(t *testing.T) {
 	auth := &fakeAuth{state: opendrive.StateNotConfigured}
-	srv := newTestServer(t, auth, WithKeystore(&fakeStore{backend: keystore.BackendKeyring}))
+	srv := newTestServer(t, auth, WithKeystore(&fakeStore{backend: keystore.BackendFile}))
 
 	rec, body := do(t, srv, http.MethodPost, "/v1/auth/login",
 		`{"username":"derek@example.com","password":"hunter2"}`)
@@ -303,7 +304,7 @@ func TestLoginStoresAndReportsStatus(t *testing.T) {
 // retrying blindly is how an account meets a captcha lock.
 func TestLoginWithALockedKeystoreMakesNoUpstreamRequest(t *testing.T) {
 	auth := &fakeAuth{state: opendrive.StateNotConfigured}
-	store := &fakeStore{backend: keystore.BackendKeyring, available: errors.New("the keyring is locked")}
+	store := &fakeStore{backend: keystore.BackendFile, available: errors.New("the keyring is locked")}
 	srv := newTestServer(t, auth, WithKeystore(store))
 
 	rec, body := do(t, srv, http.MethodPost, "/v1/auth/login",

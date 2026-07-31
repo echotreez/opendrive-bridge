@@ -58,6 +58,8 @@ archives:
     files:
       - README.md
       - LICENSE
+      # The template, never a real .env: deployment starts with copying this.
+      - .env.example
       # The first thing someone unpacking this needs is not the deployment
       # guide, it is the five minutes that ends with a file in their account.
       - src: docs/first-run.md

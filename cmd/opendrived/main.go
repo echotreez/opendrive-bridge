@@ -59,9 +59,9 @@ func run() error {
 	fs.StringVar(&o.addr, "addr", envOr("ODB_LISTEN", server.DefaultAddr),
 		"listen address, or set ODB_LISTEN; anything other than loopback requires an API key")
 	fs.StringVar(&o.apiKey, "api-key", os.Getenv("ODB_API_KEY"),
-		"API key callers must present (or set ODB_API_KEY)")
+		"API key callers must present; generated into .env on first run if unset")
 	fs.StringVar(&o.backend, "keystore", envOr("ODB_KEYSTORE", string(keystore.BackendAuto)),
-		"credential store: auto, keyring, encrypted_file or ephemeral (or set ODB_KEYSTORE)")
+		"credential store: auto, encrypted_file or ephemeral (or set ODB_KEYSTORE)")
 	fs.StringVar(&o.statePath, "keystore-file", os.Getenv("ODB_KEYSTORE_FILE"),
 		"path to the encrypted credential file, when that backend is used")
 	fs.StringVar(&o.stateDir, "state-dir", os.Getenv("ODB_STATE_DIR"),
@@ -93,6 +93,24 @@ func run() error {
 		return err
 	}
 	log.Info("credential store ready", slog.String("backend", string(store.Backend())))
+
+	// The Bridge's own API key comes from the credential store, which generates
+	// one on first run and keeps it (§9.2.2). The user never types or manages
+	// it. A key given on the command line or in the environment still wins, for
+	// the case where somebody is driving the bridge from a configuration
+	// management system that owns its own secrets.
+	if o.apiKey == "" {
+		type apiKeyer interface {
+			APIKey(context.Context) (string, error)
+		}
+		if k, ok := store.(apiKeyer); ok {
+			key, keyErr := k.APIKey(context.Background())
+			if keyErr != nil {
+				return keyErr
+			}
+			o.apiKey = key
+		}
+	}
 
 	// One cache, shared: the client resolves paths through it and the server
 	// drops what a write invalidated (§10.3).

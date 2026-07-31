@@ -2,12 +2,12 @@
 // after its initial setup: username, password, OAuth tokens and session id
 // (whitepaper §9.2, the four credential kinds of the CredentialStore).
 //
-// Two real backends are available. The default is the operating system's own
-// credential vault — macOS Keychain, Linux Secret Service, Windows Credential
-// Manager — which unlocks with the user's login session and stores its contents
-// encrypted on disk. Where no vault exists (Docker, headless servers) an
-// AES-256-GCM encrypted file is used instead, and its key must be supplied
-// explicitly.
+// There is one real backend: an encrypted .env file beside the programs, with
+// its key in .env.key next to it (§9.2.2). Until v1.2 there were four — the
+// three OS vaults and this — and the three were removed because two of them were
+// unavailable on the machines where the bridge most often runs, so this path had
+// to exist anyway and was being maintained as the second-class one. §9.2.1 has
+// the full reasoning, and §9.2.3 is honest about what the change costs.
 //
 // Open refuses to hand back a store that forgets everything on restart unless
 // the caller asks for that in so many words: a bridge that looks configured and
@@ -28,14 +28,12 @@ import (
 
 // Defaults for the keyring item and the encrypted file.
 const (
-	// DefaultService is the keyring service name credentials are filed under.
-	DefaultService = "opendrive-bridge"
-	// DefaultAccount separates several bridge profiles in one keyring.
-	DefaultAccount = "default"
-	// DefaultKeyEnv is the environment variable holding the encrypted file key.
+	// DefaultKeyEnv names an environment variable that stands in for .env.key.
+	// It exists for containers and for tests: a key given this way is used as
+	// it is and no key file is written.
 	DefaultKeyEnv = "ODB_STATE_KEY"
-	// DefaultFileName is the encrypted credential file name.
-	DefaultFileName = "credentials.enc"
+	// DefaultFileName is the credential file's name.
+	DefaultFileName = EnvFileName
 )
 
 // Backend selects where credentials live (config keystore, §3.4).
@@ -43,12 +41,11 @@ type Backend string
 
 // Backends.
 const (
-	// BackendAuto prefers the OS keyring and falls back to the encrypted file
-	// only when a key was configured explicitly.
+	// BackendAuto is the encrypted file. The name is kept because it is what
+	// existing configurations say, and because it still describes the
+	// behaviour: the store sets itself up without being told how.
 	BackendAuto Backend = "auto"
-	// BackendKeyring is the OS credential vault.
-	BackendKeyring Backend = "keyring"
-	// BackendFile is the AES-256-GCM encrypted file.
+	// BackendFile is the encrypted .env, named for what §3.4 calls it.
 	BackendFile Backend = "encrypted_file"
 	// BackendEphemeral keeps credentials in memory only. It must be requested
 	// explicitly and is meant for tests and one-off runs.
@@ -61,15 +58,16 @@ var (
 	// ErrNoBackend means nothing can persist credentials on this machine, and
 	// the caller did not opt into an ephemeral run.
 	ErrNoBackend = errors.New("keystore: no credential store is available; " +
-		"unlock the OS keyring, or set keystore: encrypted_file together with " +
-		DefaultKeyEnv + ", or start with --ephemeral to accept losing credentials on restart")
+		"copy " + ExampleFileName + " to " + EnvFileName + " and fill in your OpenDrive " +
+		"username and password, or start with --ephemeral to accept losing credentials on restart")
 	// ErrEphemeralNotAllowed means an in-memory store was requested without the
 	// explicit opt-in.
 	ErrEphemeralNotAllowed = errors.New("keystore: the ephemeral backend keeps credentials in memory only " +
 		"and must be enabled explicitly (--ephemeral)")
-	// ErrNoKey means the encrypted file backend has no key to work with.
-	ErrNoKey = errors.New("keystore: the encrypted file backend needs a key in " + DefaultKeyEnv +
-		" (32 random bytes, base64 encoded, or any passphrase)")
+	// ErrNoKey means a key was asked for and none could be read or created.
+	ErrNoKey = errors.New("keystore: no key is available to encrypt " + EnvFileName +
+		"; the bridge creates " + KeyFileName + " itself on first run, so this means the " +
+		"directory could not be written to")
 	// ErrUnsupportedBackend is returned for an unknown backend name.
 	ErrUnsupportedBackend = errors.New("keystore: unknown backend")
 )
@@ -78,12 +76,10 @@ var (
 type Config struct {
 	// Backend selects the store. The zero value means BackendAuto.
 	Backend Backend
-	// Service and Account name the keyring item.
-	Service string
-	Account string
-	// Path is the encrypted file location; empty means the per-OS default.
+	// Path is the credential file; empty means .env beside the program.
 	Path string
-	// Key is the encrypted file key. When empty the value of KeyEnv is used.
+	// Key overrides .env.key. When empty the value of KeyEnv is used, and
+	// failing that the key file is read or created.
 	Key []byte
 	// KeyEnv names the environment variable holding the key; empty means
 	// DefaultKeyEnv.
@@ -96,12 +92,6 @@ type Config struct {
 func (c Config) withDefaults() Config {
 	if c.Backend == "" {
 		c.Backend = BackendAuto
-	}
-	if c.Service == "" {
-		c.Service = DefaultService
-	}
-	if c.Account == "" {
-		c.Account = DefaultAccount
 	}
 	if c.KeyEnv == "" {
 		c.KeyEnv = DefaultKeyEnv
@@ -116,16 +106,11 @@ type Store interface {
 
 	// Backend reports which implementation is in use, for /v1/auth/status.
 	Backend() Backend
-	// Available reports whether the store can be read at this moment. A locked
-	// keyring returns an error here, which the daemon surfaces as
-	// keystore_unavailable without touching the network (§4.5).
+	// Available reports whether the store can be read at this moment. A missing
+	// key file or an undecryptable .env returns an error here, which the daemon
+	// surfaces as keystore_unavailable without touching the network (§4.5).
 	Available(ctx context.Context) error
 }
-
-// keyringFactory builds the OS vault backend. It is a variable so that tests
-// can simulate a machine without a vault, which is the case the "no persistence
-// = configuration error" gate exists for.
-var keyringFactory = newKeyring
 
 // Open selects and prepares a credential store.
 //
@@ -142,46 +127,43 @@ func Open(cfg Config) (Store, error) {
 		}
 		return newEphemeral(), nil
 
-	case BackendKeyring:
-		k := keyringFactory(cfg.Service, cfg.Account)
-		if err := k.Available(context.Background()); err != nil {
-			return nil, fmt.Errorf("keystore: the OS keyring is not usable: %w", err)
+	case BackendFile, BackendAuto:
+		// A key given explicitly, or through the environment, is used as it is
+		// and no key file is written. That is how a container supplies one
+		// (§8.3) and how tests avoid touching the filesystem twice.
+		key := cfg.Key
+		if len(key) == 0 {
+			if v := os.Getenv(cfg.KeyEnv); v != "" {
+				key = []byte(v)
+			}
 		}
-		return k, nil
-
-	case BackendFile:
-		key, err := resolveKey(cfg)
-		if err != nil {
-			return nil, err
-		}
-		return newFileStore(filePath(cfg), key)
-
-	case BackendAuto:
-		k := keyringFactory(cfg.Service, cfg.Account)
-		if err := k.Available(context.Background()); err == nil {
-			return k, nil
-		}
-		// No vault. The encrypted file is only acceptable when the operator
-		// configured a key for it, never as a silent fallback.
-		if key, err := resolveKey(cfg); err == nil {
-			return newFileStore(filePath(cfg), key)
-		}
-		return nil, ErrNoBackend
+		return newEnvStore(filePath(cfg), key)
 
 	default:
 		// Naming the alternatives is the difference between a message that ends
-		// the problem and one that starts a search: "file" is the name people
-		// reach for, and the backend is called "encrypted_file".
-		return nil, fmt.Errorf("%w: %q (choose one of: %s, %s, %s, %s)",
+		// the problem and one that starts a search.
+		return nil, fmt.Errorf("%w: %q (choose one of: %s, %s, %s)",
 			ErrUnsupportedBackend, cfg.Backend,
-			BackendAuto, BackendKeyring, BackendFile, BackendEphemeral)
+			BackendAuto, BackendFile, BackendEphemeral)
 	}
 }
 
-// filePath returns the configured encrypted file path or the per-OS default.
+// filePath returns the configured credential file, or .env in the directory the
+// program was unpacked into.
+//
+// v1.2 runs in place (§8.2), so the default is beside the binary rather than in
+// a per-OS configuration directory: everything a user needs to back up or delete
+// is then in one folder. defaultStateDir remains the fallback for the case where
+// the executable's location cannot be determined.
 func filePath(cfg Config) string {
 	if cfg.Path != "" {
 		return cfg.Path
+	}
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		return filepath.Join(filepath.Dir(exe), EnvFileName)
 	}
 	return filepath.Join(defaultStateDir(), DefaultFileName)
 }

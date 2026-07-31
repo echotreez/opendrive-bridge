@@ -11,7 +11,12 @@ coverage.out
 coverage.html
 
 # Secrets & local state
+#
+# .env holds the credentials and is encrypted after first run; .env.key is the
+# only thing that can decrypt it. Neither may be committed, and neither is in
+# the release archive or the container image — .env.example is what ships.
 .env
+.env.key
 *.token
 config.local.yaml
 state/

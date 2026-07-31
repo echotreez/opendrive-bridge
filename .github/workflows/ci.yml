@@ -233,7 +233,17 @@ jobs:
               *.zip)   unzip -Z1 "$a" > "$listing" ;;
               *.tar.gz) tar tzf "$a" > "$listing" ;;
             esac
-            for want in opendrived odctl docs/first-run.md docs/deployment.md; do
+            # A release must carry the template and must never carry a real
+            # credential file. The second half matters more than it looks: .env
+            # and .env.key live in the working directory a release is built
+            # from, so a stray one would be picked up by the archive glob and
+            # published to everyone.
+            for unwanted in .env .env.key; do
+              if grep -qx "$unwanted" "$listing"; then
+                echo "$a contains $unwanted, which must never be published"; exit 1
+              fi
+            done
+            for want in opendrived odctl .env.example docs/first-run.md docs/deployment.md; do
               # Windows archives carry opendrived.exe, so match the prefix.
               grep -q "^$want" "$listing" \
                 || { echo "$a is missing $want; it contains:"; cat "$listing"; exit 1; }
@@ -301,6 +311,20 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           ignore-unfixed: true
+
+      # Same rule for the image: the credential files are created by the user
+      # at run time and mounted in, never baked in.
+      - name: The image carries no credential files
+        run: |
+          set -euo pipefail
+          found=$(docker run --rm --entrypoint /usr/local/bin/odctl opendrive-bridge:ci --version >/dev/null 2>&1 && echo ok)
+          [ "$found" = "ok" ] || { echo "the image does not run"; exit 1; }
+          # distroless has no shell, so the filesystem is inspected from outside.
+          id=$(docker create opendrive-bridge:ci)
+          docker export "$id" | tar t 2>/dev/null | grep -E '(^|/)\.env(\.key)?$' && {
+            docker rm "$id" >/dev/null; echo "the image contains a credential file"; exit 1; }
+          docker rm "$id" >/dev/null
+          echo "no .env or .env.key in the image"
 
       - name: The image is small enough to be worth shipping
         run: |
