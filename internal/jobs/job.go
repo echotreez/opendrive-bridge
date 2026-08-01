@@ -22,7 +22,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // State is the lifecycle of a job. The values are the strings the Bridge REST

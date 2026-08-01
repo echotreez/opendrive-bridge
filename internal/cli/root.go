@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/StormRealm/opendrive-bridge/internal/server"
+	"github.com/echotreez/opendrive-bridge/internal/server"
 )
 
 // Version is set at build time.

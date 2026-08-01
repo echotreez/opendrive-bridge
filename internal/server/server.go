@@ -21,9 +21,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/StormRealm/opendrive-bridge/internal/jobs"
-	"github.com/StormRealm/opendrive-bridge/internal/keystore"
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/internal/jobs"
+	"github.com/echotreez/opendrive-bridge/internal/keystore"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // Config describes the daemon's HTTP surface.

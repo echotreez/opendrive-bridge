@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // TestSeamlessAcrossRestarts is the product requirement end to end (§2.2): the

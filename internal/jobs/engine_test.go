@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // ---------------------------------------------------------------- test rig

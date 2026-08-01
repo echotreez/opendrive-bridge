@@ -13,7 +13,7 @@
 # its own is useless.
 services:
   opendrive-bridge:
-    image: ghcr.io/stormrealm/opendrive-bridge:latest
+    image: ghcr.io/echotreez/opendrive-bridge:latest
     container_name: opendrive-bridge
     restart: unless-stopped
 

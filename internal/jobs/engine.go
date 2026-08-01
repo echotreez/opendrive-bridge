@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // Defaults for an Engine created with New.

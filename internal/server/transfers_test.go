@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/internal/jobs"
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/internal/jobs"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // withTransfers adds the upload/download machinery to the fake upstream and

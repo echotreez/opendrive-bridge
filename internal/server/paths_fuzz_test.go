@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // The Bridge's own path layer is fuzzed separately from the SDK's because they

@@ -1,4 +1,4 @@
-module github.com/StormRealm/opendrive-bridge
+module github.com/echotreez/opendrive-bridge
 
 go 1.22
 

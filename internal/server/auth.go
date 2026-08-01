@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/internal/keystore"
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/internal/keystore"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // StatusResponse is the /v1/auth/status schema of whitepaper §4.1.

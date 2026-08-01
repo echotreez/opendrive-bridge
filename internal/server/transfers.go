@@ -12,8 +12,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/StormRealm/opendrive-bridge/internal/jobs"
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/internal/jobs"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // Transfers come in two shapes, and the difference is not a detail:

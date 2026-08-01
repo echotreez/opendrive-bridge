@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // stubAuth is a fixed session, enough to drive the classifier.

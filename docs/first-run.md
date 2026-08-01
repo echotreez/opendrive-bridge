@@ -52,7 +52,7 @@ from the internet and refuses anything not signed with a paid Apple certificate.
 
 ```bash
 # 1. Download the darwin_arm64 archive (Apple Silicon) from
-#    https://github.com/StormRealm/opendrive-bridge/releases
+#    https://github.com/echotreez/opendrive-bridge/releases
 
 # 2. Check it is the file we published, before you trust it:
 shasum -a 256 -c opendrive-bridge_*_SHA256SUMS --ignore-missing
@@ -231,7 +231,7 @@ docker run -d --name opendrive-bridge \
   -e ODB_API_KEY="$(openssl rand -hex 32)" \
   -v "$PWD/.env:/data/.env" \
   -v odb-state:/data/jobs \
-  ghcr.io/stormrealm/opendrive-bridge:1.1.0
+  ghcr.io/echotreez/opendrive-bridge:1.1.0
 ```
 
 The first start rewrites `.env` encrypted and creates `.env.key` next to it — on

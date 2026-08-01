@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/StormRealm/opendrive-bridge/internal/cache"
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/internal/cache"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // fakeUpstream is enough OpenDrive to drive the path-addressed endpoints: a

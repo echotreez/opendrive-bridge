@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // This file is the Bridge boundary, and the boundary has one job: **upstream's

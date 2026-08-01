@@ -18,11 +18,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/internal/cache"
-	"github.com/StormRealm/opendrive-bridge/internal/jobs"
-	"github.com/StormRealm/opendrive-bridge/internal/keystore"
-	"github.com/StormRealm/opendrive-bridge/internal/server"
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/internal/cache"
+	"github.com/echotreez/opendrive-bridge/internal/jobs"
+	"github.com/echotreez/opendrive-bridge/internal/keystore"
+	"github.com/echotreez/opendrive-bridge/internal/server"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // Set by the linker at release time (see .goreleaser.yaml) so that a binary

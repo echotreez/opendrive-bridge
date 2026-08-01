@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/StormRealm/opendrive-bridge/internal/cli"
+	"github.com/echotreez/opendrive-bridge/internal/cli"
 )
 
 // Set by the linker at release time (see .goreleaser.yaml) so that a binary

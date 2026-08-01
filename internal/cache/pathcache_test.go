@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // The cache must satisfy the SDK's interface, which is how the daemon wires it.

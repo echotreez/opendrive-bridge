@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // sandboxOnce guards the shared client. Every test reuses one login, as §6.2

@@ -19,7 +19,7 @@ import (
 // Defaults for a Client created with New.
 const (
 	DefaultBaseURL   = "https://dev.opendrive.com/api/v1"
-	DefaultUserAgent = "opendrive-bridge/0.1 (+https://github.com/StormRealm/opendrive-bridge)"
+	DefaultUserAgent = "opendrive-bridge/0.1 (+https://github.com/echotreez/opendrive-bridge)"
 
 	// OAuthSessionID is the magic value the session_id parameter must carry
 	// when the call is authenticated with an OAuth2 access token

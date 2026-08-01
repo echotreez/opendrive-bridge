@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/internal/keystore"
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/internal/keystore"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // fakeAuth is an Authenticator whose state the tests set directly, so that

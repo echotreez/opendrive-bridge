@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/internal/jobs"
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/internal/jobs"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 func sandboxClient(t *testing.T) (*opendrive.Client, context.Context) {

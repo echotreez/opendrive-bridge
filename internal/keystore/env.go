@@ -17,7 +17,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // The credential file, and the one path credentials take (§9.2.2).

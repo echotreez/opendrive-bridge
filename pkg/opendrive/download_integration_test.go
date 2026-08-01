@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // The download pipeline against the live sandbox (whitepaper §2.5, §6.2). The

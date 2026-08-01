@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // The upload pipeline against the live sandbox (whitepaper §2.4, §6.2). These

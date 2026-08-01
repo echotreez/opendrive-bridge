@@ -31,11 +31,11 @@ Back up `.env` and `.env.key` together, or neither is any use.
 ## 1. Install
 
 Download the archive for your machine from the
-[releases page](https://github.com/StormRealm/opendrive-bridge/releases), then
+[releases page](https://github.com/echotreez/opendrive-bridge/releases), then
 check it against the published checksums before you run anything:
 
 ```bash
-sha256sum --check --ignore-missing opendrive-bridge_1.0.0_SHA256SUMS
+sha256sum --check --ignore-missing opendrive-bridge_1.1.0_SHA256SUMS
 ```
 
 On macOS use `shasum -a 256 -c` instead. If the check does not say `OK`, stop and
@@ -60,7 +60,7 @@ paid Apple certificate; it is not a sign that anything is wrong with the file â€
 but do check the checksum above before doing this:
 
 ```bash
-xattr -d com.apple.quarantine /usr/local/bin/opendrived /usr/local/bin/odctl
+xattr -d com.apple.quarantine ./opendrived ./odctl
 ```
 
 Releases built with a certificate available are signed and notarised, and need
@@ -197,7 +197,7 @@ including Administrators.
 
 ## 4. Containers
 
-The image is on `ghcr.io/stormrealm/opendrive-bridge`. It is built for both Intel
+The image is on `ghcr.io/echotreez/opendrive-bridge`. It is built for both Intel
 and ARM, runs as a non-root user, and contains nothing but the two programs and a
 set of CA certificates.
 
@@ -213,7 +213,7 @@ docker run -d --name opendrive-bridge \
   -e ODB_API_KEY="$(openssl rand -hex 32)" \
   -v "$PWD/.env:/data/.env" \
   -v odb-state:/data/jobs \
-  ghcr.io/stormrealm/opendrive-bridge:1.1.0
+  ghcr.io/echotreez/opendrive-bridge:1.1.0
 ```
 
 The first start rewrites `.env` encrypted and creates `.env.key` beside it, on

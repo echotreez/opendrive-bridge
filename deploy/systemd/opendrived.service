@@ -29,7 +29,7 @@
 
 [Unit]
 Description=OpenDrive Bridge daemon
-Documentation=https://github.com/StormRealm/opendrive-bridge/blob/main/docs/deployment.md
+Documentation=https://github.com/echotreez/opendrive-bridge/blob/main/docs/deployment.md
 After=network-online.target
 Wants=network-online.target
 

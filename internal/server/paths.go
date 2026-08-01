@@ -7,7 +7,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // The Bridge is path-addressed: callers say /Docs/2026/report.pdf and never see

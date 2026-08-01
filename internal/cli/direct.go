@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/StormRealm/opendrive-bridge/internal/cache"
-	"github.com/StormRealm/opendrive-bridge/internal/jobs"
-	"github.com/StormRealm/opendrive-bridge/internal/keystore"
-	"github.com/StormRealm/opendrive-bridge/internal/server"
-	"github.com/StormRealm/opendrive-bridge/pkg/opendrive"
+	"github.com/echotreez/opendrive-bridge/internal/cache"
+	"github.com/echotreez/opendrive-bridge/internal/jobs"
+	"github.com/echotreez/opendrive-bridge/internal/keystore"
+	"github.com/echotreez/opendrive-bridge/internal/server"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
 // --direct runs the bridge inside odctl, for a machine with no daemon.

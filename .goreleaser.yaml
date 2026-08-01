@@ -168,7 +168,7 @@ release:
     ### Container
 
     ```
-    docker pull ghcr.io/stormrealm/opendrive-bridge:{{ .Tag }}
+    docker pull ghcr.io/echotreez/opendrive-bridge:{{ .Tag }}
     ```
 
     The container takes the same two files as a host install: mount `.env`

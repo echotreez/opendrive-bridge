@@ -44,7 +44,7 @@ import (
 
 const (
 	defaultBase = "https://dev.opendrive.com/api/v1"
-	userAgent   = "opendrive-bridge-fetch-spec/0.1 (+https://github.com/StormRealm/opendrive-bridge)"
+	userAgent   = "opendrive-bridge-fetch-spec/0.1 (+https://github.com/echotreez/opendrive-bridge)"
 
 	// OAuthSessionMarker is the magic session_id value used with OAuth2; it is
 	// not a secret and stays readable in logs.
