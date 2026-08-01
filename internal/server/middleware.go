@@ -137,10 +137,23 @@ func recoverPanic(next http.Handler) http.Handler {
 // system is already deciding who may connect. On any other address it is
 // mandatory, and a daemon configured to listen publicly without one refuses to
 // start rather than silently exposing an account (see New).
+//
+// "Optional" has to mean optional, and until v1.2 it did not: the check was
+// skipped only when there was no key at all. That was harmless while nobody had
+// one on loopback, and stopped being harmless the moment the daemon began
+// generating a key for itself on first run (§9.2.2) — odctl, sitting in the same
+// folder, had no idea what it was and every local command came back 401. A key
+// the daemon invented for its own convenience must not lock the user out of
+// their own machine.
+//
+// A key the *user* configured is different: that is a decision to enforce, and
+// `required` carries it. So the rule is: enforce when required, and otherwise
+// still check any key that is presented, so a client that sends the wrong one is
+// told rather than quietly let in.
 func apiKeyAuth(key string, required bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if key == "" && !required {
+			if !required && (key == "" || presentedKey(r) == "") {
 				next.ServeHTTP(w, r)
 				return
 			}

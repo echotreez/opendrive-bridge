@@ -27,6 +27,13 @@ const (
 
 // shellProfilePath picks the file to edit. Windows has no equivalent and is
 // handled by the caller.
+//
+// Every return is the user's own home directory joined with a constant. Nothing
+// from the environment reaches the path except through filepath.Base, and even
+// that only chooses between fixed names — a SHELL of "/tmp/../../etc/passwd"
+// selects the default branch, not a file called passwd. gosec's taint analysis
+// (G703) cannot see that, which is why the writes below are annotated rather
+// than the analysis switched off.
 func shellProfilePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -72,7 +79,10 @@ func addToShellProfile(dir string) (path string, changed bool, err error) {
 			"add this line to yours by hand:\n  " + pathLine(dir))
 	}
 
-	existing, err := os.ReadFile(path) // #nosec G304 -- the user's own shell profile
+	// #nosec G304,G703 -- reviewed: path is $HOME joined with one of four
+	// constants (see shellProfilePath), and this is the user's own file, edited
+	// only because they asked for it with --modify-shell-profile.
+	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return path, false, fmt.Errorf("cannot read %s: %w", path, err)
 	}
@@ -82,6 +92,7 @@ func addToShellProfile(dir string) (path string, changed bool, err error) {
 
 	if len(existing) > 0 {
 		backup := fmt.Sprintf("%s.opendrive-bridge-backup-%s", path, time.Now().Format("20060102-150405"))
+		// #nosec G703 -- as above: a constant suffix on a path under $HOME.
 		if err := os.WriteFile(backup, existing, 0o600); err != nil {
 			return path, false, fmt.Errorf("cannot back up %s before editing it: %w", path, err)
 		}
@@ -96,6 +107,7 @@ func addToShellProfile(dir string) (path string, changed bool, err error) {
 		pathLine(dir) + "\n" + profileEnd + "\n"
 
 	updated := append(existing, block...)
+	// #nosec G703 -- as above.
 	if err := os.WriteFile(path, updated, 0o600); err != nil {
 		return path, false, fmt.Errorf("cannot write %s: %w", path, err)
 	}
@@ -110,7 +122,8 @@ func removeFromShellProfile() (path string, changed bool, err error) {
 	if path == "" {
 		return "", false, nil
 	}
-	raw, err := os.ReadFile(path) // #nosec G304 -- the user's own shell profile
+	// #nosec G304,G703 -- as in addToShellProfile.
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return path, false, nil
@@ -138,6 +151,7 @@ func removeFromShellProfile() (path string, changed bool, err error) {
 	trimmed := content[:start] + content[end:]
 	trimmed = strings.TrimRight(trimmed, "\n") + "\n"
 
+	// #nosec G703 -- as above.
 	if err := os.WriteFile(path, []byte(trimmed), 0o600); err != nil {
 		return path, false, fmt.Errorf("cannot write %s: %w", path, err)
 	}

@@ -31,6 +31,10 @@ type Config struct {
 	// Addr is the listen address. The default binds loopback only, which is
 	// what makes an absent API key safe (§9.1).
 	Addr string
+	// APIKeyRequired forces the key to be presented even on loopback. It is set
+	// when the user configured a key themselves, as opposed to the daemon
+	// generating one into .env for clients that need it (§9.2.2).
+	APIKeyRequired bool
 	// APIKey authenticates callers. It is optional on loopback and required
 	// everywhere else.
 	APIKey string
@@ -139,7 +143,7 @@ func New(cfg Config, auth Auth, opts ...Option) (*Server, error) {
 	for _, o := range opts {
 		o(srv)
 	}
-	srv.router = srv.routes(!loopback)
+	srv.router = srv.routes(!loopback || cfg.APIKeyRequired)
 	srv.http = &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv.router,

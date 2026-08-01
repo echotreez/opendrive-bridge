@@ -107,6 +107,43 @@ func TestNonLoopbackWithoutAKeyRefusesToStart(t *testing.T) {
 	}
 }
 
+// A key the *daemon* generated for itself must not shut the local CLI out.
+// Since v1.2 the first run puts an API key in .env so that clients which need
+// one have it (§9.2.2); odctl, in the same folder, does not know it. Enforcing
+// that key on loopback meant every local command came back 401 — found by the
+// systemd job, which drives the daemon the way a user would.
+//
+// A wrong key is still a wrong key: presenting one that does not match is
+// refused rather than waved through.
+func TestAGeneratedKeyDoesNotLockOutLoopback(t *testing.T) {
+	srv, err := New(Config{Addr: "127.0.0.1:0", APIKey: "generated-for-clients"}, &fakeAuth{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec, _ := do(t, srv, http.MethodGet, "/v1/health", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: a key the daemon made for itself must not "+
+			"lock the user out of their own loopback socket", rec.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	req.Header.Set("Authorization", "Bearer the-wrong-key")
+	wrong := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(wrong, req)
+	if wrong.Code != http.StatusUnauthorized {
+		t.Errorf("a wrong key was accepted: status = %d", wrong.Code)
+	}
+
+	right := httptest.NewRecorder()
+	reqOK := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	reqOK.Header.Set("Authorization", "Bearer generated-for-clients")
+	srv.Handler().ServeHTTP(right, reqOK)
+	if right.Code != http.StatusOK {
+		t.Errorf("the right key was refused: status = %d", right.Code)
+	}
+}
+
 func TestLoopbackNeedsNoKey(t *testing.T) {
 	srv := newTestServer(t, &fakeAuth{state: opendrive.StateNotConfigured})
 	rec, _ := do(t, srv, http.MethodGet, "/v1/health", "")
@@ -115,8 +152,10 @@ func TestLoopbackNeedsNoKey(t *testing.T) {
 	}
 }
 
+// A key the user configured is enforced everywhere, loopback included: setting
+// one is a decision, and the bridge honours it.
 func TestAKeyIsEnforcedWhenConfigured(t *testing.T) {
-	srv, err := New(Config{Addr: "127.0.0.1:0", APIKey: "secret"}, &fakeAuth{})
+	srv, err := New(Config{Addr: "127.0.0.1:0", APIKey: "secret", APIKeyRequired: true}, &fakeAuth{})
 	if err != nil {
 		t.Fatal(err)
 	}

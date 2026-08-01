@@ -276,10 +276,13 @@ jobs:
       - name: Check what came out
         run: |
           set -euo pipefail
-          # Six archives and one checksum file, or the matrix has drifted.
+          # Four archives and one checksum file, or the matrix has drifted.
+          # It said six until v1.2 narrowed the matrix and this line was left
+          # behind — the same lag as the systemd unit, in the file whose job is
+          # to catch lag.
           archives=$(ls dist/*.tar.gz dist/*.zip | wc -l)
-          if [ "$archives" -ne 6 ]; then
-            echo "expected 6 archives, found $archives:"; ls dist/
+          if [ "$archives" -ne 4 ]; then
+            echo "expected 4 archives, found $archives:"; ls dist/
             exit 1
           fi
           ls dist/*SHA256SUMS >/dev/null
@@ -293,6 +296,10 @@ jobs:
           # that the first archive was "missing opendrived" — an accurate status
           # about the wrong thing, which is the mistake this project spends most
           # of its time catching upstream.
+          # Unpacking must produce opendrive-bridge/ and nothing loose. This is
+          # checked rather than assumed: wrap_in_directory is one line of
+          # configuration and the failure it prevents — a tar bomb across the
+          # user's current directory — is invisible until somebody unpacks one.
           for a in dist/*.tar.gz dist/*.zip; do
             listing="$(mktemp)"
             case "$a" in
@@ -309,7 +316,12 @@ jobs:
                 echo "$a contains $unwanted, which must never be published"; exit 1
               fi
             done
-            for want in opendrived odctl .env.example docs/first-run.md docs/deployment.md; do
+            if grep -qv '^opendrive-bridge/' "$listing"; then
+              echo "$a has files outside opendrive-bridge/:"; cat "$listing"; exit 1
+            fi
+            for want in opendrive-bridge/opendrived opendrive-bridge/odctl \
+                        opendrive-bridge/.env.example \
+                        opendrive-bridge/docs/first-run.md opendrive-bridge/docs/deployment.md; do
               # Windows archives carry opendrived.exe, so match the prefix.
               grep -q "^$want" "$listing" \
                 || { echo "$a is missing $want; it contains:"; cat "$listing"; exit 1; }
