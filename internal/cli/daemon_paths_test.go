@@ -194,7 +194,14 @@ func TestInstallWritesTheBlockWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the profile was not written: %v", err)
 	}
-	if !strings.Contains(string(raw), profileBegin) || !strings.Contains(string(raw), dir) {
+	// Assert the line the code actually writes, not the bare directory. They are
+	// the same string on a POSIX path and not on a Windows one, because pathLine
+	// formats with %q and %q escapes the backslashes — so this read as a failure
+	// on Windows while the block was perfectly correct. Comparing against
+	// pathLine is also the real contract: the block contains the PATH line for
+	// this directory, however that line has to be spelled.
+	if !strings.Contains(string(raw), profileBegin) ||
+		!strings.Contains(string(raw), pathLine(dir)) {
 		t.Errorf("the block is not what was expected:\n%s", raw)
 	}
 }
