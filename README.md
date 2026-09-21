@@ -23,7 +23,7 @@ first run encrypts it and the plaintext disappears; after that the daemon keeps
 itself signed in and nothing else ever handles your password.
 [What that protects you from, and what it does not.](./SECURITY.md#what-this-protects-you-from-and-what-it-does-not)
 
-Linux, macOS and Windows, or as a container. MIT licensed.
+Linux and macOS, or as a container. MIT licensed.
 
 ## Five minutes
 

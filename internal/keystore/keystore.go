@@ -3,7 +3,7 @@
 // (whitepaper §9.2, the four credential kinds of the CredentialStore).
 //
 // There is one real backend: an encrypted .env file beside the programs, with
-// its key in .env.key next to it (§9.2.2). Until v1.2 there were four — the
+// its key in .env.key next to it (§9.2.2). Until v1.1 there were four — the
 // three OS vaults and this — and the three were removed because two of them were
 // unavailable on the machines where the bridge most often runs, so this path had
 // to exist anyway and was being maintained as the second-class one. §9.2.1 has
@@ -151,7 +151,7 @@ func Open(cfg Config) (Store, error) {
 // filePath returns the configured credential file, or .env in the directory the
 // program was unpacked into.
 //
-// v1.2 runs in place (§8.2), so the default is beside the binary rather than in
+// v1.1 runs in place (§8.2), so the default is beside the binary rather than in
 // a per-OS configuration directory: everything a user needs to back up or delete
 // is then in one folder. defaultStateDir remains the fallback for the case where
 // the executable's location cannot be determined.
@@ -171,10 +171,6 @@ func filePath(cfg Config) string {
 // defaultStateDir mirrors the configuration locations of §3.4.
 func defaultStateDir() string {
 	switch runtime.GOOS {
-	case "windows":
-		if dir := os.Getenv("APPDATA"); dir != "" {
-			return filepath.Join(dir, "opendrive-bridge")
-		}
 	case "darwin":
 		if home, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(home, "Library", "Application Support", "opendrive-bridge")

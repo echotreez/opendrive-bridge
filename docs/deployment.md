@@ -120,8 +120,8 @@ From inside the folder you unpacked:
 ./odctl status
 ```
 
-That registers the daemon with whatever your system uses — systemd, launchd or
-the Windows Service Manager — so it starts when you log in. It runs **from this
+That registers the daemon with whatever your system uses — systemd on Linux,
+launchd on macOS — so it starts when you log in. It runs **from this
 folder**, with the absolute path written into the service definition, because no
 service manager reads your shell configuration.
 
@@ -181,17 +181,6 @@ unpacked. A LaunchAgent runs as you, which is what lets it read `.env`. A
 LaunchDaemon would start earlier, run as root, and be looking for a file it has
 no business reading. Nothing prompts you for anything — macOS is not holding the
 credentials.
-
-### Windows
-
-`odctl daemon install` from an Administrator prompt registers a Windows Service,
-pointed at the folder you unpacked. `deploy/windows/README.txt` has the manual
-equivalent.
-
-`.env` and `.env.key` live in that folder like everywhere else. NTFS ignores the
-POSIX mode bits Go sets, so the bridge tightens the access control list with
-`icacls` instead: both files end up readable by your account and nobody else,
-including Administrators.
 
 ---
 
@@ -300,26 +289,6 @@ even when OpenDrive is unreachable, and it will say which of these you are in:
 | 6 | no bridge is running to talk to |
 | 7 | OpenDrive refused this and will refuse it again; retrying will not help |
 
-**On Windows, if you use Git Bash.** Git Bash changes any argument that starts
-with a slash into a Windows path before `odctl` ever runs, so
-
-```
-odctl ls /Documents
-```
-
-reaches the program as `odctl ls "C:/Program Files/Git/Documents"` and cannot
-work. `odctl` recognises the result and says so, but it cannot undo it. Either
-
-```
-MSYS_NO_PATHCONV=1 odctl ls /Documents
-```
-
-or use PowerShell or Command Prompt, where nothing is rewritten. This affects
-only paths in your OpenDrive account; local filenames are unaffected, so
-`odctl up report.pdf /Documents/report.pdf` needs the same treatment while
-`odctl up C:\reports\report.pdf .` does not. (If you use MSYS2 rather than Git
-for Windows, the equivalent is `MSYS2_ARG_CONV_EXCL='*'`.)
-
 **Logs.** `journalctl -u opendrived` on Linux, `log show --predicate 'process ==
 "opendrived"'` on macOS, `docker logs opendrive-bridge` for a container. Every
 line has a `request_id`; quote it in a bug report and it can be matched to the
@@ -395,6 +364,6 @@ One more is suppressed at the call site: the retry backoff uses a
 non-cryptographic random source for jitter. Jitter exists so that many clients do
 not retry in lockstep, which needs spread rather than unpredictability.
 
-The three OS keyring backends that used to appear here are gone — v1.2 removed
+The three OS keyring backends that used to appear here are gone — v1.1 removed
 them along with about a thousand lines of code and the CI jobs that tested each
 vault on its own runner.

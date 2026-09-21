@@ -1,14 +1,21 @@
 # Release build for opendrive-bridge (whitepaper §8.1).
 #
-# Four platforms, two binaries, one checksum file. The version comes from the git
-# tag rather than from a constant in the source, so `opendrived --version` and
-# the tag are the same string by construction — a binary can always be traced
-# back to the commit it was built from.
+# Three platforms, two binaries, one checksum file. The version comes from the
+# git tag rather than from a constant in the source, so `opendrived --version`
+# and the tag are the same string by construction — a binary can always be
+# traced back to the commit it was built from.
 #
-# v1.2 dropped darwin/amd64 and windows/arm64 from the *release matrix* only.
-# Both still cross-compile and CI still builds them, so restoring either is one
-# line here and no code change — which is the point of removing them this way
-# rather than by narrowing the code.
+# v1.1 dropped darwin/amd64 and windows/arm64 from the *release matrix* only,
+# leaving them cross-compiling and covered by CI. v1.2 removes Windows
+# altogether, and that is a different kind of removal: it is the only platform
+# that needed a parallel implementation of things the others share — an icacls
+# ACL for the credential file because NTFS ignores the mode bits, a Windows
+# Service instead of a user-level systemd or launchd unit, zip instead of
+# tar.gz, Authenticode instead of codesign — and the caching gateway of §3.5
+# adds another set of path and file-locking differences on top. §8.1 has the
+# reasoning. The code still cross-compiles to Windows; it is simply not built,
+# not tested and not claimed to work, and restoring it means restoring the CI
+# coverage first.
 version: 2
 
 project_name: opendrive-bridge
@@ -23,14 +30,17 @@ builds:
   - id: opendrived
     main: ./cmd/opendrived
     binary: opendrived
-    # No cgo anywhere. The credential vaults are reached through their own CLIs
-    # or through the Win32 API precisely so these cross-compile cleanly (§8.1).
+    # No cgo anywhere. Since v1.1 credentials are an encrypted file and nothing
+    # else, so there is no vault to link against and these cross-compile with
+    # the toolchain alone (§8.1).
     env: [CGO_ENABLED=0]
-    goos: [linux, darwin, windows]
+    goos: [linux, darwin]
     goarch: [amd64, arm64]
+    # darwin/amd64 is the one remaining exclusion: Intel Macs, few enough of them
+    # to be worth one fewer archive. linux/arm64 stays because that is a Pi or a
+    # cheap VPS, which is exactly where a bridge like this ends up living.
     ignore:
       - { goos: darwin, goarch: amd64 }
-      - { goos: windows, goarch: arm64 }
     flags: [-trimpath]
     ldflags:
       - -s -w
@@ -43,11 +53,13 @@ builds:
     main: ./cmd/odctl
     binary: odctl
     env: [CGO_ENABLED=0]
-    goos: [linux, darwin, windows]
+    goos: [linux, darwin]
     goarch: [amd64, arm64]
+    # darwin/amd64 is the one remaining exclusion: Intel Macs, few enough of them
+    # to be worth one fewer archive. linux/arm64 stays because that is a Pi or a
+    # cheap VPS, which is exactly where a bridge like this ends up living.
     ignore:
       - { goos: darwin, goarch: amd64 }
-      - { goos: windows, goarch: arm64 }
     flags: [-trimpath]
     ldflags:
       - -s -w
@@ -73,9 +85,6 @@ archives:
     # so "the folder" is a real thing a user keeps and backs up.
     wrap_in_directory: opendrive-bridge
     formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
     files:
       - README.md
       - LICENSE

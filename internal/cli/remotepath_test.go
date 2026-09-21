@@ -7,13 +7,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The failure this file guards against was found by the Windows smoke test, not
-// by a unit test, and the reason is worth stating: nothing on a Mac or a Linux
-// runner rewrites arguments, so on every machine the project develops on, the
-// bug is invisible. These tests reproduce the rewritten value directly.
-
-func TestAWindowsPathIsNotAnOpenDrivePath(t *testing.T) {
-	// Exactly what Git Bash hands odctl when the person typed "ls /Smoke".
+// A path that is not anchored at the account root is refused, whatever kind of
+// path it happens to be.
+//
+// The strings below are what Git Bash used to hand odctl when somebody typed
+// "ls /Smoke" on Windows. Windows is gone (§8.1) and so is the regular
+// expression that recognised them specially — this test stays because removing
+// that expression must not have opened a hole, and it had not: every one of them
+// fails the plain "starts with a slash" rule, which was always the check doing
+// the work. Keeping the cases is cheaper than re-deriving that argument later.
+func TestAPathOnSomeOtherComputerIsNotAnOpenDrivePath(t *testing.T) {
 	for _, arg := range []string{
 		`C:/Program Files/Git/Smoke`,
 		`C:\Program Files\Git\Smoke`,
@@ -24,30 +27,12 @@ func TestAWindowsPathIsNotAnOpenDrivePath(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s was accepted as a path in the account", arg)
 		}
-		if !strings.Contains(err.Error(), "not in your OpenDrive account") {
-			t.Errorf("%s: the message does not say where the path is: %v", arg, err)
+		// Whatever the message says, it has to show what a right one looks like.
+		if !strings.Contains(err.Error(), "/Documents/report.pdf") {
+			t.Errorf("%s: the message shows no example of a correct path: %v", arg, err)
 		}
 		if code := exitCodeOf(t, err); code != ExitUsage {
 			t.Errorf("%s: exit code %d, want %d", arg, code, ExitUsage)
-		}
-	}
-}
-
-func TestTheRewrittenPathMessageNamesTheCause(t *testing.T) {
-	// Windows-only: the hint is about a Windows shell, and printing it on a Mac
-	// would send someone looking for a cause that cannot apply.
-	if !rewritingShell() {
-		hint := rewriteHint()
-		if hint != "" {
-			t.Fatalf("the Git Bash explanation was offered off Windows: %q", hint)
-		}
-		t.Skip("the rewriting only happens under a Windows shell")
-	}
-	err := checkRemotePath(`C:/Program Files/Git/Smoke`)
-	msg := err.Error()
-	for _, want := range []string{"this shell changed it", "MSYS_NO_PATHCONV=1", "PowerShell"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("the message does not mention %q:\n%s", want, msg)
 		}
 	}
 }
@@ -75,16 +60,16 @@ func TestOpenDrivePathsAreAccepted(t *testing.T) {
 	}
 }
 
-// remoteArgs must check the remote position and leave the local one alone —
-// `odctl up C:\report.pdf /Documents/report.pdf` is correct on Windows, and an
-// over-eager check would reject the very platform it was written for.
+// remoteArgs must check the remote position and leave the local one alone. The
+// local argument is a path on this computer and none of the account's rules apply
+// to it: an over-eager check would refuse perfectly ordinary local filenames.
 func TestOnlyTheRemoteArgumentIsChecked(t *testing.T) {
 	up := remoteArgs(cobra.ExactArgs(2), 1)
-	if err := up(nil, []string{`C:\report.pdf`, "/Documents/report.pdf"}); err != nil {
-		t.Errorf("a Windows local file was refused: %v", err)
+	if err := up(nil, []string{"./report.pdf", "/Documents/report.pdf"}); err != nil {
+		t.Errorf("a relative local file was refused: %v", err)
 	}
-	if err := up(nil, []string{`C:\report.pdf`, `C:\Documents\report.pdf`}); err == nil {
-		t.Error("a Windows path in the remote position was accepted")
+	if err := up(nil, []string{"./report.pdf", "./Documents/report.pdf"}); err == nil {
+		t.Error("a local-looking path in the remote position was accepted")
 	}
 
 	// An optional path that was not given must not be checked into existence.

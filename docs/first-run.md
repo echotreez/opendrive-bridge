@@ -30,8 +30,7 @@ Pick your section:
 
 - [macOS](#macos) — **read the quarantine part first, it will stop you otherwise**
 - [Linux](#linux)
-- [Windows](#windows)
-- [Docker](#docker) — different setup, because a container has no password store
+- [Docker](#docker) — the same two files, mounted in
 
 For running it permanently in the background, see
 [deployment.md](./deployment.md). This page is only about the first five
@@ -160,59 +159,6 @@ that needs root:
 ```bash
 sudo loginctl enable-linger $USER
 ```
-
----
-
-## Windows
-
-Download the `windows_amd64` zip and unpack it — it creates an
-`opendrive-bridge` folder. Keep it somewhere permanent.
-
-In **PowerShell**, inside that folder:
-
-```powershell
-Get-FileHash .\opendrive-bridge_1.1.0_windows_amd64.zip -Algorithm SHA256
-# compare that against the line for this file in the SHA256SUMS file
-
-Copy-Item .env.example .env
-notepad .env            # put your OpenDrive username and password in
-
-.\opendrived.exe
-```
-
-In a second PowerShell window, in the same folder:
-
-```powershell
-.\odctl.exe status
-.\odctl.exe ls /
-"hello from Windows" | Out-File -Encoding utf8 hello.txt
-.\odctl.exe up hello.txt /hello.txt
-.\odctl.exe down /hello.txt back.txt
-```
-
-`.env` and `.env.key` are locked down with `icacls` so that only your account can
-read them — NTFS ignores the Unix permission bits, so the bridge sets the access
-control list explicitly.
-
-### If you use Git Bash
-
-Use PowerShell or Command Prompt if you can. Git Bash rewrites any argument
-starting with a slash into a Windows path before `odctl` ever sees it, so
-
-```
-odctl ls /Documents
-```
-
-arrives as `odctl ls "C:/Program Files/Git/Documents"` and cannot work. `odctl`
-recognises the result and tells you what happened, but it cannot undo it. If you
-want to stay in Git Bash, put `MSYS_NO_PATHCONV=1` in front of the command:
-
-```bash
-MSYS_NO_PATHCONV=1 odctl ls /Documents
-```
-
-This affects paths in your OpenDrive account only. Local filenames are fine
-either way.
 
 ---
 

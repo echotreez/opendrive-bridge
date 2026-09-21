@@ -73,17 +73,17 @@ So when 1.1 ships, 1.0 gets security fixes and nothing else, and when 1.2 ships,
 
 ## Routine checks that only a person can do
 
-- **Every quarter**, install a release by hand on all three platforms and run the
-  five minutes in [first-run.md](./first-run.md) exactly as written. CI proves
-  the binaries run; it does not prove the instructions are still true.
-- **Watch the certificates.** macOS notarisation and any Windows signing
-  certificate expire on their own schedule, and the failure shows up as
-  "the developer cannot be verified" for users, not as a red build.
+- **Every quarter**, install a release by hand on each platform and run the five
+  minutes in [first-run.md](./first-run.md) exactly as written. CI proves the
+  binaries run; it does not prove the instructions are still true.
+- **Watch the certificate.** A macOS notarisation certificate expires on its own
+  schedule, and the failure shows up as "the developer cannot be verified" for
+  users, not as a red build.
 - **Watch the runners.** GitHub retires runner images, and a job whose image no
   longer exists does not fail — it queues until the run times out, which reads as
   a green tick beside a job that never ran. `macos-15-intel` is the last x86_64
-  macOS image and support ends in autumn 2027; when it goes, darwin/amd64 joins
-  windows/arm64 as compiled-and-archived-only.
+  macOS image and support ends in autumn 2027; when it goes, darwin/amd64 is
+  compiled but no longer smoke-tested.
 
 ## What is deliberately not automated
 

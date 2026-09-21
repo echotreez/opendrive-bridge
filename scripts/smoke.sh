@@ -10,44 +10,19 @@
 # Usage: scripts/smoke.sh <dir-containing-opendrived-and-odctl>
 set -uo pipefail
 
+# This script used to carry a second personality for Windows: an .exe suffix, a
+# pair of MSYS variables to stop Git Bash rewriting arguments that begin with a
+# slash, and WORK/WORKN — the same temporary directory spelled twice, because
+# mktemp hands back /tmp/tmp.XXXX and only the shell understands that. All of it
+# was correct and all of it is gone with Windows support (§8.1). It is worth a
+# sentence here because that second personality is what §8.1 means when it says
+# Windows was the only platform needing a parallel code path: even the smoke test
+# had one.
 BIN_DIR="${1:-.}"
-EXE=""
-MSYS_SHELL=""
-case "$(uname -s 2>/dev/null || echo Windows)" in
-  MINGW*|MSYS*|CYGWIN*|Windows*) EXE=".exe"; MSYS_SHELL=1 ;;
-esac
-
-# Git Bash rewrites any argument beginning with a slash into a Windows path
-# before the program it is starting has run a single instruction, so `ls /Smoke`
-# arrives as `ls "C:/Program Files/Git/Smoke"`. That is real and it happens to
-# real users, but it is not what most Windows users see — from PowerShell and
-# Command Prompt nothing is rewritten, and that is what the documentation tells
-# people to use. So the assertions below run with the rewriting switched off,
-# and one case at the end switches it back on to check that the error explains
-# itself when it does happen.
-if [ -n "$MSYS_SHELL" ]; then
-  export MSYS_NO_PATHCONV=1
-  export MSYS2_ARG_CONV_EXCL='*'
-fi
-
-OPENDRIVED="$BIN_DIR/opendrived$EXE"
-ODCTL="$BIN_DIR/odctl$EXE"
+OPENDRIVED="$BIN_DIR/opendrived"
+ODCTL="$BIN_DIR/odctl"
 WORK="$(mktemp -d)"
 FAIL=0
-
-# Switching the rewriting off exposed what it had been quietly covering: mktemp
-# hands back /tmp/tmp.XXXX, which only this shell understands, and the first run
-# without conversion failed with "open /tmp/tmp.BqPQOxV5b5/upstream.addr: The
-# system cannot find the path specified."
-#
-# So the directory needs both spellings. WORK is for this script — redirects,
-# grep, mktemp — and WORKN is the same directory as Windows names it, for the
-# arguments handed to the binaries. The conversion existed for a reason; the
-# only thing wrong with it was applying to remote paths as well.
-WORKN="$WORK"
-if [ -n "$MSYS_SHELL" ] && command -v cygpath >/dev/null 2>&1; then
-  WORKN="$(cygpath -w "$WORK")"
-fi
 
 cleanup() {
   # Both waits are there to keep the shell from printing "Terminated" after the
@@ -79,7 +54,7 @@ if [ "${SMOKE_EXPECT_VERSION:-}" != "" ]; then
 fi
 
 say "a mock OpenDrive"
-"$BIN_DIR/mockupstream$EXE" --addr 127.0.0.1:0 --port-file "$WORKN/upstream.addr" &
+"$BIN_DIR/mockupstream" --addr 127.0.0.1:0 --port-file "$WORK/upstream.addr" &
 MPID=$!
 for _ in $(seq 1 50); do [ -s "$WORK/upstream.addr" ] && break; sleep 0.2; done
 UPSTREAM="$(cat "$WORK/upstream.addr" 2>/dev/null)"
@@ -92,7 +67,7 @@ PORT=9761
 # the daemon refuses to guess that for itself (§9.2).
 ODB_BASE_URL="http://$UPSTREAM/api/v1" \
   "$OPENDRIVED" --addr "127.0.0.1:$PORT" --keystore ephemeral --ephemeral \
-  --state-dir "$WORKN/jobs" --log-level error &
+  --state-dir "$WORK/jobs" --log-level error &
 DPID=$!
 
 for _ in $(seq 1 50); do
@@ -120,33 +95,6 @@ say "a failure reports itself properly"
 code=$?
 [ "$code" = "5" ]; check $? "a missing path exits 5 (got $code)"
 sed 's/^/      /' "$WORK/err.txt"
-
-# Only this shell, on this platform, can check the following — which is why the
-# problem it covers survived every test written on a Mac.
-if [ -n "$MSYS_SHELL" ]; then
-  say "a path the shell rewrote says so"
-  (
-    unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
-    "$ODCTL" --addr "127.0.0.1:$PORT" ls /Smoke
-  ) > "$WORK/rewritten.txt" 2>&1
-  code=$?
-  [ "$code" = "2" ]; check $? "a rewritten path is a mistake in the command (got $code)"
-  grep -qi "not in your OpenDrive account" "$WORK/rewritten.txt"
-  check $? "the message says the path is a local one"
-  grep -q "MSYS_NO_PATHCONV=1" "$WORK/rewritten.txt"
-  check $? "the message names a way out"
-  sed 's/^/      /' "$WORK/rewritten.txt"
-
-  # The way out has to work, or the message is only a better-worded lie. Note
-  # that this uses MSYS_NO_PATHCONV alone — exactly what the message advises —
-  # rather than both variables the top of this script sets.
-  (
-    unset MSYS2_ARG_CONV_EXCL
-    MSYS_NO_PATHCONV=1 "$ODCTL" --addr "127.0.0.1:$PORT" ls /Smoke
-  ) > "$WORK/wayout.txt" 2>&1
-  grep -q "hello.txt" "$WORK/wayout.txt"
-  check $? "MSYS_NO_PATHCONV=1 makes the same command work"
-fi
 
 printf '\n=== smoke %s\n' "$([ $FAIL -eq 0 ] && echo PASSED || echo FAILED)"
 exit $FAIL

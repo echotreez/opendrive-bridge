@@ -8,7 +8,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -129,7 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        goos: [linux, darwin, windows]
+        goos: [linux, darwin]
         goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
@@ -141,20 +141,20 @@ jobs:
   # fail on its target for reasons no compiler sees, so each of these starts the
   # real daemon against a mock OpenDrive and drives it with the real odctl.
   #
-  # Five of the six targets have a hosted runner that can execute them natively.
-  # windows/arm64 has none, so it is covered by crossbuild and by the archive
-  # only — recorded here rather than left to be discovered.
+  # Every supported target now has a runner that executes it natively, which is
+  # one of the quieter benefits of dropping Windows (§8.1): there is no longer a
+  # combination that is only ever cross-compiled and hoped about.
   #
-  # darwin/amd64 uses macos-15-intel. It was macos-13, which GitHub retired in
-  # December 2025; the job did not fail, it queued for a runner that no longer
+  # darwin/amd64 is built but not released, and still smoked here because the
+  # runner exists. It uses macos-15-intel. It was macos-13, which GitHub retired
+  # in December 2025; the job did not fail, it queued for a runner that no longer
   # exists and would have sat there until the run timed out. A green tick on a
   # job that never started is the same class of problem as a 200 that means
   # nothing, so it is worth naming.
   #
   # macos-15-intel is the last x86_64 macOS image GitHub intends to offer, and
-  # support for it ends in autumn 2027. When it goes, darwin/amd64 joins
-  # windows/arm64 as compiled-and-archived-only unless Apple hardware is
-  # available to run it on.
+  # support for it ends in autumn 2027. When it goes, darwin/amd64 becomes
+  # compiled-only unless Apple hardware is available to run it on.
   smoke:
     timeout-minutes: 15
     strategy:
@@ -164,7 +164,6 @@ jobs:
           - { os: ubuntu-latest, target: linux/amd64 }
           - { os: macos-latest, target: darwin/arm64 }
           - { os: macos-15-intel, target: darwin/amd64 }
-          - { os: windows-latest, target: windows/amd64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -285,13 +284,16 @@ jobs:
       - name: Check what came out
         run: |
           set -euo pipefail
-          # Four archives and one checksum file, or the matrix has drifted.
-          # It said six until v1.2 narrowed the matrix and this line was left
-          # behind — the same lag as the systemd unit, in the file whose job is
-          # to catch lag.
-          archives=$(ls dist/*.tar.gz dist/*.zip | wc -l)
-          if [ "$archives" -ne 4 ]; then
-            echo "expected 4 archives, found $archives:"; ls dist/
+          # Three archives and one checksum file, or the matrix has drifted.
+          # This number has now been wrong twice — it said six after v1.1
+          # narrowed the matrix to four, and the line below still announced "6
+          # archives" after that was fixed. Both in the file whose whole job is
+          # to catch exactly this kind of lag. It is asserted and printed from
+          # one variable now, so the two cannot disagree again.
+          want_archives=3
+          archives=$(ls dist/*.tar.gz | wc -l)
+          if [ "$archives" -ne "$want_archives" ]; then
+            echo "expected $want_archives archives, found $archives:"; ls dist/
             exit 1
           fi
           ls dist/*SHA256SUMS >/dev/null
@@ -309,12 +311,9 @@ jobs:
           # checked rather than assumed: wrap_in_directory is one line of
           # configuration and the failure it prevents — a tar bomb across the
           # user's current directory — is invisible until somebody unpacks one.
-          for a in dist/*.tar.gz dist/*.zip; do
+          for a in dist/*.tar.gz; do
             listing="$(mktemp)"
-            case "$a" in
-              *.zip)   unzip -Z1 "$a" > "$listing" ;;
-              *.tar.gz) tar tzf "$a" > "$listing" ;;
-            esac
+            tar tzf "$a" > "$listing"
             # A release must carry the template and must never carry a real
             # credential file. The second half matters more than it looks: .env
             # and .env.key live in the working directory a release is built
@@ -331,19 +330,17 @@ jobs:
             for want in opendrive-bridge/opendrived opendrive-bridge/odctl \
                         opendrive-bridge/.env.example \
                         opendrive-bridge/docs/first-run.md opendrive-bridge/docs/deployment.md; do
-              # Windows archives carry opendrived.exe, so match the prefix.
               grep -q "^$want" "$listing" \
                 || { echo "$a is missing $want; it contains:"; cat "$listing"; exit 1; }
             done
             rm -f "$listing"
           done
-          echo "6 archives, checksums present, contents complete"
+          echo "$want_archives archives, checksums present, contents complete"
       - uses: actions/upload-artifact@v4
         with:
           name: snapshot-archives
           path: |
             dist/*.tar.gz
-            dist/*.zip
             dist/*SHA256SUMS
           retention-days: 7
 
@@ -434,7 +431,7 @@ jobs:
       #
       # This is not belt-and-braces. The step below used to assert that a
       # container with no ODB_STATE_KEY refused to start, which was true until
-      # v1.2 moved credentials to an encrypted .env the daemon creates itself.
+      # v1.1 moved credentials to an encrypted .env the daemon creates itself.
       # After that the container started normally — and a foreground `docker run`
       # of a daemon that starts does not fail, it blocks. The job ran for six
       # hours and was killed by the platform, twice, and the only symptom was a
@@ -444,7 +441,7 @@ jobs:
       - name: A credential directory it cannot write to is a sentence, not a hang
         run: |
           set -euo pipefail
-          # This is the v1.2 shape of "no persistence = configuration error"
+          # This is the v1.1 shape of "no persistence = configuration error"
           # (§9.2.4). There is no state key to forget any more: the daemon makes
           # .env.key itself on first run. What it cannot do is make it in a
           # read-only mount, and mounting /data read-only is an easy thing to do
