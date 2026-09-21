@@ -5,6 +5,7 @@ on:
 
 jobs:
   test:
+    timeout-minutes: 20
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -21,6 +22,7 @@ jobs:
   # Whitepaper §6.3: pkg/opendrive >= 85%, internal/* >= 75%, each package on its
   # own. CI blocks a PR that drops below the gate.
   coverage:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +33,7 @@ jobs:
         run: ./scripts/check-coverage.sh coverage.out
 
   lint:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     # gitleaks asks GitHub which commits a pull request contains, which needs
     # pull-requests: read. Without it the step fails with "Resource not
@@ -110,6 +113,7 @@ jobs:
   # threshold would fail for reasons unrelated to the code, and a gate that
   # cries wolf gets switched off. scripts/check-bench.sh explains it in full.
   bench:
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -121,6 +125,7 @@ jobs:
   # Every target compiles. Compiling is necessary and not sufficient, which is
   # what the smoke job below is for.
   crossbuild:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -151,6 +156,7 @@ jobs:
   # windows/arm64 as compiled-and-archived-only unless Apple hardware is
   # available to run it on.
   smoke:
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -181,6 +187,7 @@ jobs:
   # reading its .env. A unit file is not documentation, it is the thing that
   # runs, and the only way to know it works is to start it.
   systemd-user-unit:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -242,6 +249,7 @@ jobs:
   # linux/arm64 has no hosted x86 runner, so it runs under emulation. Slower, but
   # it is the difference between "it compiled" and "it works".
   smoke-linux-arm64:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -263,6 +271,7 @@ jobs:
   # The release archives are built on every pull request, not only on a tag, so
   # a packaging mistake is found by the change that caused it.
   package:
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -345,6 +354,7 @@ jobs:
   # thing a user meets, and what it says has to be a sentence naming the variable
   # to set — not a stack trace (§9.2, §8.3).
   docker:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -420,40 +430,71 @@ jobs:
           echo "runs as: $user"
           case "$user" in root|"") echo "the image runs as root"; exit 1 ;; esac
 
-      - name: Without a state key it refuses, in words
+      # Every `docker run` that is not -d gets a `timeout`, without exception.
+      #
+      # This is not belt-and-braces. The step below used to assert that a
+      # container with no ODB_STATE_KEY refused to start, which was true until
+      # v1.2 moved credentials to an encrypted .env the daemon creates itself.
+      # After that the container started normally — and a foreground `docker run`
+      # of a daemon that starts does not fail, it blocks. The job ran for six
+      # hours and was killed by the platform, twice, and the only symptom was a
+      # red tick with no message in it. An assertion whose premise has been
+      # deleted should fail in seconds; `timeout` is what makes the difference
+      # between a wrong answer and no answer at all.
+      - name: A credential directory it cannot write to is a sentence, not a hang
         run: |
           set -euo pipefail
-          # No ODB_STATE_KEY: a container has no keychain, so this is the very
-          # first thing a user will hit if they miss a line of the guide.
+          # This is the v1.2 shape of "no persistence = configuration error"
+          # (§9.2.4). There is no state key to forget any more: the daemon makes
+          # .env.key itself on first run. What it cannot do is make it in a
+          # read-only mount, and mounting /data read-only is an easy thing to do
+          # by accident — it is what you would try if you had read that .env
+          # holds secrets.
+          mkdir -p /tmp/ro && chmod 0777 /tmp/ro
           set +e
-          out=$(docker run --rm opendrive-bridge:ci 2>&1)
+          out=$(timeout 60 docker run --rm -v /tmp/ro:/data:ro opendrive-bridge:ci 2>&1)
           code=$?
           set -e
-          echo "exit=$code"
-          echo "$out"
+          echo "exit=$code"; echo "$out"
 
-          [ "$code" -ne 0 ] || { echo "it started without anywhere to keep credentials"; exit 1; }
-          # The message must name the variable to set...
-          echo "$out" | grep -q "ODB_STATE_KEY" || { echo "the message does not name ODB_STATE_KEY"; exit 1; }
+          [ "$code" -ne 124 ] || { echo "it hung instead of answering"; exit 1; }
+          [ "$code" -ne 0 ] || { echo "it started with nowhere to keep credentials"; exit 1; }
+          # The message has to name the files the user is dealing with, and the
+          # directory to fix. It used to name the atomic-write temp file instead.
+          echo "$out" | grep -q "\.env\.key" || { echo "the message does not name .env.key"; exit 1; }
+          echo "$out" | grep -q "/data" || { echo "the message does not name the directory"; exit 1; }
+          echo "$out" | grep -q "\.tmp" && { echo "the message names a temp file"; exit 1; }
           # ...and must not be a crash.
           echo "$out" | grep -qiE "panic|goroutine [0-9]+|\.go:[0-9]+" \
             && { echo "a stack trace reached the user"; exit 1; }
           echo "refused correctly, with something a person can act on"
 
-      - name: With a key but a public address and no API key, it still refuses
+      - name: A public address with no API key of the user's own is refused
         run: |
           set -euo pipefail
+          # The image binds 0.0.0.0 because loopback inside a container means
+          # unreachable, so this is every container user's situation. The daemon
+          # generates an API key into .env on first run, and that key must not be
+          # what opens the port: nothing prints it, §9.4 forbids logging it, and
+          # a service answering only to a secret its owner has never seen is not
+          # a service they can use. Exposing the bridge has to be deliberate.
           set +e
-          out=$(docker run --rm -e ODB_STATE_KEY="$(openssl rand -base64 32)" opendrive-bridge:ci 2>&1)
+          out=$(timeout 60 docker run --rm opendrive-bridge:ci 2>&1)
           code=$?
           set -e
           echo "exit=$code"; echo "$out"
+          [ "$code" -ne 124 ] || { echo "it hung instead of refusing"; exit 1; }
           [ "$code" -ne 0 ] || { echo "it exposed the account on 0.0.0.0 with no API key"; exit 1; }
           echo "$out" | grep -qi "api key" || { echo "the refusal does not mention an API key"; exit 1; }
+          echo "$out" | grep -q "ODB_API_KEY" || { echo "the refusal does not say how to set one"; exit 1; }
 
       - name: Configured properly, it starts and answers
         run: |
           set -euo pipefail
+          # The credential path is the host's, exactly as §8.3 and the compose
+          # file describe it: a writable /data for .env, and the key supplied by
+          # the environment. ODB_STATE_KEY stands in for .env.key and is the one
+          # container-specific convenience there is.
           docker run -d --name odb-ci \
             -p 127.0.0.1:9750:9750 \
             -e ODB_STATE_KEY="$(openssl rand -base64 32)" \

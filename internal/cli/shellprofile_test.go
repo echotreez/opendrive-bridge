@@ -11,11 +11,26 @@ import (
 // tests are about restraint: what it writes, that it backs up first, and that
 // removing it takes exactly the block and nothing else.
 
+// withHomeAndShell redirects the home directory these tests write into.
+//
+// Both variables, not just HOME. os.UserHomeDir reads HOME on Unix and
+// USERPROFILE on Windows, so setting only HOME left the Windows runs pointing at
+// the real account: one of them wrote its marker block into the CI runner's
+// actual ~/.zshrc and reported success, and the other two failed because they
+// were reading a file they had never written. A test that edits shell profiles
+// and can miss its sandbox is worse than a failing test — on a contributor's own
+// machine it would have edited their profile and passed.
 func withHomeAndShell(t *testing.T, shell string) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("SHELL", shell)
+
+	// Belt and braces: prove the redirection took before writing anything.
+	if got, err := os.UserHomeDir(); err != nil || got != home {
+		t.Fatalf("the home directory was not redirected: got %q (err %v), want %q", got, err, home)
+	}
 	return home
 }
 

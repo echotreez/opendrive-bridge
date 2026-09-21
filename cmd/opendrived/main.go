@@ -99,8 +99,10 @@ func run() error {
 	// it. A key given on the command line or in the environment still wins, for
 	// the case where somebody is driving the bridge from a configuration
 	// management system that owns its own secrets.
-	// A key the user gave us is enforced everywhere; one we generate is for
-	// clients that need it, and must not shut the local CLI out (§9.1).
+	// Whether the key was the user's choice is remembered, because two rules
+	// hang off it: a key the user gave us is enforced everywhere, while one we
+	// generated must not shut the local CLI out (§9.1) and is not enough on its
+	// own to justify listening on a public address (server.New says why).
 	apiKeyConfigured := o.apiKey != ""
 	if o.apiKey == "" {
 		type apiKeyer interface {
@@ -153,10 +155,10 @@ func run() error {
 	}
 
 	srv, err := server.New(server.Config{
-		Addr:           o.addr,
-		APIKey:         o.apiKey,
-		APIKeyRequired: apiKeyConfigured,
-		Logger:         log,
+		Addr:             o.addr,
+		APIKey:           o.apiKey,
+		APIKeyConfigured: apiKeyConfigured,
+		Logger:           log,
 	}, auth,
 		server.WithKeystore(store),
 		server.WithClient(client),

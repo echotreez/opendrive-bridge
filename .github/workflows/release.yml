@@ -22,6 +22,7 @@ permissions:
 jobs:
   # Everything that can say no, before anything is built for publication.
   verify:
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +94,7 @@ jobs:
             || { echo "$tag is not a SemVer tag like v1.2.3"; exit 1; }
 
   binaries:
+    timeout-minutes: 45
     needs: verify
     runs-on: macos-latest   # so that macOS signing is possible when configured
     steps:
@@ -179,6 +181,7 @@ jobs:
             dist/*SHA256SUMS
 
   image:
+    timeout-minutes: 40
     needs: verify
     runs-on: ubuntu-latest
     steps:
@@ -250,6 +253,7 @@ jobs:
 
   # The gate that makes "no partial releases" true rather than aspirational.
   released:
+    timeout-minutes: 10
     needs: [binaries, image]
     if: always()
     runs-on: ubuntu-latest

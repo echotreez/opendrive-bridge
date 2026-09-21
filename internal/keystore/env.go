@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -518,7 +519,24 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 	tmp, err := os.CreateTemp(dir, ".odb-*.tmp")
 	if err != nil {
-		return fmt.Errorf("keystore: cannot create a temporary file in %s: %w", dir, err)
+		// Name the file the user cares about, not the temporary one they will
+		// never see. This is the message a container with a read-only /data
+		// gets, and "cannot create a temporary file in /data:
+		// open /data/.odb-419478592.tmp: permission denied" told them nothing
+		// about which file the bridge wanted or what to change.
+		//
+		// The PathError is unwrapped to its errno before wrapping, because
+		// otherwise the temporary name comes back anyway in the tail of the
+		// message — which a test here noticed. errors.Is(err, fs.ErrPermission)
+		// still works, since that is what the errno answers.
+		cause := err
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			cause = pathErr.Err
+		}
+		return fmt.Errorf("keystore: cannot write %s: %s has to be writable, because the "+
+			"bridge keeps your credentials there and creates %s in it on first run: %w",
+			filepath.Base(path), dir, KeyFileName, cause)
 	}
 	tmpName := tmp.Name()
 	defer func() {

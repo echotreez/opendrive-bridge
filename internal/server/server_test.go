@@ -102,8 +102,34 @@ func TestNonLoopbackWithoutAKeyRefusesToStart(t *testing.T) {
 		}
 	}
 
-	if _, err := New(Config{Addr: "0.0.0.0:7777", APIKey: "k"}, &fakeAuth{}); err != nil {
-		t.Errorf("a public listener with a key was refused: %v", err)
+	if _, err := New(Config{
+		Addr: "0.0.0.0:7777", APIKey: "k", APIKeyConfigured: true,
+	}, &fakeAuth{}); err != nil {
+		t.Errorf("a public listener with a key the user chose was refused: %v", err)
+	}
+}
+
+// The key the daemon generates for itself does not open a public listener.
+//
+// This is the test the old one should have been. It asserted that any non-empty
+// APIKey was enough — which was true when the only way to have a key was to
+// configure one. Since v1.2 the daemon always has a key, because it makes one on
+// first run, so the refusal above silently stopped firing for every deployment
+// that had not set ODB_API_KEY. The container job in CI would have caught it,
+// except that a daemon which starts instead of exiting does not fail a test that
+// runs it in the foreground: it hangs, and six hours later the runner is killed.
+func TestAGeneratedKeyDoesNotOpenAPublicListener(t *testing.T) {
+	_, err := New(Config{Addr: "0.0.0.0:7777", APIKey: "generated-into-dot-env"}, &fakeAuth{})
+	if err == nil {
+		t.Fatal("a public listener was opened on the strength of a key the daemon " +
+			"generated; nothing prints that key, so the address would be reachable " +
+			"by a secret its owner has never seen")
+	}
+	// And it must point at the thing the user has to do, naming the ways in.
+	for _, want := range []string{"--api-key", "ODB_API_KEY"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not mention %q: %v", want, err)
+		}
 	}
 }
 
@@ -155,7 +181,7 @@ func TestLoopbackNeedsNoKey(t *testing.T) {
 // A key the user configured is enforced everywhere, loopback included: setting
 // one is a decision, and the bridge honours it.
 func TestAKeyIsEnforcedWhenConfigured(t *testing.T) {
-	srv, err := New(Config{Addr: "127.0.0.1:0", APIKey: "secret", APIKeyRequired: true}, &fakeAuth{})
+	srv, err := New(Config{Addr: "127.0.0.1:0", APIKey: "secret", APIKeyConfigured: true}, &fakeAuth{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -450,3 +450,47 @@ func TestTheDefaultPathIsBesideTheProgram(t *testing.T) {
 		t.Errorf("default path %q is not beside the program at %q", got, exe)
 	}
 }
+
+// A directory the bridge cannot write to is the v1.2 shape of "no persistence =
+// configuration error" (§9.2.4), and it has a specific way of going wrong: the
+// failure surfaces from the atomic-write temp file, so the message used to read
+// "cannot create a temporary file in /data" and name .odb-419478592.tmp. That
+// tells the person nothing. A container with /data mounted read-only — an easy
+// mistake, and the one you would make on purpose after reading that .env holds
+// secrets — is exactly who receives it.
+func TestAnUnwritableDirectoryNamesTheCredentialFileNotATempFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX mode bits do not restrict writes on NTFS")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the mode bits this test depends on")
+	}
+	cheapKDF(t)
+
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	s, err := newEnvStore(filepath.Join(dir, EnvFileName), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.Save(context.Background(), sampleCredentials())
+	if err == nil {
+		t.Fatal("a read-only directory accepted a credential write")
+	}
+	msg := err.Error()
+	// The file the user is looking for, the directory to fix, and the key file
+	// they will need to know about — all three, because the point of the message
+	// is that somebody can act on it without reading the source.
+	for _, want := range []string{EnvFileName, dir, KeyFileName} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the message does not mention %q: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, ".tmp") {
+		t.Errorf("the message names a temporary file the user will never see: %s", msg)
+	}
+}
