@@ -54,8 +54,8 @@ Upstream API 存在以下"历史包袱",Bridge 的价值就是把它们全部屏
 | # | 交付物 | 说明 |
 |---|--------|------|
 | D1 | `opendrived` 二进制 | linux/amd64、linux/arm64、darwin/arm64,共 3 个平台组合(v1.2 收窄,§8.1) |
-| D2 | `odctl` 二进制 | 同上 6 个平台组合 |
-| D3 | Docker 镜像 | multi-arch (linux/amd64 + linux/arm64),发布到 registry |
+| D2 | `odctl` 二进制 | 同上 3 个平台组合 |
+| D3 | Docker 镜像 | multi-arch (linux/amd64 + linux/arm64),发布到 registry。**与 D1/D2 的平台收窄无关,容器一直是一等交付物** |
 | D4 | Go SDK 包 | `pkg/opendrive` 可被其他 Go 程序 import(REST 代理与 CLI 共用的核心) |
 | D5 | 文档 | README、Bridge API 的 OpenAPI 3.1 规格、部署手册、CHANGELOG |
 | D6 | 测试与 CI | 单元/集成/契约/E2E 测试 + GitHub Actions 全平台矩阵 |
@@ -658,6 +658,7 @@ docker run -d -p 127.0.0.1:9750:9750 \
 | 为什么原地运行 | 免 sudo、卸载即删目录、便于用户维护备份 | 三条理由都不成立:镜像不可变、丢弃重建即"卸载" |
 | 二进制位置 | 解包目录 | **`/usr/local/bin`(FHS,结构更清晰)** |
 | 凭证位置 | 解包目录内的 `.env` / `.env.key` | `/data/.env` / `/data/.env.key`,**运行时挂载** |
+| 缓存位置 | 解包目录内的 `./cache` | `/data/cache`,**必须是持久卷**,见 §8.3.1 |
 
 ```dockerfile
 COPY --from=builder /out/opendrived /usr/local/bin/opendrived
@@ -669,10 +670,25 @@ ENTRYPOINT ["/usr/local/bin/opendrived"]
 ```bash
 docker run -d -p 127.0.0.1:9750:9750 \
   -v $PWD/.env:/data/.env -v $PWD/.env.key:/data/.env.key \
-  <registry>/opendrive-bridge:1.1.0
+  -v odb-cache:/data/cache \
+  <registry>/opendrive-bridge:1.2.0
 ```
 
 `.env` 需要可写(首次运行要把加密结果写回,token 轮换也要落盘),因此**不能挂成 `:ro`**;`.env.key` 可以只读。镜像里绝不包含任何凭证文件,`.dockerignore` 必须覆盖 `.env` 与 `.env.key`。提供 `docker-compose.yaml` 样例与 healthcheck(`GET /v1/auth/status`)。
+
+#### 8.3.1 容器 × write-back 缓存:本次改造最锋利的一条边(v1.2 新增)
+
+§3.5.2 说过 write-back 让网关在一段时间内成为用户数据的唯一持有者。**容器把这件事的危险程度又放大了一档**,因为容器的可写层是一次性的,而"删掉容器重建一个"是日常操作而非事故:
+
+> 如果 `/data/cache` 落在容器的临时可写层上,那么 `docker rm`、`docker compose down`、镜像升级、编排系统重新调度——任何一次,都会**销毁网关已经用 202 向客户端确认过的数据**。用户认为文件已经存好了,实际上它随容器一起消失了。
+
+因此:
+
+1. **`docker-compose.yaml` 必须默认带上缓存的命名卷**,不能留给用户自己想起来加。这是"默认配置就是安全配置"的要求,不是文档建议。
+2. **daemon 启动时要自检并告警**:检测到运行在容器内(`/.dockerenv` 或 cgroup 特征)、且 `cache.dir` 不是一个独立挂载点(读 `/proc/self/mountinfo` 比对)、且 `write_back: true` 时,**在日志里用一整行明确警告**,并在 `/v1/cache/status` 里带一个 `durable: false` 标志,GUI 缓存面板对此显著标红。
+   - 检测不可能百分之百可靠,所以这里的姿态是**告警而非拒绝启动**——但话要说死:"缓存目录不是持久卷,容器被删除时尚未上传的数据会丢失"。
+   - 反过来,若用户明知故犯(例如纯只读场景),可用 `cache.write_back: false` 退化为直写,此时没有脏数据,告警自动消失。
+3. **文档要把这条写在 Docker 一节的最前面**,和 macOS 的 quarantine 提示同等地位——都是"第一个会伤到人的地方"。
 
 ### 8.4 发布流程 Release Flow
 
@@ -914,6 +930,7 @@ odctl share /Finance/2026/report.xlsx --expires 7d --max-uses 10
 4. **§8.1:去掉 Windows,发布矩阵收窄为三个目标。** 理由不只是少发一个包:Windows 是唯一需要平行代码路径的平台(icacls ACL、Windows Service、zip、Authenticode),而 v1.2 的缓存网关会再引入一批路径与文件锁的平台差异。随之删除 `perm_windows.go`、`deploy/windows/`、CI 的 windows 组合,**CLAUDE.md 中"Windows 用 icacls 收紧 ACL"一条同时作废**。
 5. **§12.1.1:桌面客户端改为内嵌 Web GUI。** 按工作量选型——`go:embed` 进现有二进制,无新构建链、无签名、无 cgo、三平台通吃、零新增发布产物。铁律不变:GUI 是 REST API 的又一个客户端,不得绕过 daemon。新增缓存面板,其中"是否可以安全关机"的指示是 §3.5.2 耐久性契约在界面上的兑现。
 6. §3.2 仓库结构:新增 `internal/ui/` 与 `internal/datacache/`;后者与既有的 `internal/cache/`(元数据缓存)是**两件不同的事**,命名与配置项不得混用。
+7. **§8.3.1 新增:容器 × write-back 缓存的风险。** 平台收窄只针对二进制发布矩阵,**Docker 镜像始终是一等交付物,不受影响**(交付物表 D3 已注明)。但缓存给容器带来一条新的锋利边缘:容器可写层是一次性的,而删容器重建是日常操作,若 `/data/cache` 不在持久卷上,一次 `docker rm` 就会销毁网关已用 202 确认过的数据。对策是三层——compose 默认带命名卷、daemon 启动自检并在 `/v1/cache/status` 暴露 `durable: false`、文档把它放在 Docker 一节最前面。检测不可能完全可靠,因此姿态是告警而非拒绝启动,但话要说死。
 
 
 
