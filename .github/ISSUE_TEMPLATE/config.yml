@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/echotreez/opendrive-bridge/security/advisories/new
+    about: Report privately. Please do not open a public issue for this.
+  - name: Questions and ideas
+    url: https://github.com/echotreez/opendrive-bridge/discussions
+    about: How do I…, would you consider…, has anyone tried… — Discussions is the better place.
+  - name: Getting started
+    url: https://github.com/echotreez/opendrive-bridge/blob/main/docs/first-run.md
+    about: Download to first upload, per platform. Worth reading before opening an issue.

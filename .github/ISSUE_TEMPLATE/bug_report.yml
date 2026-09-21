@@ -1,0 +1,81 @@
+name: Something is wrong
+description: The bridge did something other than what it said it would.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please do not report security problems here.** Use
+        [Report a vulnerability](https://github.com/echotreez/opendrive-bridge/security/advisories/new)
+        instead, which is private. See [SECURITY.md](../blob/main/SECURITY.md).
+
+        **Never paste `.env`, `.env.key`, or an API key.** The bridge redacts
+        credentials from its own output, but a file you paste by hand is not
+        covered by that.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: >
+        The command you ran and what came back. Paste the message exactly —
+        the wording is chosen carefully and the exact text tells us which path
+        it came from.
+      placeholder: |
+        $ odctl up ./report.pdf /Documents/report.pdf
+        Your OpenDrive account is not allowed to do this here.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`odctl --version` — it prints the commit too, which is what we need."
+      placeholder: odctl version 1.1.0 (commit abc1234, built 2026-08-01T00:00:00Z)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where it is running
+      options:
+        - macOS (Apple Silicon)
+        - Linux (x86-64)
+        - Linux (ARM64)
+        - Windows
+        - Docker / container
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: status
+    attributes:
+      label: What `odctl status` says
+      description: >
+        It answers without touching the network, so it works even when OpenDrive
+        does not. Safe to paste — it never prints a credential.
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: >
+        `journalctl --user -u opendrived` on Linux, Console.app on macOS,
+        `docker logs opendrive-bridge` for a container. Every line has a
+        `request_id`; including it lets us match your report to the exact
+        request. Tokens are removed before anything is written.
+      render: shell
+    validations:
+      required: false

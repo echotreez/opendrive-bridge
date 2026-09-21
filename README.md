@@ -1,14 +1,29 @@
 # OpenDrive Bridge
 
-A local REST proxy (`opendrived`) and command line (`odctl`) for
-[OpenDrive.com](https://www.opendrive.com) cloud storage, written in Go.
+**Use your [OpenDrive](https://www.opendrive.com) storage from the command line,
+or from your own programs, without touching OpenDrive's API.**
 
-把 OpenDrive 官方 REST API 封装为本地代理服务与命令行工具:内部处理 OAuth2 token
-生命周期、四步分块上传、MD5 秒传、断点续传与重试,对外提供统一简化的现代 REST 接口。
+OpenDrive's REST API is workable but awkward: uploads take four calls in a fixed
+order, tokens expire on their own schedule, and the API often reports success for
+things that did not happen. This puts a small server on your own machine that
+deals with all of that, and gives you two ordinary things instead:
 
-You sign in once. After that the daemon keeps itself signed in through your
-operating system's own credential store, so your scripts and programs can work
-with your files without ever handling your password.
+```bash
+odctl up ./report.pdf /Documents/report.pdf     # a command line
+curl 127.0.0.1:9750/v1/ls?path=/Documents       # and a plain local HTTP API
+```
+
+**Who it is for.** Anyone who wants OpenDrive in a script, a backup job or a
+program of their own — and does not want to write an API client to get there.
+You need a terminal; you do not need Go, and you do not need to have heard of
+OpenDrive's API.
+
+**Sign in once.** Your username and password go into a `.env` file, once. The
+first run encrypts it and the plaintext disappears; after that the daemon keeps
+itself signed in and nothing else ever handles your password.
+[What that protects you from, and what it does not.](./SECURITY.md#what-this-protects-you-from-and-what-it-does-not)
+
+Linux, macOS and Windows, or as a container. MIT licensed.
 
 ## Five minutes
 
@@ -16,26 +31,31 @@ with your files without ever handling your password.
 # 1. Download the archive for your machine from the releases page, and check it
 sha256sum --check --ignore-missing opendrive-bridge_*_SHA256SUMS
 
-# 2. Unpack and install
+# 2. Unpack. This creates opendrive-bridge/ — nothing is installed system-wide
 tar xzf opendrive-bridge_*_linux_amd64.tar.gz
-sudo install -m 0755 opendrived odctl /usr/local/bin/
+cd opendrive-bridge
 
-# 3. Run the daemon in one terminal
-opendrived
+# 3. Put your OpenDrive username and password in, once
+cp .env.example .env
+$EDITOR .env
 
-# 4. In another, sign in and upload something
-odctl login you@example.com
-odctl ls /
-odctl up ./report.pdf /Documents/report.pdf
-odctl down /Documents/report.pdf ./back.pdf
+# 4. Start it once. This encrypts .env and your password stops being readable
+./opendrived
+
+# 5. In another terminal, in the same folder
+./odctl ls /
+./odctl up ./report.pdf /Documents/report.pdf
+./odctl down /Documents/report.pdf ./back.pdf
 ```
 
-**On macOS, do [the quarantine step](./docs/first-run.md#macos) first** — macOS
-refuses unsigned downloads, and that is the first thing that stops people.
+> **On macOS, do [the quarantine step](./docs/first-run.md#macos) first.** These
+> builds are not signed with an Apple certificate, so macOS refuses to run them
+> until you clear one flag. It is one command, it is not a sign that anything is
+> wrong with the download, and it is the single most common reason a first run
+> fails.
 
 **[docs/first-run.md](./docs/first-run.md)** is the same path written out
-properly, with a section per platform and one for Docker. It assumes you have
-never heard of OpenDrive's API, because you do not need to have.
+properly, with a section per platform and one for Docker.
 
 ## Documentation
 
@@ -112,9 +132,27 @@ OpenDrive 的 REST API Guide(PDF)**不在本仓库中**,因为它的版权页写
 来自对线上 API 的实测,记录在 `docs/discrepancies.md`(46 条)与
 `docs/error-taxonomy.md` 中 —— 那是运行结果的记录,不是文档的转述。
 
-## License
+## Licence
 
-MIT。仓库自研代码采用 MIT 许可,见 [LICENSE](./LICENSE)。
+**MIT**, for everything written for this project — see [LICENSE](./LICENSE).
+Copyright © 2026 Derek Zhang.
 
-`docs/api-samples/` 是 OpenDrive, Inc. 的官方示例代码,同样为 MIT 许可,版权归
-OpenDrive, Inc. 所有。
+`docs/api-samples/` is OpenDrive's own sample code (PHP, C#, JavaScript),
+republished unchanged under the MIT licence OpenDrive publishes it with.
+Copyright © OpenDrive, Inc. — see
+[docs/api-samples/LICENSE](./docs/api-samples/LICENSE). It is not compiled into
+the binaries.
+
+OpenDrive's REST API Guide (the PDF) is **not** in this repository and cannot be:
+its copyright page forbids reproducing or transmitting it in any form, and says
+that reproducing includes converting it to another format. Where to request it,
+and which sources outrank it, is in
+[docs/official-api-reference.md](./docs/official-api-reference.md).
+
+## Security
+
+Report vulnerabilities privately through
+[GitHub's advisory form](https://github.com/echotreez/opendrive-bridge/security/advisories/new),
+not a public issue. [SECURITY.md](./SECURITY.md) has the threat model in full —
+including a plain account of what the credential file does **not** protect you
+from, which is worth reading before you decide to trust it.

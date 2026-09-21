@@ -1,0 +1,54 @@
+name: OpenDrive's API did something unexpected
+description: The upstream API behaved differently from its documentation, or from what the bridge assumed.
+labels: [upstream, discrepancy]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project keeps a record of every place OpenDrive's live API disagrees
+        with its own documentation — [docs/discrepancies.md](../blob/main/docs/discrepancies.md),
+        46 of them so far. Several show the published guide is simply wrong.
+
+        If you have found another, this is the right place. Measurements are
+        welcome even when you have not worked out what they mean.
+
+        **Do not paste an `access_token`, `session_id` or password.** If they are
+        in a URL you want to show, replace them with `REDACTED`.
+
+  - type: textarea
+    id: request
+    attributes:
+      label: The request
+      description: The endpoint and the parameters, with credentials removed.
+      render: http
+    validations:
+      required: true
+
+  - type: textarea
+    id: response
+    attributes:
+      label: What came back
+      description: >
+        Status, headers if they matter, and the body. A response that says 200
+        and means nothing is exactly the kind of thing worth reporting.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What the documentation or the bridge expected
+    validations:
+      required: true
+
+  - type: input
+    id: reproducible
+    attributes:
+      label: Does it happen every time?
+      description: >
+        Some upstream refusals are transient and some are permanent, and telling
+        them apart is most of the work — see docs/error-taxonomy.md. If you tried
+        more than once, say what happened.
+    validations:
+      required: false
