@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -86,15 +85,16 @@ func TestTheFileIsEncryptedAndPrivate(t *testing.T) {
 		t.Fatal("the file is not in the encrypted format")
 	}
 
-	if runtime.GOOS != "windows" {
-		for _, p := range []string{s.path, s.keyPath} {
-			info, err := os.Stat(p)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if mode := info.Mode().Perm(); mode != 0o600 {
-				t.Errorf("%s mode = %04o, want 0600", filepath.Base(p), mode)
-			}
+	// The mode is now checked unconditionally. It used to be skipped on Windows,
+	// where NTFS ignores the mode bits and a separate icacls implementation did
+	// the work; both platforms left support the same character (§8.1).
+	for _, p := range []string{s.path, s.keyPath} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode := info.Mode().Perm(); mode != 0o600 {
+			t.Errorf("%s mode = %04o, want 0600", filepath.Base(p), mode)
 		}
 	}
 }
@@ -432,7 +432,7 @@ func TestConfigDefaults(t *testing.T) {
 	}
 }
 
-// The default location is beside the program, because v1.2 runs in place: a user
+// The default location is beside the program, because v1.1 runs in place: a user
 // who unpacks the archive finds their credentials in the same folder (§8.2).
 func TestTheDefaultPathIsBesideTheProgram(t *testing.T) {
 	got := filePath(Config{}.withDefaults())
@@ -451,7 +451,7 @@ func TestTheDefaultPathIsBesideTheProgram(t *testing.T) {
 	}
 }
 
-// A directory the bridge cannot write to is the v1.2 shape of "no persistence =
+// A directory the bridge cannot write to is the v1.1 shape of "no persistence =
 // configuration error" (§9.2.4), and it has a specific way of going wrong: the
 // failure surfaces from the atomic-write temp file, so the message used to read
 // "cannot create a temporary file in /data" and name .odb-419478592.tmp. That
@@ -459,9 +459,6 @@ func TestTheDefaultPathIsBesideTheProgram(t *testing.T) {
 // mistake, and the one you would make on purpose after reading that .env holds
 // secrets — is exactly who receives it.
 func TestAnUnwritableDirectoryNamesTheCredentialFileNotATempFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX mode bits do not restrict writes on NTFS")
-	}
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores the mode bits this test depends on")
 	}

@@ -138,7 +138,7 @@ func recoverPanic(next http.Handler) http.Handler {
 // mandatory, and a daemon configured to listen publicly without one refuses to
 // start rather than silently exposing an account (see New).
 //
-// "Optional" has to mean optional, and until v1.2 it did not: the check was
+// "Optional" has to mean optional, and until v1.1 it did not: the check was
 // skipped only when there was no key at all. That was harmless while nobody had
 // one on loopback, and stopped being harmless the moment the daemon began
 // generating a key for itself on first run (§9.2.2) — odctl, sitting in the same

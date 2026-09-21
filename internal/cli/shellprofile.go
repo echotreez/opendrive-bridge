@@ -25,8 +25,7 @@ const (
 	profileEnd   = "# <<< opendrive-bridge <<<"
 )
 
-// shellProfilePath picks the file to edit. Windows has no equivalent and is
-// handled by the caller.
+// shellProfilePath picks the file to edit.
 //
 // Every return is the user's own home directory joined with a constant. Nothing
 // from the environment reaches the path except through filepath.Base, and even

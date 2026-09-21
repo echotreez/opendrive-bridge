@@ -74,7 +74,7 @@ const (
 )
 
 // envStore is the only credential backend. It replaced three OS keyring
-// implementations in v1.2; the reasoning is in whitepaper §9.2.1, and the short
+// implementations in v1.1; the reasoning is in whitepaper §9.2.1, and the short
 // version is that two of the three were never available where the bridge most
 // often runs, so the file path had to exist anyway and was being maintained as
 // the second-class one.
@@ -559,8 +559,8 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("keystore: cannot replace %s: %w", path, err)
 	}
-	// The mode set above means nothing on Windows, so the access control list
-	// is tightened here, after the file is in place (§9.2.2).
+	// The mode is reasserted after the rename, in case an existing file was
+	// created by an older build with a laxer one (§9.2.2).
 	if err := restrictToOwner(path); err != nil {
 		return err
 	}
@@ -568,6 +568,25 @@ func writeFileAtomic(path string, data []byte) error {
 	if d, err := os.Open(dir); err == nil { // #nosec G304 -- the directory just written
 		_ = d.Sync()
 		_ = d.Close()
+	}
+	return nil
+}
+
+// restrictToOwner makes the credential file readable by its owner only.
+//
+// The mode bits say it all: 0600, set when the temporary file is created and
+// reasserted after the rename (§9.2).
+//
+// Until v1.2 this had a second implementation. NTFS ignores the mode bits Go's
+// Chmod pretends to set, so on Windows the file inherited its directory's access
+// control list — which on a default profile includes Administrators — and a
+// separate perm_windows.go rebuilt the ACL with icacls. That file, its test, and
+// the reason for the build tags went with Windows support (§8.1): one platform
+// needing a parallel implementation of something this basic is a fair sample of
+// why the support surface narrowed.
+func restrictToOwner(path string) error {
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("keystore: cannot restrict the credential file: %w", err)
 	}
 	return nil
 }

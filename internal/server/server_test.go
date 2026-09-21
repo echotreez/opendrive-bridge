@@ -113,7 +113,7 @@ func TestNonLoopbackWithoutAKeyRefusesToStart(t *testing.T) {
 //
 // This is the test the old one should have been. It asserted that any non-empty
 // APIKey was enough — which was true when the only way to have a key was to
-// configure one. Since v1.2 the daemon always has a key, because it makes one on
+// configure one. Since v1.1 the daemon always has a key, because it makes one on
 // first run, so the refusal above silently stopped firing for every deployment
 // that had not set ODB_API_KEY. The container job in CI would have caught it,
 // except that a daemon which starts instead of exiting does not fail a test that
@@ -134,7 +134,7 @@ func TestAGeneratedKeyDoesNotOpenAPublicListener(t *testing.T) {
 }
 
 // A key the *daemon* generated for itself must not shut the local CLI out.
-// Since v1.2 the first run puts an API key in .env so that clients which need
+// Since v1.1 the first run puts an API key in .env so that clients which need
 // one have it (§9.2.2); odctl, in the same folder, does not know it. Enforcing
 // that key on loopback meant every local command came back 401 — found by the
 // systemd job, which drives the daemon the way a user would.
@@ -299,7 +299,7 @@ func TestStatusReportsTheConfiguredAccount(t *testing.T) {
 
 // An unreadable credential store outranks whatever the authenticator last
 // managed: nothing can be renewed until it comes back, and no upstream request
-// may be attempted meanwhile (§4.5). Since v1.2 that means a missing .env.key or
+// may be attempted meanwhile (§4.5). Since v1.1 that means a missing .env.key or
 // an undecryptable .env rather than a locked vault.
 func TestStatusReportsALockedKeystoreAndMakesNoRequest(t *testing.T) {
 	auth := &fakeAuth{

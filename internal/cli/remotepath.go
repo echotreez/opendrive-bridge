@@ -1,40 +1,39 @@
 package cli
 
 import (
-	"os"
-	"regexp"
-	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-// This file exists because of one line of output from the Windows smoke test:
+// Paths that name something in the account are checked before a request goes
+// anywhere, so that a mistake is answered by the program the person is talking to
+// rather than by a daemon two layers away.
+//
+// This file began as a Windows fix. The Windows smoke test printed
 //
 //	$ odctl ls /Smoke
 //	Paths must start with a slash, for example /Documents/report.pdf.
 //
-// The complaint was true about the value odctl received and useless to the
-// person who typed it, because they had plainly typed a slash. Git Bash — and
-// MSYS2, and Cygwin — rewrite arguments that begin with a slash into Windows
-// paths before the program starts, so `ls /Smoke` arrives as
-// `ls "C:/Program Files/Git/Smoke"`. The rewriting happens in the shell and is
-// finished before odctl has run a single instruction, so odctl cannot undo it.
-// What it can do is recognise the result and name the cause.
+// which was true about the value odctl received and useless to the person who
+// typed it, because they had plainly typed a slash: Git Bash rewrites arguments
+// beginning with a slash into Windows paths before the program starts, so
+// `ls /Smoke` arrived as `ls "C:/Program Files/Git/Smoke"`. An accurate message
+// about the wrong thing — the mistake this project keeps finding upstream.
 //
-// The general shape of the mistake is the one this project keeps finding
-// upstream: an accurate message about the wrong thing.
-
-// volumeRooted matches a path anchored to a Windows volume — C:\..., C:/... or
-// a \\server\share name. None of those can name anything in an OpenDrive
-// account, whose paths always start at a single root.
-var volumeRooted = regexp.MustCompile(`^([A-Za-z]:[\\/]|\\\\)`)
+// Windows is no longer supported (§8.1) and the explanation of MSYS argument
+// rewriting has gone with it, along with the regular expression that recognised
+// a volume-rooted path. That check turned out to be redundant rather than merely
+// unneeded: "C:\\x", "C:/x" and "\\\\server\\share" all fail the plain
+// "starts with a slash" test below, which was always the check doing the work.
+// What is left applies on every platform, because a path that does not start at
+// the account root is wrong wherever it was typed.
 
 // remoteArgs adds a check for OpenDrive paths to an existing cobra argument
-// validator. The positions are the arguments that name something in the
-// account rather than on this computer: `up` takes a local file first and a
-// remote path second, so only position 1 is checked, and a Windows path there
-// is a mistake while the same string in position 0 is correct.
+// validator. The positions are the arguments that name something in the account
+// rather than on this computer, and they have to be named one at a time: `up`
+// takes a local file first and a remote path second, so only position 1 is
+// checked, and "./report.pdf" is correct in position 0 and wrong in position 1.
 //
 // Positions past the end of args are skipped, so an optional trailing path
 // (`ls` with no argument) needs no special case.
@@ -61,16 +60,14 @@ func remoteArgs(inner cobra.PositionalArgs, positions ...int) cobra.PositionalAr
 // account, before a request goes anywhere.
 //
 // This is deliberately a client-side check even though the Bridge validates
-// paths too. The Bridge cannot write this message: the shell that rewrote the
-// argument is the caller's, and a daemon on another machine — or in a
-// container — has no way to know it was involved.
+// paths too, because the two are answering different questions. The Bridge
+// decides whether a path is acceptable; odctl can say what the person appears to
+// have meant, having seen the argument as they typed it. A daemon on another
+// machine — or in a container — knows nothing about the shell it came from.
 func checkRemotePath(p string) error {
 	switch {
 	case p == "":
 		return usage("A path is needed here, for example /Documents/report.pdf.")
-
-	case volumeRooted.MatchString(p):
-		return usage("%s is a path on this computer, not in your OpenDrive account.%s", p, rewriteHint())
 
 	case strings.HasPrefix(p, "~"):
 		// The shell expands ~ before odctl sees it only when it is a real home
@@ -84,31 +81,4 @@ func checkRemotePath(p string) error {
 			"for example /Documents/report.pdf. Got %s.", p)
 	}
 	return nil
-}
-
-// rewriteHint explains the Git Bash argument rewriting, but only where it can
-// actually be the cause. On a Mac or a Linux box a Windows path in a command is
-// simply a typo, and a paragraph about MSYS would be noise.
-func rewriteHint() string {
-	if !rewritingShell() {
-		return ""
-	}
-	return "\n\nIf you typed a path beginning with a slash, this shell changed it: " +
-		"Git Bash rewrites arguments like /Documents into Windows paths before odctl runs. " +
-		"Put MSYS_NO_PATHCONV=1 in front of the command, or run odctl from PowerShell " +
-		"or Command Prompt instead."
-}
-
-// rewritingShell reports whether odctl was started by a shell that performs the
-// rewriting. Git Bash and MSYS2 both set MSYSTEM; Cygwin does not, but sets
-// TERM and a Unix-shaped HOME, and the conservative test is enough for the
-// shells people actually use on Windows.
-func rewritingShell() bool {
-	if runtime.GOOS != "windows" {
-		return false
-	}
-	if os.Getenv("MSYSTEM") != "" {
-		return true
-	}
-	return strings.Contains(strings.ToLower(os.Getenv("SHELL")), "sh")
 }

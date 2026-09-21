@@ -148,7 +148,10 @@ func TestUploadValidatesItsInputs(t *testing.T) {
 	dir := t.TempDir()
 
 	// A real local file, made here rather than borrowed from the operating
-	// system: /etc/hosts does not exist on Windows, and the CI runner said so.
+	// system. It was /etc/hosts once, until a CI runner pointed out that Windows
+	// has no such file; borrowing from the host was the mistake either way, since
+	// a test that depends on the machine's contents fails for reasons that have
+	// nothing to do with the code.
 	real := filepath.Join(dir, "real.bin")
 	if err := os.WriteFile(real, []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)

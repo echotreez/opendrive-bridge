@@ -10,7 +10,7 @@
   This is a LaunchAgent, not a LaunchDaemon, and deliberately so: an agent runs
   as you, which is what lets it read the .env in the folder you unpacked. A
   LaunchDaemon starts earlier and runs as root, and would be looking at a file it
-  has no business reading — and, since v1.2 puts the credentials beside the
+  has no business reading — and, since v1.1 puts the credentials beside the
   binaries rather than in a system directory, would not find one at all.
 
   Nothing prompts you for anything. The credentials are in .env, encrypted with

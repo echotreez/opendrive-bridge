@@ -3,7 +3,6 @@ package cli
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -92,16 +91,13 @@ func TestTheServiceRunsInTheFolderItWasInstalledFrom(t *testing.T) {
 	}
 }
 
-func TestTheDaemonBinaryIsNamedForThePlatform(t *testing.T) {
-	got := daemonBinaryName()
-	if runtime.GOOS == "windows" {
-		if !strings.HasSuffix(got, ".exe") {
-			t.Errorf("on Windows the daemon is %q", got)
-		}
-		return
-	}
-	if strings.Contains(got, ".exe") {
-		t.Errorf("off Windows the daemon is %q", got)
+// Both supported platforms name the daemon the same way, and neither wants an
+// executable suffix. This used to branch on Windows; it is kept as a test rather
+// than deleted because resolveDaemonPath looks for this exact filename beside
+// odctl, so the two must not drift apart.
+func TestTheDaemonBinaryHasNoExecutableSuffix(t *testing.T) {
+	if got := daemonBinaryName(); got != "opendrived" {
+		t.Errorf("the daemon is %q, want %q", got, "opendrived")
 	}
 }
 
@@ -194,12 +190,11 @@ func TestInstallWritesTheBlockWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the profile was not written: %v", err)
 	}
-	// Assert the line the code actually writes, not the bare directory. They are
-	// the same string on a POSIX path and not on a Windows one, because pathLine
-	// formats with %q and %q escapes the backslashes — so this read as a failure
-	// on Windows while the block was perfectly correct. Comparing against
-	// pathLine is also the real contract: the block contains the PATH line for
-	// this directory, however that line has to be spelled.
+	// Assert the line the code actually writes, not the bare directory: the block
+	// contains the PATH line for this directory, however that line is spelled.
+	// The two differ whenever pathLine's %q has anything to escape, which is how
+	// this test came to fail on a Windows path while the block it was reading was
+	// perfectly correct.
 	if !strings.Contains(string(raw), profileBegin) ||
 		!strings.Contains(string(raw), pathLine(dir)) {
 		t.Errorf("the block is not what was expected:\n%s", raw)

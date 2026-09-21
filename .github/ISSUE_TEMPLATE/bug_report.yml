@@ -51,9 +51,8 @@ body:
         - macOS (Apple Silicon)
         - Linux (x86-64)
         - Linux (ARM64)
-        - Windows
         - Docker / container
-        - Something else
+        - Something else (including Windows, which is not supported)
     validations:
       required: true
 
