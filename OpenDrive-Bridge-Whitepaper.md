@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| 文档版本 | 1.2(修订记录见附录 E) |
+| 文档版本 | 1.3(修订记录见附录 E) |
 | 日期 | 2026-07-25 |
 | 目标读者 | Claude Opus 5 / 其他代码开发 AI / 项目开发者 |
 | 依据资料 | OpenDrive REST API Guide v1.1.7 (10/2023)、官方 PHP/C# 代码样本、官方 API Explorer (https://dev.opendrive.com/api/explorer/) |
@@ -53,7 +53,7 @@ Upstream API 存在以下"历史包袱",Bridge 的价值就是把它们全部屏
 
 | # | 交付物 | 说明 |
 |---|--------|------|
-| D1 | `opendrived` 二进制 | Linux / macOS / Windows × x86_64 / arm64,共 6 个平台组合 |
+| D1 | `opendrived` 二进制 | linux/amd64、linux/arm64、darwin/arm64,共 3 个平台组合(v1.2 收窄,§8.1) |
 | D2 | `odctl` 二进制 | 同上 6 个平台组合 |
 | D3 | Docker 镜像 | multi-arch (linux/amd64 + linux/arm64),发布到 registry |
 | D4 | Go SDK 包 | `pkg/opendrive` 可被其他 Go 程序 import(REST 代理与 CLI 共用的核心) |
@@ -284,17 +284,18 @@ opendrive-bridge/
 │   └── errors.go                 # 统一错误类型 (APIError{Code, Message, Kind})
 ├── internal/
 │   ├── server/                   # Bridge REST API (handlers, middleware, OpenAPI)
+│   ├── ui/                       # v1.2: 内嵌 Web GUI 静态资源 (go:embed)
 │   ├── jobs/                     # 传输任务引擎(队列、并发、持久化状态、进度)
-│   ├── keystore/                 # OS keyring 封装 (99designs/keyring)
-│   ├── cache/                    # 路径→ID 解析缓存 (TTL + DirUpdateTime 失效)
+│   ├── keystore/                 # 加密 .env 凭证存储(v1.1 起唯一后端)
+│   ├── cache/                    # 元数据缓存:路径→ID (TTL + DirUpdateTime 失效)
+│   ├── datacache/                # v1.2: 数据缓存网关(§3.5)——与上面那个是两回事
 │   └── config/                   # 配置加载 (file + env + flags)
 ├── tools/fetch-spec/             # 登录后拉取线上 Swagger 全量规格存档
 ├── testdata/                     # 录制的真实响应 fixture(脱敏)
 ├── deploy/
 │   ├── docker/Dockerfile         # multi-stage, distroless/static
 │   ├── systemd/opendrived.service
-│   ├── launchd/com.opendrive.bridge.plist
-│   └── windows/                  # Windows Service 安装脚本 (kardianos/service)
+│   └── launchd/com.opendrive.bridge.plist
 ├── .github/workflows/            # ci.yml, release.yml
 ├── .goreleaser.yaml
 └── docs/                         # bridge-openapi.yaml, 部署手册
@@ -318,13 +319,74 @@ env_file: .env                # v1.2: 唯一凭证来源;密钥在 .env.key
 upstream_base: https://dev.opendrive.com/api/v1
 transfers:
   chunk_size_mb: 50           # 官方样本值;可调 8–100
-  parallel_chunks: 3          # 单文件并发 chunk 数(注意服务端顺序要求,见 §10.2)
+  parallel_chunks: 1          # v1.2: 单文件分块并发,默认关闭,见 §10.2 的实测结论
+  parallel_ranges: 4          # v1.2: 单文件下载的 Range 并发(下载方向可行)
   max_concurrent_jobs: 4
   retry_max: 5
+cache:                        # v1.2 缓存网关,见 §3.5
+  enabled: true
+  dir: ./cache                # 与 .env 同在解包目录
+  max_bytes: 20GiB            # 容量上限
+  high_watermark: 0.90        # 超过即开始淘汰 clean 条目
+  low_watermark: 0.70         # 淘汰到此为止
+  write_back: true            # false 则退化为直写(等上游确认才返回)
+  max_dirty_bytes: 5GiB       # 未刷写数据的上限;达到即拒绝新写入,绝不丢数据
 log:
   level: info
   redact_tokens: true         # 强制脱敏,不可关闭 access_token 的脱敏
 ```
+
+---
+
+## 3.5 缓存网关架构 Caching Gateway(v1.2 新增)
+
+### 3.5.1 目标与形态
+
+Bridge 从"透明代理"升级为 **S3 gateway 式的缓存网关**:客户端只与本地网关交换数据,网关在后台与 OpenDrive 同步。
+
+```
+        写入                                   读取
+客户端 ──PUT──▶ 缓存(落盘+journal) ──2xx──▶    客户端 ──GET──▶ 命中? ──是──▶ 直接返回
+                      │                                       │
+                      │ 后台 flush                            否 → 回源 OpenDrive
+                      ▼                                          （边下边返回，同时落缓存）
+                 OpenDrive
+```
+
+### 3.5.2 两个方向的风险完全不对称——这是本节最重要的一句话
+
+| | 读缓存(read-through) | 写缓存(write-back) |
+|---|---|---|
+| 权威副本 | 在 OpenDrive | **在网关本地磁盘,上游还没有** |
+| 淘汰代价 | 重新下载即可 | **淘汰 = 用户数据永久丢失** |
+| 崩溃代价 | 无 | **未刷写的数据全丢** |
+| 风险等级 | 低 | **高:网关临时成为唯一的数据持有者** |
+
+write-back 把 Bridge 从"从不持有用户数据"变成"在一段时间内是用户数据的唯一存放处"。这是 v1.0–v1.2 从未有过的责任,必须用明确的契约兜住:
+
+**耐久性契约(对外必须说清楚,不许含糊)**
+
+> 上传返回 2xx 的含义是:**字节已落到网关磁盘并记入 journal**;**不是**"已经到 OpenDrive"。
+
+由此推出四条不可协商的规则:
+
+1. **脏条目永不淘汰。** 容量压力下只淘汰 clean 条目。若缓存被脏数据占满(达到 `max_dirty_bytes`),新写入**必须明确拒绝或阻塞**,绝不能为了腾地方丢掉尚未上传的数据。这条规则的优先级高于任何容量目标。
+2. **journal 必须 fsync。** 条目状态(`dirty → uploading → clean`)与其磁盘位置写入日志并 fsync 后,才可以向客户端返回 2xx。崩溃重启时扫描 journal,把所有 dirty/uploading 条目重新入队。
+3. **用户必须能看见"还有多少没上去"。** `/v1/cache/status` 报告 `dirty_bytes` / `dirty_objects`,`odctl cache flush --wait` 阻塞到全部刷完,GUI 上要有一个明确的"可以安全关机了"指示。关机前不知道有没有数据在途,是这类网关最容易伤到人的地方。
+4. **关机要 drain。** daemon 收到 SIGTERM 后先停止接受新写入、尽力刷完脏数据再退出;超时未刷完则在日志里逐条列出未完成对象,不静默退出。systemd 单元相应调大 `TimeoutStopSec`。
+
+### 3.5.3 顺带解决的既有问题
+
+缓存对 §2.6 的两个上游怪癖是正面收益:
+
+- **D44(刚上传的文件短时间内不可见)**:客户端写完立刻读,命中本地缓存,拿到的就是自己刚写的字节——读写一致性由网关保证,不再暴露上游的读写延迟。
+- **D42(`download/all.json` 返回空档案)**:批量下载可以在网关侧按对象逐个取并自行打包,不依赖那个会撒谎的端点。
+
+### 3.5.4 边界与非目标
+
+- 缓存是**单用户本地加速层**,不是分布式缓存,不做多实例一致性。
+- 缓存目录存放的是**用户明文数据**,与 `.env` 的加密不同——它的保护依赖文件系统权限(0700)与所在磁盘的加密。这一点必须写进用户文档,不能让人以为"Bridge 什么都加密"。
+- 元数据缓存(§10.3 的路径→ID 与目录列表)与本节的**数据缓存**是两回事,命名、配置项、失效逻辑都不得混用。
 
 ---
 
@@ -391,6 +453,22 @@ Bridge API 是**面向使用者的简化层**,统一 JSON、统一错误、路�
 | `/v1/share/list` | GET | 已分享内容 |
 | `/v1/share` | DELETE | 取消分享 |
 
+### 4.4.1 缓存(v1.2 新增)
+
+| 端点 | 方法 | 说明 |
+|---|---|---|
+| `/v1/cache/status` | GET | 容量、命中率、`dirty_bytes`/`dirty_objects`、最旧脏条目的年龄 |
+| `/v1/cache/objects` | GET | 缓存对象列表:path、size、state(`dirty`/`uploading`/`clean`)、last_access |
+| `/v1/cache/flush` | POST | `{path?, wait?}` 立即刷写脏条目;`wait=true` 阻塞到完成 |
+| `/v1/cache/refresh` | POST | `{path}` 丢弃某条 **clean** 条目,下次读取回源。**对 dirty 条目必须拒绝**,否则就是丢数据 |
+| `/v1/cache` | DELETE | 清空 **clean** 条目;若存在脏条目,返回 409 并告知先 flush |
+
+传输端点的语义随之变化,必须在 OpenAPI 里写明:
+
+- `POST /v1/upload` 与 `PUT /v1/upload/stream`:`write_back: true` 时返回 **202 Accepted** + `job_id` + `cache_state: "dirty"`,而不是 200。用 202 是因为它的含义恰好是"已接收,尚未完成"——这正是耐久性契约要传达的事。
+- `GET /v1/download/stream`:响应头带 `X-Cache: HIT|MISS`,便于用户和 GUI 判断数据来自本地还是回源。
+- `GET /v1/jobs/{id}`:新增 `phase` 字段区分 `caching`(客户端→网关)与 `uploading`(网关→OpenDrive),两段进度分别可见。
+
 ### 4.5 统一错误格式
 
 ```json
@@ -407,6 +485,8 @@ Bridge API 是**面向使用者的简化层**,统一 JSON、统一错误、路�
 | `token_expired` | access_token 过期(瞬态) | SDK 自动刷新/重登,调用方通常看不到;仅在自动处理中途才短暂外露 |
 | `captcha_required` | 上游要求 captcha | 停止自动尝试,提示用户到网页端解锁 |
 | `unauthorized` | 仅指 **Bridge API 自身**鉴权失败(API key 错误等),与上游凭证无关 | 拒绝请求 |
+
+**v1.2 新增 `cache_full`**(HTTP 507 Insufficient Storage):脏数据已达 `max_dirty_bytes`,网关拒绝接收新写入。它**不是上游错误**,而是网关自己的状态,因此不经分类层的上游判据,但同样要有一句面向人的话——说清"你的数据没丢,只是还没传完,等一会儿或者 `odctl cache flush --wait`"。这是 §3.5.2 第 1 条规则在 API 上的出口:宁可明确拒绝,也不丢已接收的数据。
 
 其余不变:`not_found / conflict / quota_exceeded / bandwidth_exceeded / invalid_name / upstream_error / rate_limited / network / invalid_response / invalid_request`。SDK 层 `errors.Kind` 与此枚举一一映射,新增 `KindKeystoreUnavailable` 与 `KindReauthRequired`(替代原先笼统归入 `unauthorized`/`refresh_token_failed` 的用法;`refresh_token_failed` 保留为内部瞬态,静默重登成功后对外不可见)。
 
@@ -510,7 +590,7 @@ odctl daemon install|start|stop|uninstall  # 注册系统服务
 **并发安全**:全部测试跑 `-race`;job engine 做专门的并发压力用例。
 **安全扫描**:`govulncheck`(依赖漏洞)、`gosec`(代码模式)、`gitleaks`(防 secrets 入库)、Docker 镜像 `trivy` 扫描。CI 每日定时跑一次,不只在 PR 时。
 **依赖治理**:`go.mod` 最小化;Dependabot/Renovate 自动升级 PR + CI 验证。
-**Code Review 清单**(AI 或人工 review 都照此执行):错误是否都被处理且携带上下文;token/密码是否可能进入日志/错误信息;文件句柄/response body 是否关闭;context 是否贯穿并支持取消;chunk 边界与 offset 计算是否有 off-by-one;Windows 路径分隔符与文件名大小写处理。
+**Code Review 清单**(AI 或人工 review 都照此执行):错误是否都被处理且携带上下文;token/密码是否可能进入日志/错误信息;文件句柄/response body 是否关闭;context 是否贯穿并支持取消;chunk 边界与 offset 计算是否有 off-by-one;文件名大小写与路径分隔符处理。v1.2 起还要问:缓存条目的状态转换是否原子、脏条目是否可能被淘汰、失败路径是否仍然 fsync 过 journal。
 **发布前 QA 门禁**:6 平台二进制冒烟(`odctl version` + mock server 走一次 login/ls);Docker 镜像双架构冒烟;OpenAPI 文档与实现一致性检查;CHANGELOG 完整;§9 安全清单逐项签收。
 
 ---
@@ -521,37 +601,41 @@ odctl daemon install|start|stop|uninstall  # 注册系统服务
 
 Go 交叉编译,`CGO_ENABLED=0`(v1.2 起凭证只用加密 `.env`,不再有任何需要 cgo 的 keyring 路径,见 §9.2)。
 
-**v1.2 收窄为四个目标**,砍掉两个实际用户极少的组合,减少构建面与冒烟成本:
+**v1.2 收窄为三个目标——Windows 整体退出支持范围**:
 
 | OS | Arch | 产物 |
 |---|---|---|
 | linux | amd64 | `opendrive-bridge_{ver}_linux_amd64.tar.gz` |
 | linux | arm64 | `..._linux_arm64.tar.gz` |
 | darwin (macOS) | arm64 (Apple Silicon) | `..._darwin_arm64.tar.gz` |
-| windows | amd64 | `..._windows_amd64.zip` |
 
-已移除:`darwin/amd64`(Intel Mac)、`windows/arm64`。二者都只是从发布矩阵中去掉,代码仍可交叉编译——若日后 Windows on ARM(Snapdragon X 一类)用户出现,在 `.goreleaser.yaml` 加回一行即可,无需改代码。
+历次移除与理由:
+
+- v1.2 去掉 `darwin/amd64`(Intel Mac)与 `windows/arm64`——实际用户极少。
+- **v1.2 去掉 `windows/amd64`,即不再支持 Windows**。这不只是少发一个包:Windows 是唯一需要单独维护的平台分支——凭证文件要用 `icacls` 收 ACL(POSIX 模式位在 NTFS 上无效)、服务要走 Windows Service 而非用户级 systemd/launchd、归档要打 zip、签名要 Authenticode。删掉它就删掉了整条平行代码路径与其 CI 真机测试。v1.2 新增的缓存网关(§3.5)会再引入一批路径与文件锁语义的平台差异,此时收敛支持面比事后补救便宜得多。
+- 随之删除:`internal/keystore/perm_windows.go` 及其测试、`credman` 残留、`deploy/windows/`、CI 的 windows runner 与 crossbuild 组合、文档中的 Windows 章节。**CLAUDE.md 里"Windows 上用 icacls 收紧 ACL"那条规则同时作废**(§2.5:行为变了,随产物分发的文件和规则都要跟着变)。
+
+Go 代码仍然可以交叉编译到 Windows——只是不再构建、不再测试、不再声称支持。日后若要恢复,先补回 CI 真机测试再谈发布。
 
 **归档必须包裹目录(v1.2 新增,修复实测问题)**:goreleaser 设 `wrap_in_directory: true`,使 `tar xzf` 后在当前目录生成 `opendrive-bridge/` 并把所有文件放入其中。此前的归档是"tar 炸弹"——解包会把二进制、LICENSE、docs、deploy 一股脑摊在用户当前目录里,清理起来很麻烦。
 
-每个包内含 `opendrived`、`odctl`、`.env.example`、LICENSE、README、`docs/`、`deploy/`。用 **goreleaser** 一条命令产出全矩阵 + checksums (SHA256);版本号注入 `main.version`(SemVer,`git tag` 驱动)。macOS 产物做 codesign + notarization(无开发者证书时文档说明 `xattr -d com.apple.quarantine` 方案);Windows 产物条件允许时做 Authenticode 签名。
+每个包内含 `opendrived`、`odctl`、`.env.example`、LICENSE、README、`docs/`、`deploy/`。用 **goreleaser** 一条命令产出全矩阵 + checksums (SHA256);版本号注入 `main.version`(SemVer,`git tag` 驱动)。macOS 产物做 codesign + notarization(无开发者证书时文档说明 `xattr -d com.apple.quarantine` 方案)。
 
 ### 8.2 主机部署 Host Deployment(v1.2 改为原地运行)
 
 **不再复制二进制到 `/usr/local/bin`。** 程序就留在用户解包出来的 `opendrive-bridge/` 目录里运行,原因有三:免 sudo、卸载即删目录、`.env` 与二进制同目录便于用户自行维护和备份。
 
-> **本节只约束主机部署(Linux / macOS / Windows),不约束容器。** 容器的情形恰好相反:镜像本身就是不可变的部署单元,由 Dockerfile 一次构建、随时可丢弃重建,既没有 sudo 顾虑也没有"卸载残留"问题。因此容器内**仍按 FHS 把二进制放在 `/usr/local/bin`**,结构更清晰;唯独 `.env` 与 `.env.key` 例外——它们是运行时挂载进来的用户数据,绝不进镜像。详见 §8.3。
+> **本节只约束主机部署(Linux / macOS),不约束容器。** 容器的情形恰好相反:镜像本身就是不可变的部署单元,由 Dockerfile 一次构建、随时可丢弃重建,既没有 sudo 顾虑也没有"卸载残留"问题。因此容器内**仍按 FHS 把二进制放在 `/usr/local/bin`**,结构更清晰;唯独 `.env` 与 `.env.key` 例外——它们是运行时挂载进来的用户数据,绝不进镜像。详见 §8.3。
 
 `odctl daemon install` 的行为改为:
 
-1. 以**解包目录的绝对路径**写服务单元(systemd / launchd / Windows Service)。服务管理器不读 shell 配置,因此单元里必须是绝对路径,不能依赖 PATH。
+1. 以**解包目录的绝对路径**写服务单元(systemd / launchd)。服务管理器不读 shell 配置,因此单元里必须是绝对路径,不能依赖 PATH。
 2. 打印一行 `export PATH="$PATH:<解包目录>"` 供用户加入 `~/.zshrc` 或 `~/.bashrc`;**默认只打印不写入**,加 `--modify-shell-profile` 才代写,并在写入前备份、写入内容用标记块包裹以便 `daemon uninstall` 精确移除。理由:擅自改用户的 shell 配置是侵入行为,而且写错会让用户开不了新终端。
 3. `daemon uninstall` 卸载服务单元、移除标记块,但**不删除 `.env` 与 `.env.key`**——凭证的删除必须是用户显式动作(`odctl logout` 或手工删文件)。
 
 - **Linux**: `deploy/systemd/opendrived.service`,用户级 (`systemctl --user`) 为默认,含 `ProtectSystem=strict`、`NoNewPrivileges=yes` 等硬化指令。注意 `DynamicUser=yes` 与"读取用户目录下的 `.env`"不兼容,v1.2 起改为以调用用户身份运行。
 - **macOS**: launchd plist 装载到 `~/Library/LaunchAgents`。
-- **Windows**: 经 `kardianos/service` 注册 Windows Service。
-- 三平台统一由 `odctl daemon start|stop|status` 管理,屏蔽差异。
+- 两平台统一由 `odctl daemon start|stop|status` 管理,屏蔽差异。
 
 ### 8.3 Docker 部署
 
@@ -624,7 +708,7 @@ v1.2 统一为**唯一后端:AES-256-GCM 加密的 `.env` 文件**。这不是�
 |---|---|---|
 | `.env.example` | 模板,随发布包分发,进版本库 | 0644 |
 | `.env` | 用户凭证与 API key,**加密后**存放 | 0600 |
-| `.env.key` | 32 字节随机数据密钥,首次运行自动生成 | 0600(Windows 用 ACL 收紧,复用 `perm_windows.go`) |
+| `.env.key` | 32 字节随机数据密钥,首次运行自动生成 | 0600 |
 
 - 部署前:`cp .env.example .env`,填入 OpenDrive 用户名与密码(此刻为明文)。
 - 首次运行:daemon 生成 `.env.key`,生成随机 Bridge API key,把全部凭证加密写回 `.env`(明文密码在此刻消失)。用户**从不需要**手动输入或管理 API key。
@@ -675,8 +759,23 @@ Upstream 要求 `access_token` 放 URL query,这会出现在各种日志里。�
 
 ### 10.2 并发模型
 
-- Job engine:全局 worker pool(默认 4 job 并发),单文件 chunk 默认**串行**(upstream 的 TempLocation+offset 协议未承诺乱序写安全;P3 阶段实测验证后才允许开启 `parallel_chunks>1`,并作为实验特性)。多文件并发是主要吞吐来源。
+并发要分三层来谈,因为**上游对上传和下载的容忍度完全不同**。
+
+**(a) 多文件并发——已有,且是吞吐主力。** Job engine 的 worker pool(默认 4)让多个文件同时传输,这条路径已在 P3 实测跑通。
+
+**(b) 单文件分块上传并发——现有证据指向"不可行",不得先实现再验证。** 白皮书 v1.0 曾把它列为"实测后可开启的实验特性"。P3 的实测结果其实已经给出了强烈的反面证据,写在这里以免后人重复踩:
+
+- D37:偏移错误时上游回的是 ``Incorrect chunk offset: uploaded=0, chunk_offset=999999`` ——它把请求的 `chunk_offset` 和**自己已收到的字节数 `uploaded`** 相比较。这说明服务端为每个 `TempLocation` 维护一个线性写入游标。
+- D35:`TotalWritten` 返回的是**本次 chunk** 的字节数,不是累计值——同样符合"逐块顺序追加"的模型。
+
+两条合起来:一个 `TempLocation` 极可能只接受**严格递增、无空洞**的写入,乱序并发块会被直接拒绝。因此 `parallel_chunks` 默认值由 3 **改为 1**,并且——按 CLAUDE.md 第 0 条——**先探测再实现**:写一个一次性探针,对同一 `TempLocation` 并发投递乱序块,把结果(无论成败)记进 `docs/discrepancies.md`,再决定这个配置项是保留、删除还是改语义。**在探针出结果之前不得写任何并发分块代码。**
+
+**(c) 单文件下载并发——这才是单文件提速的现实路径。** D41 已实测确认 `Range` 头工作正常(而文档里的 `offset` 参数在最后一个字节上差一位)。既然 `Range` 可用,就可以把一个大文件切成 N 段并发取、按偏移写入同一个目标文件。这是 `parallel_ranges` 的由来(默认 4)。仍需实测确认的两点:上游是否对并发连接数设限、以及 `BWExceeded` 在并发下的表现——同样是先探测再实现。
+
+**(d) 缓存带来的第三种并发:客户端↔网关 与 网关↔上游 彻底解耦。** 这其实是本次改造对用户感知速度提升最大的一项——客户端写入只受本地磁盘限制,上游速度不再挡在用户面前。
+
 - HTTP 连接复用:单一 `http.Transport`,合理的 `MaxIdleConnsPerHost`,开启 HTTP/2(若 upstream 支持)。
+- 缓存刷写有独立的 worker pool 与并发上限,不与前台请求争抢;刷写失败走 §4.5 的分类层决定重试与退避,**不得自行判断错误性质**。
 
 ### 10.3 元数据性能
 
@@ -702,27 +801,45 @@ Upstream 要求 `access_token` 放 URL query,这会出现在各种日志里。�
 | 版本 | 内容 |
 |---|---|
 | v1.0 | 核心存储 + daemon + CLI + Docker(已发布 v0.1.0) |
-| **v1.1** | **凭证与打包重构(本次 v1.2 白皮书修订的落地内容)**:加密 `.env` 取代 OS keyring、四平台矩阵、归档包裹目录、原地运行部署 |
-| **v1.2** | **桌面 GUI(macOS + Windows)**:见下方 §12.1.1 |
+| **v1.1** | 凭证与打包重构:加密 `.env` 取代 OS keyring、收窄平台矩阵、归档包裹目录、原地运行部署 |
+| **v1.2** | **缓存网关(§3.5)+ 内嵌 Web GUI(§12.1.1)+ 去掉 Windows(§8.1)** |
 | v1.3 | Users 写操作、Account Users 管理、User Groups(role=2 管理场景) |
 | v1.4 | Secure Folders(两阶段授权)、文件/文件夹密码保护全流程、Stats 带宽/用量报表 |
 | v1.5 | Notes 与 Tasks/Projects 模块(若有实际需求) |
-| v2.0 候选 | **WebDAV / FUSE 挂载前端**(把 OpenDrive 挂成本地盘)、**rclone backend 贡献**、S3 兼容网关、双向同步引擎(基于 DirUpdateTime 增量) |
+| v2.0 候选 | **WebDAV / FUSE 挂载前端**(把 OpenDrive 挂成本地盘)、**rclone backend 贡献**、S3 兼容 API(v1.2 的缓存网关已经铺好了一半的路)、双向同步引擎(基于 DirUpdateTime 增量) |
 
-#### 12.1.1 桌面 GUI(v1.2 规划)
+#### 12.1.1 Web GUI(v1.2 规划,取代原桌面客户端方案)
 
-**范围**:macOS 与 Windows 提供图形界面;**Linux 不做 GUI**(其典型部署是 headless 服务器,CLI + REST 已足够)。
+**选型结论:内嵌 Web UI,由 `opendrived` 自己在 `/ui` 提供服务。** 原计划是 macOS/Windows 各做一个桌面客户端,改为 Web 的理由是工作量差一个数量级:
 
-GUI 是 Bridge REST API 的**又一个客户端**,与 `odctl` 平级——不得绕过 daemon 直接调用 SDK,否则会出现两条凭证路径和两套错误措辞,前五个阶段建立的边界纪律会在这里破功。
+| | 桌面客户端 | 内嵌 Web UI |
+|---|---|---|
+| 构建 | 每平台一套工具链与打包 | 无——`go:embed` 打进现有二进制 |
+| 签名公证 | 每平台一份证书与流程 | 无 |
+| cgo | 多数 GUI 框架需要,会毁掉 `CGO_ENABLED=0` 的交叉编译 | 不需要 |
+| 与 daemon 通信 | 要新写一层 | 已有 REST + OpenAPI,直接用 |
+| 覆盖平台 | 只有做了的那几个 | 全部,Linux 白拿 |
+| 发布产物 | 额外的包 | 零新增 |
 
-功能:
+所以:**三个平台统一一套 Web UI**(Linux 虽然典型部署是 headless,但既然零成本就不必刻意排除——服务器上开个 SSH 端口转发看状态反而很实用)。
 
-1. **服务状态**:daemon 是否运行、`/v1/auth/status` 的账号与认证状态、配额用量(注意 D45 的单位换算已在 Bridge 层完成)。
-2. **凭证管理**:修改 OpenDrive 用户名/密码并写回加密 `.env`;密码被改后进入 `reauth_required` 时,这里是用户最自然的补救入口。
-3. **传输速率曲线**:消费 `/v1/jobs` 的 `speed` 字段绘制实时曲线。
-4. **Job 监控窗口**:列出进行中与历史任务的 state / bytes_done / bytes_total / error,支持取消。
+**技术约束**:纯静态资源(HTML/CSS/JS,不引入前端构建链;图表用一个轻量库或直接 canvas),`go:embed` 打进 `opendrived`,离线可用,不从 CDN 取任何东西——一个持有云盘凭证的本地服务不应该在启动时联网拉第三方脚本。
 
-技术选型待定,倾向系统托盘常驻 + 轻量 webview(复用 REST 与 JSON,避免引入重型 GUI 框架并保持 `CGO_ENABLED=0` 的交叉编译优势);若必须引入 cgo,则 GUI 单独成一个可选产物,不影响 daemon 与 CLI 的构建矩阵。
+**铁律不变**:GUI 是 Bridge REST API 的**又一个客户端**,与 `odctl` 平级,**不得绕过 daemon 直接调 SDK**。否则会出现两条凭证路径和两套错误措辞,前六个阶段建立的边界纪律会在这里破功。GUI 展示的每一句错误都应当直接来自 §4.5 错误信封的 `message` 字段,不做二次改写。
+
+**功能范围:**
+
+1. **服务状态**:`/v1/auth/status` 的账号、认证状态、token 到期、配额用量(D45 的单位换算已在 Bridge 层完成)。
+2. **认证**:首次配置与凭证更新——写回加密 `.env`。密码在别处被改、进入 `reauth_required` 时,这里是最自然的补救入口。
+3. **传输速率曲线**:消费 `/v1/jobs` 的 `speed` 绘制实时曲线。
+4. **Job 监控**:进行中与历史任务的 state / phase / bytes_done / bytes_total / error,支持取消。
+5. **缓存面板(v1.2 新增,§3.5)**:容量与水位、命中率、**`dirty_bytes` 与"是否可以安全关机"的明确指示**、对象列表、flush / refresh / 清空操作。第三项不是装饰——它是 §3.5.2 耐久性契约在界面上的兑现。
+
+**认证与暴露面**:
+
+- 默认 `127.0.0.1`,与 REST API 同一个监听端口和同一套 API key 规则。loopback 上 daemon 自动生成的 key 不强制(见 v1.1 修复),因此本机打开浏览器即用。
+- 非 loopback 监听时必须配置 API key,UI 显示一个输入框,key 存 `sessionStorage`(不是 `localStorage`)、**绝不放进 URL**——URL 会进浏览器历史、Referer 和日志,这正是 §9.4 一直在防的事。
+- 静态资源不设 cookie、不设 CORS;UI 与 API 同源,无需跨域。
 
 ### 12.2 API 漂移监控 Upstream Drift Watch
 
@@ -732,7 +849,7 @@ GUI 是 Bridge REST API 的**又一个客户端**,与 `odctl` 平级——不得
 
 - **版本策略**:SemVer;upstream 不兼容变更 → minor + 迁移说明;Bridge API 破坏性变更只在 major。
 - **支持窗口**:最新 minor 全量支持,前一 minor 仅安全修复。
-- **例行任务**:每月依赖升级 PR;每日 `govulncheck`;每季度全平台手动冒烟(尤其 macOS notarization 与 Windows 签名有效期);Go 版本跟随官方支持窗口(N 与 N-1)。
+- **例行任务**:每月依赖升级 PR;每日 `govulncheck`;每季度全平台手动冒烟(尤其 macOS notarization 有效期);Go 版本跟随官方支持窗口(N 与 N-1)。
 - **文档维护**:OpenAPI 规格由代码生成,防止文档漂移;README 快速上手 5 分钟内可完成 login→upload。
 
 ---
@@ -786,6 +903,19 @@ odctl share /Finance/2026/report.xlsx --expires 7d --max-uses 10
 5. 所有公开函数写 godoc;错误信息面向使用者,不泄漏内部路径与 token。
 
 ### E. 修订记录 Changelog
+
+**白皮书 v1.3 (2026-09-20)——对应产品 v1.2** — 缓存网关、Web GUI、平台收窄(Derek 试用后提出):
+
+> 版本号说明:本文件的「文档版本」与产品发布号不同步。白皮书 v1.2 对应产品 v1.1,白皮书 v1.3 对应产品 v1.2。正文中标注功能归属时一律用**产品版本号**,打 tag 以此为准。
+
+1. **§3.5 新增:缓存网关。** Bridge 从透明代理变为 S3 gateway 式的读写缓存——客户端只与本地网关交换数据,网关在后台与 OpenDrive 同步。本节的核心不是功能清单而是**耐久性契约**:write-back 使网关在一段时间内成为用户数据的**唯一持有者**,这是 v1.0–v1.2 从未承担过的责任。由此定下四条不可协商的规则——脏条目永不淘汰、journal 必须 fsync、用户必须能看见未刷写的量、关机必须 drain。§3.5.2 的风险对照表说明读缓存与写缓存的风险差一个数量级。
+2. **§4.4.1 新增缓存端点**(status / objects / flush / refresh / delete),并修订传输端点语义:write-back 下上传返回 **202** 而非 200,下载带 `X-Cache` 头,job 增加 `phase` 区分"客户端→网关"与"网关→上游"两段。§4.5 新增 `cache_full`(507)——宁可明确拒绝,也不丢已接收的数据。
+3. **§10.2 重写并发模型,并推翻 v1.0 的一处设想。** v1.0 把"单文件分块并发"列为可开启的实验特性;P3 的实测证据(D37 的 ``uploaded=0, chunk_offset=…`` 说明服务端维护线性写入游标,D35 的 `TotalWritten` 只计本块)指向上游只接受严格递增无空洞的写入。因此 `parallel_chunks` 默认值改为 1,并要求**先探测再实现**。单文件提速的现实路径改为下载方向的 `Range` 并发(D41 已证实 `Range` 可用),同样先探测。
+4. **§8.1:去掉 Windows,发布矩阵收窄为三个目标。** 理由不只是少发一个包:Windows 是唯一需要平行代码路径的平台(icacls ACL、Windows Service、zip、Authenticode),而 v1.2 的缓存网关会再引入一批路径与文件锁的平台差异。随之删除 `perm_windows.go`、`deploy/windows/`、CI 的 windows 组合,**CLAUDE.md 中"Windows 用 icacls 收紧 ACL"一条同时作废**。
+5. **§12.1.1:桌面客户端改为内嵌 Web GUI。** 按工作量选型——`go:embed` 进现有二进制,无新构建链、无签名、无 cgo、三平台通吃、零新增发布产物。铁律不变:GUI 是 REST API 的又一个客户端,不得绕过 daemon。新增缓存面板,其中"是否可以安全关机"的指示是 §3.5.2 耐久性契约在界面上的兑现。
+6. §3.2 仓库结构:新增 `internal/ui/` 与 `internal/datacache/`;后者与既有的 `internal/cache/`(元数据缓存)是**两件不同的事**,命名与配置项不得混用。
+
+
 
 **v1.2 (2026-07-31)** — v0.1.0 实机试用后的部署与凭证重构(Derek 亲自走通首次部署后提出):
 
