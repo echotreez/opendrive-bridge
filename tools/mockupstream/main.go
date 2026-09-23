@@ -29,6 +29,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -125,13 +126,19 @@ func handle(w http.ResponseWriter, r *http.Request) {
 
 	case strings.Contains(path, "upload_file_chunk"):
 		// TotalWritten is this chunk's size, not the running total (D35). Echoing
-		// the declared chunk_size reproduces that exactly, and a mock that
-		// returned a cumulative figure would let a regression through.
-		n := r.URL.Query().Get("chunk_size")
-		if n == "" {
-			n = "0"
+		// the declared chunk_size reproduces that exactly, and a mock that returned
+		// a cumulative figure would let a regression through.
+		//
+		// Parsed rather than echoed as text. Two reasons, and gosec pointed at the
+		// second: a malformed chunk_size would otherwise produce invalid JSON, which
+		// would confuse a test rather than catch a bug — and copying a query
+		// parameter into a response body is reflection, which is a habit worth not
+		// having even in a test double.
+		n, err := strconv.ParseInt(r.URL.Query().Get("chunk_size"), 10, 64)
+		if err != nil || n < 0 {
+			n = 0
 		}
-		_, _ = fmt.Fprintf(w, `{"TotalWritten":%s}`, n)
+		_, _ = fmt.Fprintf(w, `{"TotalWritten":%d}`, n)
 
 	case strings.Contains(path, "close_file_upload"):
 		// The hash the client declared is echoed back as the stored file's hash.
