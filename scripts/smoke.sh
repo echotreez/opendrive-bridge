@@ -25,11 +25,17 @@ WORK="$(mktemp -d)"
 FAIL=0
 
 cleanup() {
+  # Keep the evidence when something went wrong. A smoke test that deletes the
+  # logs of its own failure is a smoke test you debug twice.
+  if [ "${FAIL:-0}" -ne 0 ]; then
+    echo "smoke failed; leaving the working directory at $WORK"
+    KEEP_WORK=1
+  fi
   # Both waits are there to keep the shell from printing "Terminated" after the
   # result line, where it reads like a failure in a run that passed.
   if [ -n "${DPID:-}" ]; then kill "$DPID" 2>/dev/null; wait "$DPID" 2>/dev/null; fi
   if [ -n "${MPID:-}" ]; then kill "$MPID" 2>/dev/null; wait "$MPID" 2>/dev/null; fi
-  rm -rf "$WORK"
+  [ -n "${KEEP_WORK:-}" ] || rm -rf "$WORK"
 }
 trap cleanup EXIT
 
@@ -65,9 +71,14 @@ say "the daemon starts and signs in"
 PORT=9761
 # An ephemeral credential store, chosen explicitly: this is a throwaway run and
 # the daemon refuses to guess that for itself (§9.2).
+# The caching gateway is on for this run. "It compiles" is not evidence that it
+# works on a platform (§8.1's standing rule), and the gateway is the first part of
+# this program that holds the user's data — so it is exercised here, on the real
+# daemon, on every platform that has a runner, rather than only in unit tests on
+# whatever machine happened to run them.
 ODB_BASE_URL="http://$UPSTREAM/api/v1" \
   "$OPENDRIVED" --addr "127.0.0.1:$PORT" --keystore ephemeral --ephemeral \
-  --state-dir "$WORK/jobs" --log-level error &
+  --state-dir "$WORK/jobs" --cache-dir "$WORK/cache" --log-level error &
 DPID=$!
 
 for _ in $(seq 1 50); do
@@ -89,6 +100,94 @@ grep -q "Smoke" "$WORK/ls.txt"; check $? "ls / shows the folder"
 
 "$ODCTL" --addr "127.0.0.1:$PORT" ls /Smoke | tee "$WORK/ls2.txt"
 grep -q "hello.txt" "$WORK/ls2.txt"; check $? "ls /Smoke shows the file"
+
+say "the caching gateway"
+# The gateway is reached through the streaming endpoints, so this part uses curl
+# rather than odctl. That is not a stylistic choice and it is worth stating plainly:
+# `odctl up` and `odctl down` go through the *job* endpoints, which do not use the
+# cache at all yet. See the note in internal/server/cache_transfers.go — coupling
+# the job engine to the gateway is the piece that is not built, and until it is, the
+# cache is only reachable by a caller that speaks HTTP.
+if ! command -v curl >/dev/null 2>&1; then
+  say "curl is not available; skipping the cache checks"
+else
+  API="http://127.0.0.1:$PORT/v1"
+
+  # Nothing written yet, so nothing is outstanding and it says so. The wording
+  # matters as much as the number: this is the line a person reads before turning a
+  # machine off (§3.5.2 rule 3).
+  "$ODCTL" --addr "127.0.0.1:$PORT" cache status | tee "$WORK/cache0.txt"
+  grep -qi "safe to stop the bridge" "$WORK/cache0.txt"
+  check $? "an empty cache reports itself safe to stop"
+
+  # A write-back upload: the body lands in the cache and the answer is 202 —
+  # accepted here, not yet on OpenDrive. A 201 would mean the opposite, so the
+  # status code is checked rather than just the success.
+  printf 'cached content for the smoke test\n' > "$WORK/cached.txt"
+  code=$(curl -sS -o "$WORK/cacheup.json" -w '%{http_code}' \
+    -X PUT --data-binary "@$WORK/cached.txt" \
+    "$API/upload/stream?path=/Smoke/cached.txt&overwrite=true")
+  [ "$code" = "202" ]
+  check $? "a write through the gateway answers 202 (got $code)"
+  sed 's/^/      /' "$WORK/cacheup.json"
+  grep -q '"cache_state":"dirty"' "$WORK/cacheup.json"
+  check $? "the response says the file is not on OpenDrive yet"
+
+  # It is readable at once, which is the read-after-write consistency §3.5.3 offers
+  # against upstream's own delay (D44) — and it is a HIT, from this disk.
+  hdr=$(curl -sS -D - -o "$WORK/readback.txt" "$API/download/stream?path=/Smoke/cached.txt")
+  printf '%s' "$hdr" | grep -qi "^X-Cache: HIT"
+  check $? "a just-written file reads back from the cache"
+  cmp -s "$WORK/cached.txt" "$WORK/readback.txt"
+  check $? "the bytes read back are the bytes written"
+
+  # The object listing names it. Deliberately not `--unsent`: against a mock on
+  # loopback the flush can finish before this line runs, so requiring it to still be
+  # outstanding would be a race — and the flusher being fast is not a failure. What
+  # is worth asserting is that the listing describes state in words a person can
+  # read rather than in the API's own vocabulary.
+  "$ODCTL" --addr "127.0.0.1:$PORT" cache objects | tee "$WORK/cacheobjs.txt"
+  grep -q "/Smoke/cached.txt" "$WORK/cacheobjs.txt"
+  check $? "the object listing names the file"
+  grep -qE "NOT uploaded yet|on OpenDrive" "$WORK/cacheobjs.txt"
+  check $? "the listing says what state it is in, in plain words"
+  grep -q "dirty" "$WORK/cacheobjs.txt" && { echo "    FAIL: an API state name leaked into the listing"; FAIL=1; }
+
+  # Flushing with --wait is the contract: it returns when nothing is left.
+  "$ODCTL" --addr "127.0.0.1:$PORT" cache flush --wait > "$WORK/cacheflush.txt" 2>&1
+  check $? "cache flush --wait returns"
+  grep -qi "safe to stop the bridge" "$WORK/cacheflush.txt"
+  check $? "after a flush it reports itself safe to stop"
+
+  "$ODCTL" --addr "127.0.0.1:$PORT" cache status > "$WORK/cache2.txt" 2>&1
+  grep -qi "NOT safe" "$WORK/cache2.txt" && { echo "    FAIL: still not safe after a flush"; FAIL=1; }
+  grep -q "1 file" "$WORK/cache2.txt" || true
+
+  # A read of something that was never written is a MISS, and fills the cache, so
+  # the next read of the same path is a HIT. That is the read-through half.
+  hdr=$(curl -sS -D - -o "$WORK/first.txt" "$API/download/stream?path=/Smoke/hello.txt")
+  printf '%s' "$hdr" | grep -qi "^X-Cache: MISS"
+  check $? "the first read of a file is a miss"
+  hdr=$(curl -sS -D - -o "$WORK/second.txt" "$API/download/stream?path=/Smoke/hello.txt")
+  printf '%s' "$hdr" | grep -qi "^X-Cache: HIT"
+  check $? "the second read is served from the cache"
+  cmp -s "$WORK/first.txt" "$WORK/second.txt"
+  check $? "the cached copy matches what was downloaded"
+
+  # Clearing works once nothing is outstanding.
+  "$ODCTL" --addr "127.0.0.1:$PORT" cache clear > "$WORK/cacheclear.txt" 2>&1
+  check $? "cache clear"
+
+  # The directory holds the user's files in the clear, so the mode is the whole of
+  # its protection (§3.5.4).
+  # GNU stat first, BSD second. -f is "format" on BSD and "filesystem status" on
+  # GNU, so putting BSD first made GNU *succeed* at printing filesystem details and
+  # the fallback never ran — the check then compared "700" against a block of text
+  # and failed on Linux only.
+  mode=$(stat -c '%a' "$WORK/cache" 2>/dev/null || stat -f '%Lp' "$WORK/cache" 2>/dev/null)
+  [ "$mode" = "700" ]
+  check $? "the cache directory is 0700 (got ${mode:-unknown})"
+fi
 
 say "a failure reports itself properly"
 "$ODCTL" --addr "127.0.0.1:$PORT" stat /Smoke/nope.txt > "$WORK/err.txt" 2>&1

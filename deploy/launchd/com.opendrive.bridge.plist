@@ -2,9 +2,11 @@
 <!--
   launchd agent for the OpenDrive Bridge (whitepaper §8.2).
 
-  Install with `odctl daemon install`, or by hand:
+  Install with `odctl daemon install`, which writes the real paths in for you.
+  By hand:
 
-    cp com.opendrive.bridge.plist ~/Library/LaunchAgents/
+    sed "s#/path/to/opendrive-bridge#$PWD#g" com.opendrive.bridge.plist \
+      > ~/Library/LaunchAgents/com.opendrive.bridge.plist
     launchctl load ~/Library/LaunchAgents/com.opendrive.bridge.plist
 
   This is a LaunchAgent, not a LaunchDaemon, and deliberately so: an agent runs
@@ -21,10 +23,24 @@
     <key>Label</key>
     <string>com.opendrive.bridge</string>
 
+    <!-- The absolute path to the folder you unpacked, not /usr/local/bin.
+
+         This template said /usr/local/bin/opendrived until now, which had been
+         wrong since v1.1 stopped installing anything there: §8.2 runs the
+         programs in place, so that .env sits beside them and uninstalling is
+         deleting a folder. A plist pointing at a path that does not exist fails
+         with "no such file", which at least says so — but it says it about the
+         wrong thing, and somebody would go looking for a broken install. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/opendrived</string>
+        <string>/path/to/opendrive-bridge/opendrived</string>
     </array>
+
+    <!-- Without this the daemon starts in / and looks for a .env that is not
+         there. launchd inherits no shell, so the same reasoning as the systemd
+         unit applies: both paths have to be spelled out. -->
+    <key>WorkingDirectory</key>
+    <string>/path/to/opendrive-bridge</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -39,6 +55,24 @@
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
+    <!-- Long enough for the cache to finish uploading before launchd loses
+         patience (§3.5.2 rule 4).
+
+         launchd sends SIGTERM and then SIGKILL after ExitTimeOut, which defaults
+         to twenty seconds. With the caching gateway on, SIGTERM is the daemon's
+         cue to flush files OpenDrive does not have yet, and it allows itself two
+         minutes for that by default (--cache-drain-timeout). Twenty seconds would
+         cut the drain short and leave files on disk that the user had been told
+         were stored — and, worse, kill the process before it could write down
+         which ones.
+
+         So this is deliberately larger than the drain's own budget: the daemon
+         should be the thing that decides it has run out of time, because it is the
+         thing that can then name what it did not finish. If you raise
+         --cache-drain-timeout, raise this too. -->
+    <key>ExitTimeOut</key>
+    <integer>300</integer>
+
     <key>ProcessType</key>
     <string>Background</string>
 
@@ -48,13 +82,30 @@
              needed here. -->
         <key>ODB_LOG_LEVEL</key>
         <string>info</string>
+
+        <!-- The caching gateway is off unless you give it a directory. Uncomment
+             to turn it on; ./cache is inside the folder you unpacked, alongside
+             .env, which is what §3.4 means by everything being in one place.
+
+             Note what write-back means before you enable it: an upload is
+             answered as soon as the file is on this disk, and for a while after
+             that the bridge is the only place it exists. `odctl cache status`
+             says whether anything is outstanding. The cache directory is *not*
+             encrypted, unlike .env.
+        <key>ODB_CACHE_DIR</key>
+        <string>/path/to/opendrive-bridge/cache</string>
+        -->
     </dict>
 
-    <!-- Both streams go to one file per stream under ~/Library/Logs, which is
-         where Console.app looks. Tokens are removed before anything is written. -->
+    <!-- Both streams go to one file in the folder you unpacked, which is where
+         §8.2 puts everything else. It was /tmp until now, under a comment claiming
+         ~/Library/Logs — the comment and the value disagreed, and /tmp is somewhere
+         macOS empties. `odctl daemon install` does not use this file (it asks
+         launchd to generate one), so this only bites somebody installing by hand,
+         which is exactly the person reading it. -->
     <key>StandardOutPath</key>
-    <string>/tmp/opendrive-bridge.log</string>
+    <string>/path/to/opendrive-bridge/opendrive-bridge.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/opendrive-bridge.log</string>
+    <string>/path/to/opendrive-bridge/opendrive-bridge.log</string>
 </dict>
 </plist>

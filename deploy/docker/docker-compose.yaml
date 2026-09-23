@@ -11,6 +11,31 @@
 #
 # Two things to keep safe, and keep together: .env and .env.key. Either one on
 # its own is useless.
+#
+# ---------------------------------------------------------------------------
+# READ THIS BEFORE CHANGING THE VOLUMES (§8.3.1)
+#
+# `odb-cache` below is a named volume and it must stay one. With the caching
+# gateway in write-back mode the bridge answers a write with 202 as soon as the
+# bytes are on its disk and in its journal — before OpenDrive has them. For a
+# while, that directory is the only place the user's file exists.
+#
+# A container's writable layer is disposable by design, and deleting a container
+# to make a new one is a routine thing to do rather than an accident. If the cache
+# lived in that layer, then `docker compose down`, `docker rm`, an image upgrade
+# or an orchestrator moving the container would destroy data the bridge had
+# already told its client was stored.
+#
+# So the volume is here by default rather than mentioned in the documentation as
+# something to remember. The daemon also checks at startup and reports
+# `durable: false` on /v1/cache/status if the cache directory is not a mount — but
+# a default configuration has to be a safe one, and a check is a second line of
+# defence, not the first.
+#
+# If you would rather keep nothing here that OpenDrive does not already have, set
+# ODB_CACHE_WRITE_BACK=false. The gateway becomes a read cache, nothing is ever
+# unsent, and the whole question goes away.
+# ---------------------------------------------------------------------------
 services:
   opendrive-bridge:
     image: ghcr.io/echotreez/opendrive-bridge:latest
@@ -34,6 +59,14 @@ services:
       ODB_API_KEY: ${ODB_API_KEY:?set ODB_API_KEY, e.g. openssl rand -hex 32}
       ODB_LOG_LEVEL: info
 
+      # The caching gateway (§3.5). The directory must match the volume below.
+      ODB_CACHE_DIR: /data/cache
+      # Write-back: a write is answered as soon as it is on the bridge's disk,
+      # and uploaded in the background. Set this to false to write straight
+      # through, which is slower for the client and keeps nothing here that
+      # OpenDrive does not have.
+      ODB_CACHE_WRITE_BACK: "true"
+
     volumes:
       # .env is mounted WRITABLE, and that is not an oversight. The first run
       # rewrites it encrypted, and every token rotation writes it again. Mounted
@@ -44,6 +77,14 @@ services:
       - ./.env.key:/data/.env.key:ro
       # Transfer state: job progress, resume points.
       - odb-state:/data/jobs
+      # The cache. A named volume, deliberately — see the note at the top of this
+      # file. In write-back mode this directory holds data OpenDrive does not have
+      # yet, so it must outlive the container.
+      #
+      # It also holds the user's files in the clear. Unlike .env, nothing here is
+      # encrypted: the protection is the 0700 mode the daemon sets and whatever
+      # the underlying disk provides.
+      - odb-cache:/data/cache
 
     # The image has no shell, so this runs the binary. It reports healthy as soon
     # as the daemon answers — including when it is not signed in yet, which is a
@@ -64,3 +105,4 @@ services:
 
 volumes:
   odb-state:
+  odb-cache:

@@ -45,6 +45,23 @@ WorkingDirectory=/path/to/opendrive-bridge
 Restart=on-failure
 RestartSec=5s
 
+# Long enough for the cache to finish uploading before systemd loses patience
+# (§3.5.2 rule 4).
+#
+# This matters as soon as the caching gateway is on. With write-back, SIGTERM is
+# the daemon's cue to flush files OpenDrive does not have yet, and the default it
+# allows itself for that is two minutes (--cache-drain-timeout). systemd's own
+# default here is ninety seconds, after which it sends SIGKILL — which would cut
+# the drain short and leave files on disk that the user was told had been stored.
+#
+# So this is deliberately more than the drain's own budget: the daemon should be
+# the thing that decides it has run out of time, because it is the thing that can
+# then write down which files it did not finish. systemd killing it first produces
+# the same data loss with no record of what was lost.
+#
+# If you raise --cache-drain-timeout, raise this too.
+TimeoutStopSec=5min
+
 # The daemon holds a password that unlocks somebody's whole cloud storage, so it
 # gets as little of the machine as it can work with.
 #
@@ -69,6 +86,10 @@ NoNewPrivileges=yes
 # name that folder explicitly — strict mode makes even $HOME read-only, and the
 # daemon writes .env on first run and again on every token rotation.
 ProtectSystem=strict
+# One entry covers .env, the job state and the cache directory, because §8.2 puts
+# all three in the folder the user unpacked. A cache directory placed anywhere
+# else — another disk, say — needs its own ReadWritePaths line, and without one
+# the daemon will report that it cannot write there rather than failing obscurely.
 ReadWritePaths=/path/to/opendrive-bridge
 PrivateTmp=yes
 

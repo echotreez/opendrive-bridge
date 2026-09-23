@@ -35,6 +35,10 @@ tags:
   - name: files
   - name: transfers
   - name: sharing
+  - name: cache
+    description: |
+      The caching gateway (§3.5). Not the metadata cache — this one holds file
+      contents, and in write-back mode it holds bytes OpenDrive does not have yet.
 
 paths:
   /v1/health:
@@ -341,10 +345,28 @@ paths:
     put:
       tags: [transfers]
       operationId: uploadStream
-      summary: Upload the request body as the file, synchronously.
+      summary: Upload the request body as the file.
       description: |
-        Needs a Content-Length: OpenDrive is told the size before the first byte
-        is sent, so it cannot be discovered as the body arrives.
+        Without the caching gateway this is synchronous and answers 201 when the
+        bytes are on OpenDrive. It needs a Content-Length, because OpenDrive is
+        told the size before the first byte is sent and it cannot be discovered as
+        the body arrives.
+
+        With the gateway in write-back mode (§3.5) it answers **202** instead, and
+        the difference is the durability contract rather than a detail:
+
+          * 201 means OpenDrive has the file.
+          * 202 means the bridge has it, on its own disk, recorded in a journal
+            that was flushed before this response was written — and OpenDrive does
+            not have it yet.
+
+        A 202 carries `cache_state: "dirty"`. Watch `GET /v1/cache/status` for
+        `dirty_objects` and `safe_to_shut_down`, or block until it is sent with
+        `POST /v1/cache/flush` and `wait: true`.
+
+        507 `cache_full` means the gateway is already holding as much unsent data
+        as it is allowed to. Nothing was lost; nothing more can be accepted until
+        some of it reaches OpenDrive.
       parameters:
         - { $ref: "#/components/parameters/Path" }
         - name: overwrite
@@ -357,6 +379,12 @@ paths:
             schema: { type: string, format: binary }
       responses:
         "201": { $ref: "#/components/responses/Ok" }
+        "202":
+          description: |
+            Accepted into the cache and not yet on OpenDrive (write-back only).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CachedWrite" }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -396,11 +424,24 @@ paths:
       tags: [transfers]
       operationId: downloadStream
       summary: Send the file as the response body.
+      description: |
+        With the caching gateway enabled the response carries `X-Cache: HIT` when
+        the bytes came from the bridge's own disk and `X-Cache: MISS` when they
+        came from OpenDrive. A miss also stores the file, so the next read is a
+        hit.
+
+        A file that was written through the gateway and has not been uploaded yet
+        is a hit like any other. That is deliberate: it gives read-after-write
+        consistency, which OpenDrive itself does not guarantee (D44).
       parameters:
         - { $ref: "#/components/parameters/Path" }
       responses:
         "200":
           description: The file content.
+          headers:
+            X-Cache:
+              description: Whether the bytes came from the cache or from OpenDrive.
+              schema: { type: string, enum: [HIT, MISS] }
           content:
             application/octet-stream:
               schema: { type: string, format: binary }
@@ -483,6 +524,131 @@ paths:
               schema: { $ref: "#/components/schemas/Job" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/cache/status:
+    get:
+      tags: [cache]
+      operationId: cacheStatus
+      summary: What the caching gateway is holding, and whether it is safe to stop.
+      description: |
+        The numbers a person needs before they turn the machine off (§3.5.2,
+        rule 3).
+
+        In write-back mode a write is answered as soon as the bytes are on the
+        bridge's disk and in its journal. For a while after that, the bridge is
+        the **only** place that file exists. `dirty_objects` and `dirty_bytes`
+        say how much is in that state, and `safe_to_shut_down` is the plain
+        answer computed from them — computed here, once, so that the CLI, the web
+        UI and anything else cannot each derive a different answer.
+
+        `durable` is false when the gateway is running in a container whose cache
+        directory is not on a persistent volume (§8.3.1). Data that has not
+        reached OpenDrive is lost when such a container is removed, and removing a
+        container is routine. `durability_note` says so in a sentence.
+      responses:
+        "200":
+          description: The gateway's state. `enabled` is false when it is switched off.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CacheStatus" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/cache/objects:
+    get:
+      tags: [cache]
+      operationId: cacheObjects
+      summary: What is in the cache, most recently used first.
+      responses:
+        "200":
+          description: The cached objects.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  objects:
+                    type: array
+                    items: { $ref: "#/components/schemas/CacheObject" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/cache/flush:
+    post:
+      tags: [cache]
+      operationId: cacheFlush
+      summary: Send unsent objects to OpenDrive now.
+      description: |
+        With `wait: true` the request blocks until nothing is unsent, which is
+        what `odctl cache flush --wait` uses. It is bounded by the request's own
+        lifetime and by nothing else: how long to wait for your own data to reach
+        OpenDrive is your decision.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                  description: One object; omit for everything unsent.
+                wait:
+                  type: boolean
+                  description: Block until there is nothing unsent left.
+      responses:
+        "200":
+          description: The gateway's state after flushing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CacheStatus" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/cache/refresh:
+    post:
+      tags: [cache]
+      operationId: cacheRefresh
+      summary: Forget one cached object so the next read goes back to OpenDrive.
+      description: |
+        Refused with 409 for an object that has not been uploaded yet. Discarding
+        one would not be a cache operation — it would be deleting the only copy of
+        the file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  /v1/cache:
+    delete:
+      tags: [cache]
+      operationId: cacheClear
+      summary: Empty the cache of everything OpenDrive already has.
+      description: |
+        Refused outright with 409 if anything is still waiting to be uploaded —
+        it does not clear what it can. A caller who asked to empty the cache
+        should not have to discover afterwards that it is not empty.
+      responses:
+        "200":
+          description: The gateway's state after clearing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CacheStatus" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
 
   /v1/share/link:
@@ -620,6 +786,8 @@ components:
                 - invalid_response
                 - invalid_request
                 - refresh_token_failed
+                - cache_full
+                - cache_disabled
             http: { type: integer }
             message:
               type: string
@@ -632,6 +800,91 @@ components:
               properties:
                 code: { type: integer }
                 message: { type: string }
+
+    CachedWrite:
+      type: object
+      description: |
+        The 202 from a write-back upload. The bytes are on the bridge's disk and
+        recorded in its journal; OpenDrive does not have them yet.
+      required: [path, size, cache_state]
+      properties:
+        path: { type: string }
+        size: { type: integer }
+        md5:
+          type: string
+          description: Of the bytes as stored here, computed while they arrived.
+        cache_state: { type: string, enum: [dirty] }
+        phase: { type: string, enum: [uploading] }
+        note:
+          type: string
+          description: The same thing in a sentence, for a person reading a log.
+
+    CacheStatus:
+      type: object
+      required: [enabled, safe_to_shut_down]
+      properties:
+        enabled:
+          type: boolean
+          description: False when the gateway is switched off; every other field is then zero.
+        write_back: { type: boolean }
+        dir: { type: string }
+        bytes: { type: integer }
+        max_bytes: { type: integer }
+        objects: { type: integer }
+        dirty_bytes:
+          type: integer
+          description: Bytes held here that OpenDrive does not have.
+        dirty_objects: { type: integer }
+        max_dirty_bytes:
+          type: integer
+          description: |
+            Past this, writes are refused with 507 `cache_full` rather than
+            evicting something nobody else has a copy of.
+        oldest_dirty_age_seconds:
+          type: number
+          description: |
+            How long the longest-waiting unsent object has waited. A number that
+            keeps growing means flushing is stuck rather than slow.
+        safe_to_shut_down:
+          type: boolean
+          description: |
+            True when nothing is waiting to be uploaded. This is the answer the
+            question actually has, computed once here so that every client agrees.
+        hits: { type: integer }
+        misses: { type: integer }
+        hit_rate: { type: number }
+        durable:
+          type: boolean
+          description: |
+            False when the cache directory does not look like it will outlive the
+            process — a container writable layer rather than a volume (§8.3.1).
+        durability_note: { type: string }
+
+    CacheObject:
+      type: object
+      required: [remote_path, size, state]
+      properties:
+        remote_path: { type: string }
+        size: { type: integer }
+        hash: { type: string }
+        state:
+          type: string
+          enum: [dirty, uploading, clean]
+          description: |
+            `dirty` and `uploading` both mean OpenDrive does not have it yet. An
+            upload in flight has not arrived, and a crash brings it back.
+        folder_id: { type: string }
+        name: { type: string }
+        upstream_file_id: { type: string }
+        stored_at: { type: string, format: date-time }
+        last_access: { type: string, format: date-time }
+        flush_attempts: { type: integer }
+        last_error:
+          type: string
+          description: |
+            Why the last upload failed, in the classification layer's wording —
+            never OpenDrive's, which for this class of failure is known to be
+            misleading (D39, D40).
 
     Entry:
       type: object
@@ -709,6 +962,19 @@ components:
         state:
           type: string
           enum: [queued, running, succeeded, failed, cancelled]
+        phase:
+          type: string
+          enum: [caching, uploading, downloading]
+          description: |
+            Which leg of the transfer this is. With the caching gateway in front,
+            a write has two segments that fail and progress independently —
+            client to gateway, then gateway to OpenDrive — and one progress bar
+            covering both would be wrong in whichever direction it was wrong.
+
+            A job the engine owns moves bytes between this machine and OpenDrive,
+            so it is `uploading` or `downloading` from start to finish. A write
+            that landed in the cache reports its second leg through
+            /v1/cache/objects rather than as a job.
         local_path: { type: string }
         remote_path: { type: string }
         bytes_done: { type: integer }

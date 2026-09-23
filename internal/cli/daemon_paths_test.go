@@ -1,6 +1,10 @@
 package cli
 
 import (
+	"strconv"
+	"text/template"
+
+	"github.com/echotreez/opendrive-bridge/internal/datacache"
 	"os"
 	"path/filepath"
 	"strings"
@@ -236,4 +240,66 @@ func runCLI(t *testing.T, args ...string) (int, string, string) {
 	opts.SetOutput(&out, &errOut)
 	code := Execute(args, opts)
 	return code, out.String(), errOut.String()
+}
+
+// The service definition odctl installs has to allow the cache time to drain.
+//
+// A constant nobody checks is a wish. These assert the two templates carry the
+// directive, that it is the same number as the Go constant, and — the part worth
+// the test — that it is larger than the cache's own drain budget, because the
+// daemon must be the thing that decides it has run out of time. If it is killed
+// first, the files it could not finish are lost with no record of which they were.
+func TestTheInstalledServiceAllowsTheCacheTimeToDrain(t *testing.T) {
+	if stopTimeoutSecondsLiteral != strconv.Itoa(stopTimeoutSeconds) {
+		t.Fatalf("the templates say %s seconds and the constant says %d",
+			stopTimeoutSecondsLiteral, stopTimeoutSeconds)
+	}
+
+	// Larger than datacache's DefaultDrainTimeout, with room to spare. If somebody
+	// raises the drain default without raising this, the service manager becomes
+	// the thing that ends the drain, and it ends it silently.
+	drain := int(datacache.DefaultDrainTimeout.Seconds())
+	if stopTimeoutSeconds <= drain {
+		t.Errorf("the service stop timeout is %ds and the cache's drain budget is %ds; "+
+			"the service manager would kill the daemon before it could report what it "+
+			"had not finished", stopTimeoutSeconds, drain)
+	}
+
+	if !strings.Contains(systemdUserUnit, "TimeoutStopSec="+stopTimeoutSecondsLiteral) {
+		t.Error("the systemd unit odctl writes has no TimeoutStopSec")
+	}
+	if !strings.Contains(launchdAgent, "<key>ExitTimeOut</key>") ||
+		!strings.Contains(launchdAgent, "<integer>"+stopTimeoutSecondsLiteral+"</integer>") {
+		t.Error("the launchd plist odctl writes has no ExitTimeOut")
+	}
+
+	// Both templates must still be the shape the library expects: ExecStart and
+	// ProgramArguments are what actually start the daemon, and a copy that lost one
+	// would install a service that does nothing.
+	for _, want := range []string{"ExecStart={{.Path|cmdEscape}}", "WorkingDirectory"} {
+		if !strings.Contains(systemdUserUnit, want) {
+			t.Errorf("the systemd template no longer contains %q", want)
+		}
+	}
+	for _, want := range []string{"<key>ProgramArguments</key>", "{{html .Path}}", "WorkingDirectory"} {
+		if !strings.Contains(launchdAgent, want) {
+			t.Errorf("the launchd template no longer contains %q", want)
+		}
+	}
+}
+
+// And the templates parse as the templates the library will execute. A syntax
+// error would only surface when somebody ran `daemon install`.
+func TestTheServiceTemplatesParse(t *testing.T) {
+	funcs := template.FuncMap{
+		"cmd":       func(s string) string { return s },
+		"cmdEscape": func(s string) string { return s },
+		"bool":      func(b bool) string { return "true" },
+	}
+	if _, err := template.New("systemd").Funcs(funcs).Parse(systemdUserUnit); err != nil {
+		t.Errorf("the systemd template does not parse: %v", err)
+	}
+	if _, err := template.New("launchd").Funcs(funcs).Parse(launchdAgent); err != nil {
+		t.Errorf("the launchd template does not parse: %v", err)
+	}
 }

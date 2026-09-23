@@ -228,7 +228,95 @@ Four things worth getting right:
 
 ---
 
-## 5. The credential files
+## 5. The local cache
+
+Off by default. Turn it on by giving it a directory:
+
+```bash
+./opendrived --cache-dir ./cache
+```
+
+It does two different things, and the second one changes what a successful upload
+means, so it is worth a minute.
+
+**Reading** is the easy half. A file you have read once is served from your own
+disk the next time, and `X-Cache: HIT` on the response says so. Losing the cache
+costs a download; nothing else.
+
+**Writing** is the half to understand. With write-back on — the default when the
+cache is on — `odctl up` and `PUT /v1/upload/stream` come back as soon as the file
+is on the bridge's disk, and the bridge uploads it to OpenDrive afterwards. Your
+script gets on with its work instead of waiting for the network.
+
+The cost is that for a while, **the bridge is the only place that file exists.**
+Everything below follows from that one sentence.
+
+### Is it safe to stop?
+
+```bash
+./odctl cache status
+```
+
+The last line says so in words — not a number to interpret:
+
+```
+Not yet on OpenDrive: 41.2 MB in 3 file(s), limit 5.0 GB
+Longest wait:         12s
+
+NOT safe to stop the bridge yet: 41.2 MB has not reached OpenDrive.
+Run `odctl cache flush --wait` to send it now.
+```
+
+`odctl cache flush --wait` returns when there is nothing left. `odctl cache
+objects --unsent` lists what is outstanding, and why, if an upload keeps failing.
+
+Stopping the service is handled for you: on SIGTERM the daemon stops accepting
+writes, finishes uploading what it can, and only then exits. If it runs out of
+time it writes one log line per unfinished file, naming each one and where its
+data is, so nothing vanishes without a record. `TimeoutStopSec` in the systemd
+unit is set high enough to let that happen.
+
+### What it will not do
+
+- **It never discards a file to make room.** Under capacity pressure only files
+  OpenDrive already has are evicted. If the unsent data reaches
+  `--cache-max-dirty-bytes`, new writes are **refused** — HTTP 507, and a message
+  saying nothing was lost — rather than something being thrown away.
+- **`cache refresh` and `cache clear` refuse to touch anything unsent.** They
+  answer 409 and say what is in the way.
+- **A crash loses nothing that was acknowledged.** Every write is recorded in a
+  journal that is flushed to the platter before the bridge answers, so a restart
+  finds the unsent files and re-queues them. The only thing a crash costs is a
+  write that was still in flight, which was never acknowledged.
+
+### The cache directory is not encrypted
+
+`.env` is encrypted. **The cache is not.** It holds your files as they are,
+protected by the directory's permissions — the bridge sets 0700, so only the
+account running the bridge can read it — and by whatever encryption the disk
+itself provides. If that is not enough for the files you work with, either leave
+the cache off or put it on an encrypted volume.
+
+### In a container
+
+Put the cache on a named volume. A container's own filesystem is disposable and
+recreating a container is routine, so a cache inside it would take unsent files
+with it. `deploy/docker/docker-compose.yaml` does this by default; §8.3.1 of the
+whitepaper has the full argument. The daemon also checks at startup and reports
+`durable: false` on `/v1/cache/status`, which `odctl cache status` prints as a
+warning — but a default that is right beats a warning that is read.
+
+### Turning it off again
+
+`--cache-write-back=false` keeps the read cache and sends writes straight to
+OpenDrive, which is the honest setting anywhere the cache directory might not
+survive. Removing `--cache-dir` switches the whole thing off. Neither loses
+anything: if files are still waiting when you turn write-back off, the daemon says
+so at startup and they stay on disk until you turn it back on.
+
+---
+
+## 6. The credential files
 
 Two files, in the folder you unpacked, on every platform:
 
@@ -261,7 +349,7 @@ start.
 
 ---
 
-## 6. When something is wrong
+## 7. When something is wrong
 
 Every message the bridge produces is meant to be actionable on its own. If one
 is not, that is a bug worth reporting.
@@ -304,7 +392,7 @@ nothing behind.
 
 ---
 
-## 7. Using it from your own programs
+## 8. Using it from your own programs
 
 The daemon is an ordinary HTTP API on `127.0.0.1:9750`; the full specification is
 `docs/bridge-openapi.yaml`, which you can hand to most code generators.
