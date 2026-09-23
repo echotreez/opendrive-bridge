@@ -523,6 +523,98 @@ jobs:
           echo "the healthcheck never settled"
           exit 1
 
+      # The caching gateway in a container (§8.3.1). Four measurements, each of a
+      # claim the documentation makes and nothing had checked:
+      #   1. a named volume works (the image's ownership of /data/cache is what a
+      #      fresh volume inherits, and it used to be root's);
+      #   2. a host directory bind-mounted in works, once chowned to 65532;
+      #   3. without the chown it refuses with a sentence, not a crash;
+      #   4. two containers sharing one cache directory cannot both run.
+      # All four report durable:true or false through the API, because that is the
+      # figure the daemon uses to warn about a cache that will not survive.
+
+      - name: "Cache on a named volume: starts, and survives the container"
+        run: |
+          set -euo pipefail
+          start() {
+            docker run -d --name "$1" -p 127.0.0.1:9760:9750 \
+              -e ODB_API_KEY=ci-key -e ODB_CACHE_DIR=/data/cache \
+              -v odb-ci-cache:/data/cache -v odb-ci-jobs:/data/jobs \
+              opendrive-bridge:ci
+          }
+          status() {
+            for _ in $(seq 1 40); do
+              curl -fsS -H 'Authorization: Bearer ci-key' \
+                http://127.0.0.1:9760/v1/cache/status > /tmp/nv.json 2>/dev/null && return 0
+              sleep 0.5
+            done
+            docker logs "$1"; return 1
+          }
+          start odb-nv; status odb-nv; cat /tmp/nv.json; echo
+          grep -q '"enabled":true' /tmp/nv.json || { echo "the cache did not come up"; exit 1; }
+          grep -q '"durable":true' /tmp/nv.json || { echo "a named volume was reported as not durable"; exit 1; }
+
+          # Replace the container, as an upgrade would. The volume and its
+          # journal stay; the lock does not, because it died with the process.
+          docker rm -f odb-nv >/dev/null
+          start odb-nv2; status odb-nv2
+          grep -q '"enabled":true' /tmp/nv.json || { echo "a replacement container could not reopen the cache"; exit 1; }
+          docker rm -f odb-nv2 >/dev/null
+          echo "named volume: starts, reports durable, and a replacement container reopens it"
+
+      - name: "Cache on a host directory: works when chowned, refuses in words when not"
+        run: |
+          set -euo pipefail
+          # Chowned to the user the image runs as: the recommended setup.
+          mkdir -p "$RUNNER_TEMP/hostcache"
+          sudo chown 65532:65532 "$RUNNER_TEMP/hostcache"
+          docker run -d --name odb-bind -p 127.0.0.1:9761:9750 \
+            -e ODB_API_KEY=ci-key -e ODB_CACHE_DIR=/data/cache \
+            -v "$RUNNER_TEMP/hostcache:/data/cache" opendrive-bridge:ci
+          for _ in $(seq 1 40); do
+            curl -fsS -H 'Authorization: Bearer ci-key' \
+              http://127.0.0.1:9761/v1/cache/status > /tmp/bind.json 2>/dev/null && break
+            sleep 0.5
+          done
+          cat /tmp/bind.json; echo
+          grep -q '"enabled":true' /tmp/bind.json || { docker logs odb-bind; echo "the bind-mounted cache did not come up"; exit 1; }
+          grep -q '"durable":true' /tmp/bind.json || { echo "a bind mount was reported as not durable"; exit 1; }
+          # The journal and lock are on the host, where a person can see them.
+          sudo test -f "$RUNNER_TEMP/hostcache/lock" || { echo "no lock file on the host"; exit 1; }
+
+          # Two containers, one cache directory: the second must refuse. Same kernel,
+          # so flock applies across them — this is the claim being measured.
+          set +e
+          out=$(timeout 60 docker run --rm \
+            -e ODB_API_KEY=ci-key -e ODB_CACHE_DIR=/data/cache \
+            -v "$RUNNER_TEMP/hostcache:/data/cache" opendrive-bridge:ci 2>&1)
+          code=$?
+          set -e
+          echo "second container: exit=$code"; echo "$out"
+          [ "$code" -ne 124 ] || { echo "the second container hung instead of refusing"; exit 1; }
+          [ "$code" -ne 0 ] || { echo "two containers ran on one cache directory"; exit 1; }
+          echo "$out" | grep -q "already in use by another bridge" \
+            || { echo "the refusal does not say why"; exit 1; }
+          docker rm -f odb-bind >/dev/null
+
+          # Not chowned: the mistake the documentation warns about. It must be a
+          # sentence naming the directory, not a crash and not a hang.
+          mkdir -p "$RUNNER_TEMP/rootcache"
+          sudo chown 0:0 "$RUNNER_TEMP/rootcache"
+          sudo chmod 0755 "$RUNNER_TEMP/rootcache"
+          set +e
+          out=$(timeout 60 docker run --rm \
+            -e ODB_API_KEY=ci-key -e ODB_CACHE_DIR=/data/cache \
+            -v "$RUNNER_TEMP/rootcache:/data/cache" opendrive-bridge:ci 2>&1)
+          code=$?
+          set -e
+          echo "unchowned: exit=$code"; echo "$out"
+          [ "$code" -ne 124 ] || { echo "it hung"; exit 1; }
+          [ "$code" -ne 0 ] || { echo "it started on a directory it cannot write"; exit 1; }
+          echo "$out" | grep -q "/data/cache" || { echo "the refusal does not name the directory"; exit 1; }
+          echo "$out" | grep -qiE "panic|goroutine [0-9]+" && { echo "a stack trace reached the user"; exit 1; }
+          echo "host directory: works chowned, one container at a time, refuses in words when not"
+
       - name: Logs, for the record
         if: always()
         run: docker logs odb-ci 2>&1 | tail -20 || true

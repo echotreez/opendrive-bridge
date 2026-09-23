@@ -65,13 +65,32 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
  && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath \
       -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
-      -o /out/odctl ./cmd/odctl
+      -o /out/odctl ./cmd/odctl \
+ && mkdir -p /out/data/cache /out/data/jobs
 
 # distroless/static:nonroot carries CA certificates, /etc/passwd and nothing else.
 FROM gcr.io/distroless/static:nonroot
 
 COPY --from=builder /out/opendrived /usr/local/bin/opendrived
 COPY --from=builder /out/odctl /usr/local/bin/odctl
+
+# /data, /data/cache and /data/jobs exist in the image, owned by the user the daemon
+# runs as. That is not tidiness; it decides whether a named volume works at all.
+#
+# Docker initialises a new named volume from whatever the image has at the mount
+# point — contents, ownership and mode. If /data/cache does not exist in the image,
+# the volume's root comes up owned by root, the daemon (running as nonroot, 65532)
+# cannot write to it, and the cache refuses to start. The compose file has mounted
+# a volume there since the gateway was added, and nothing tested it with the image
+# until the directory lock prompted a look at who owns what.
+#
+# distroless has no shell to mkdir or chown in, so the directories are made in the
+# builder and copied with their owner set.
+#
+# A bind mount does not get this treatment — the host directory's own ownership is
+# what the container sees — which is why the documentation for that setup says to
+# chown the host directory to 65532 first.
+COPY --from=builder --chown=65532:65532 /out/data /data
 
 # /data holds the encrypted credentials and the transfer state. Mount a volume
 # over it, or every restart is a fresh install.

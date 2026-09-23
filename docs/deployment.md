@@ -308,12 +308,51 @@ the cache off or put it on an encrypted volume.
 
 ### In a container
 
-Put the cache on a named volume. A container's own filesystem is disposable and
-recreating a container is routine, so a cache inside it would take unsent files
-with it. `deploy/docker/docker-compose.yaml` does this by default; §8.3.1 of the
-whitepaper has the full argument. The daemon also checks at startup and reports
-`durable: false` on `/v1/cache/status`, which `odctl cache status` prints as a
-warning — but a default that is right beats a warning that is read.
+Put the cache outside the container. A container's own filesystem is disposable and
+recreating a container is routine, so a cache inside it would take unsent files with
+it. §8.3.1 of the whitepaper has the full argument.
+
+**On a Linux host, use a directory on the host**, mounted in — this is what
+`deploy/docker/docker-compose.yaml` does by default:
+
+```bash
+mkdir -p cache && sudo chown 65532:65532 cache
+# ... -v "$PWD/cache:/data/cache" -e ODB_CACHE_DIR=/data/cache
+```
+
+It is the most robust option. Docker's clean-up commands (`docker compose down -v`,
+`docker volume prune`) delete named volumes and leave host directories alone; the
+journal and the unsent files are somewhere you can see and back up; and after a
+crash, starting the container again replays the journal and sends what had not gone
+up. An interrupted file is sent again from the start rather than resumed mid-way — if
+it had actually arrived, OpenDrive recognises it by hash and the resend is nearly
+free.
+
+The `chown` is needed because the image runs as uid 65532 and the bridge must own its
+cache directory. Without it the bridge refuses to start and says which directory and
+what to run.
+
+**On Docker Desktop for Mac or Windows, use a named volume** (`-v
+odb-cache:/data/cache`) until somebody measures the alternative. A host directory
+there goes through the VM's file-sharing layer, and whether an fsync inside the
+container reaches the Mac's disk through it has not been checked. Everything the
+cache promises rests on fsync, so this guide does not recommend it on a guess. A
+named volume lives on the VM's own disk and needs no `chown` — the image creates
+`/data/cache` owned by the right user, and a new volume inherits that.
+
+**One bridge per cache directory.** The daemon takes a lock on the directory at
+startup, so a second bridge pointed at the same folder — another container, or
+`opendrived` on the host — refuses to start instead of two of them writing one
+journal. It is a kernel lock, released when the holder exits however it exits, so a
+crash never leaves the directory stuck and there is nothing to clean up by hand. It
+holds between processes on the same Linux kernel, which covers containers and the
+host on a Linux machine; it is not guaranteed across Docker Desktop's VM boundary,
+or on a network filesystem.
+
+The daemon also checks at startup and reports `durable: false` on
+`/v1/cache/status` if the cache directory is not a mount at all, which `odctl cache
+status` prints as a warning — but a default that is right beats a warning that is
+read.
 
 ### Turning it off again
 

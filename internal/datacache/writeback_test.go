@@ -313,6 +313,7 @@ func TestRule3WhatWasAcknowledgedIsRecoverable(t *testing.T) {
 	// journal is all there is to go on. (A real kill is TestRule4, in
 	// crash_test.go; this asserts the same property without the process
 	// machinery, so a failure here is easier to read.)
+	crashed(c)
 
 	up2 := newFakeUpstream()
 	again, err := Open(Config{Dir: dir, WriteBack: true, Upstream: up2})
