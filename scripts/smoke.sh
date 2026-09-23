@@ -102,12 +102,10 @@ grep -q "Smoke" "$WORK/ls.txt"; check $? "ls / shows the folder"
 grep -q "hello.txt" "$WORK/ls2.txt"; check $? "ls /Smoke shows the file"
 
 say "the caching gateway"
-# The gateway is reached through the streaming endpoints, so this part uses curl
-# rather than odctl. That is not a stylistic choice and it is worth stating plainly:
-# `odctl up` and `odctl down` go through the *job* endpoints, which do not use the
-# cache at all yet. See the note in internal/server/cache_transfers.go — coupling
-# the job engine to the gateway is the piece that is not built, and until it is, the
-# cache is only reachable by a caller that speaks HTTP.
+# Both routes into the gateway are exercised: the streaming endpoints with curl, and
+# the job endpoints through odctl. The second used to bypass the cache entirely,
+# which meant the feature was unreachable from the command line — see the two legs
+# in internal/jobs/cache.go.
 if ! command -v curl >/dev/null 2>&1; then
   say "curl is not available; skipping the cache checks"
 else
@@ -173,6 +171,30 @@ else
   check $? "the second read is served from the cache"
   cmp -s "$WORK/first.txt" "$WORK/second.txt"
   check $? "the cached copy matches what was downloaded"
+
+  # And now through odctl, which is how almost everybody will actually use this.
+  # `up` copies the file into the cache (leg one) and waits for the gateway to send
+  # it (leg two); the job reports which leg it is on throughout.
+  printf 'uploaded by odctl through the cache\n' > "$WORK/viaodctl.txt"
+  "$ODCTL" --addr "127.0.0.1:$PORT" up "$WORK/viaodctl.txt" /Smoke/viaodctl.txt \
+    > "$WORK/odctlup.txt" 2>&1
+  check $? "odctl up goes through the cache"
+
+  "$ODCTL" --addr "127.0.0.1:$PORT" --json jobs > "$WORK/jobs.json" 2>&1
+  grep -q '"phase"' "$WORK/jobs.json"
+  check $? "the job reports which leg it was on"
+
+  "$ODCTL" --addr "127.0.0.1:$PORT" cache objects > "$WORK/objs2.txt" 2>&1
+  grep -q "/Smoke/viaodctl.txt" "$WORK/objs2.txt"
+  check $? "the file odctl uploaded is in the cache"
+
+  # And a download of it is served locally: the file is already here, so this costs
+  # no request to OpenDrive at all.
+  "$ODCTL" --addr "127.0.0.1:$PORT" down /Smoke/viaodctl.txt "$WORK/viaodctl-back.txt" \
+    > "$WORK/odctldown.txt" 2>&1
+  check $? "odctl down of a cached file"
+  cmp -s "$WORK/viaodctl.txt" "$WORK/viaodctl-back.txt"
+  check $? "the round trip through odctl preserved the bytes"
 
   # Clearing works once nothing is outstanding.
   "$ODCTL" --addr "127.0.0.1:$PORT" cache clear > "$WORK/cacheclear.txt" 2>&1

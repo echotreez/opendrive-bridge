@@ -174,15 +174,16 @@ func run() error {
 			slog.String("error", opendrive.RedactString(err.Error())))
 	}
 
-	engine, err := newEngine(client, o, log)
+	// The caching gateway (§3.5), when a directory was given. It is opened before
+	// the engine so that transfers can go through it, and before the server so that
+	// a directory it cannot use is a refusal to start rather than a feature that
+	// quietly is not there.
+	dc, err := newDataCache(o, client, log)
 	if err != nil {
 		return err
 	}
 
-	// The caching gateway (§3.5), when a directory was given. It is opened before
-	// the server so that a directory it cannot use is a refusal to start rather
-	// than a feature that quietly is not there.
-	dc, err := newDataCache(o, client, log)
+	engine, err := newEngine(client, o, log, datacache.ForJobs(dc))
 	if err != nil {
 		return err
 	}
@@ -310,7 +311,7 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
-func newEngine(c *opendrive.Client, o options, log *slog.Logger) (*jobs.Engine, error) {
+func newEngine(c *opendrive.Client, o options, log *slog.Logger, cache *datacache.JobCache) (*jobs.Engine, error) {
 	dir := o.stateDir
 	if dir == "" {
 		base, err := os.UserConfigDir()
@@ -323,7 +324,12 @@ func newEngine(c *opendrive.Client, o options, log *slog.Logger) (*jobs.Engine, 
 	if err != nil {
 		return nil, err
 	}
-	return jobs.New(c, jobs.WithStore(store), jobs.WithLogger(log))
+	opts := []jobs.Option{jobs.WithStore(store), jobs.WithLogger(log)}
+	// A nil adapter means no gateway, and the engine behaves as it did before v1.2.
+	if cache != nil {
+		opts = append(opts, jobs.WithCache(cache))
+	}
+	return jobs.New(c, opts...)
 }
 
 func newLogger(level string) *slog.Logger {

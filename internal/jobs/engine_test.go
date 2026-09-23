@@ -36,6 +36,9 @@ type upstream struct {
 	closeFailures int
 	blockChunk    chan struct{}
 	probeMisses   int
+	// downloaded counts real downloads, so a test can assert that a cache hit cost
+	// no request at all rather than inferring it from timing.
+	downloaded int
 }
 
 func newUpstream(t *testing.T) *upstream {
@@ -107,6 +110,7 @@ func (u *upstream) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		u.mu.Lock()
 		content := u.content
+		u.downloaded++
 		u.mu.Unlock()
 		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write(content)
@@ -133,6 +137,20 @@ func chunkPayload(r *http.Request, read int64) int64 {
 		return v
 	}
 	return read
+}
+
+// uploads counts the files create_file handed out, which is one per real upload.
+func (u *upstream) uploads() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return len(u.created)
+}
+
+// downloads counts the bodies actually served.
+func (u *upstream) downloads() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.downloaded
 }
 
 func (u *upstream) reclaims() []string {
