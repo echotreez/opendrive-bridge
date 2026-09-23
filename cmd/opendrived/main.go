@@ -53,7 +53,6 @@ type options struct {
 	cacheMaxBytes  int64
 	cacheMaxDirty  int64
 	cacheWriteBack bool
-	cacheOff       bool
 	drainTimeout   time.Duration
 }
 

@@ -54,21 +54,97 @@ func TestDurabilityIsNotAQuestionWithoutWriteBack(t *testing.T) {
 	}
 }
 
-// isMountPoint walks up: a volume at /data makes /data/cache durable too, and
-// checking only the exact path would warn about a setup that is fine.
-func TestIsMountPointLooksAtAncestorsNotJustTheLeaf(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("/proc/self/mountinfo is Linux only")
+// The ancestor walk, against a list this test controls rather than against
+// whatever the machine happens to have mounted.
+//
+// The first version of this test ran isMountPoint("/tmp/nothing/here") and expected
+// true, reasoning that everything is under / and / is a mount. That is precisely
+// what the function must not say — counting / would make every layout look durable
+// and the check would never fire — and the assertion passed on macOS, where the
+// function short-circuits on a missing /proc, and failed on Linux. A wrong test
+// that only fails on one platform is the worst shape a wrong test has.
+func TestPathIsUnderAMountWalksUpButNotToTheRoot(t *testing.T) {
+	mounts := []string{"/", "/proc", "/data", "/mnt/with space"}
+
+	cases := []struct {
+		dir  string
+		want bool
+		why  string
+	}{
+		{"/data", true, "the mount point itself"},
+		{"/data/cache", true, "a volume at /data covers /data/cache"},
+		{"/data/cache/deeper/still", true, "however deep"},
+		{"/mnt/with space/cache", true, "a mount point with a space in it"},
+		{"/var/lib/something", false, "only / is above it, and / does not count"},
+		{"/datastore", false, "a prefix of a mount point is not under it"},
+		{"/data2/cache", false, "nor is a sibling that starts the same way"},
 	}
-	// The root filesystem is a mount, so anything under it answers true. This is
-	// the ancestor walk working; the check is only meaningful inside a container,
-	// where the interesting ancestors are the volumes.
-	ok, err := isMountPoint("/tmp/nothing/here/at/all")
+	for _, tc := range cases {
+		got, err := pathIsUnderAMount(tc.dir, mounts)
+		if err != nil {
+			t.Errorf("%s: %v", tc.dir, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("pathIsUnderAMount(%q) = %v, want %v — %s", tc.dir, got, tc.want, tc.why)
+		}
+	}
+
+	// The root itself has no mountable ancestor, which is an error rather than a
+	// false: a cache directory at / is not a question this function can answer.
+	if _, err := pathIsUnderAMount("/", mounts); err == nil {
+		t.Error("the root was treated as having a mountable ancestor")
+	}
+}
+
+// The mountinfo parser, against the shape the kernel actually writes — including
+// the escaping, which is the part a hand-rolled parser gets wrong.
+func TestMountPointsAreReadFromMountinfo(t *testing.T) {
+	const sample = `21 27 0:20 / /proc rw,nosuid,nodev,noexec,relatime shared:5 - proc proc rw
+26 27 0:24 / /sys/fs/cgroup ro,nosuid,nodev,noexec shared:9 - tmpfs tmpfs ro
+too few fields
+99 27 0:99 / /mnt/my\040volume rw,relatime shared:99 - ext4 /dev/sdb rw
+`
+	got, err := readMountPoints(strings.NewReader(sample))
 	if err != nil {
-		t.Fatalf("isMountPoint: %v", err)
+		t.Fatalf("readMountPoints: %v", err)
 	}
-	if !ok {
-		t.Error("nothing under / was recognised as being on a mount")
+	want := []string{"/proc", "/sys/fs/cgroup", "/mnt/my volume"}
+	if len(got) != len(want) {
+		t.Fatalf("read %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("mount %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// And against the real file where there is one, so the parser is known to cope
+	// with what this machine writes rather than only with the sample above.
+	if runtime.GOOS == "linux" {
+		f, err := os.Open("/proc/self/mountinfo")
+		if err != nil {
+			t.Skipf("cannot read mountinfo: %v", err)
+		}
+		defer func() { _ = f.Close() }()
+		points, err := readMountPoints(f)
+		if err != nil {
+			t.Fatalf("reading the real mountinfo: %v", err)
+		}
+		if len(points) == 0 {
+			t.Fatal("the real mountinfo produced no mount points")
+		}
+		// /proc is mounted on every Linux system, so finding it proves the parser
+		// is reading the right field.
+		found := false
+		for _, p := range points {
+			if p == "/proc" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("/proc is not among the %d mount points read", len(points))
+		}
 	}
 }
 

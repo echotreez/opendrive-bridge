@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -127,8 +128,12 @@ func inContainer() bool {
 // the same filesystem, which is a perfectly ordinary way to mount a host
 // directory into a container.
 //
-// The comparison walks up: a volume mounted at /data makes /data/cache durable
-// too, and checking only the exact path would warn about a setup that is fine.
+// Reading the file and deciding the answer are separate functions, so the decision
+// can be tested against a known list instead of against whatever the machine
+// running the tests happens to have mounted. The first version of the test asserted
+// that anything under / is on a mount, which is exactly what this must *not* say —
+// and it passed on macOS and failed on Linux, which is the least useful way to
+// learn that an assertion was wrong.
 func isMountPoint(dir string) (bool, error) {
 	f, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
@@ -136,37 +141,62 @@ func isMountPoint(dir string) (bool, error) {
 	}
 	defer func() { _ = f.Close() }()
 
+	points, err := readMountPoints(f)
+	if err != nil {
+		return false, err
+	}
+	return pathIsUnderAMount(dir, points)
+}
+
+// readMountPoints pulls the mount points out of mountinfo.
+//
+// Field 5 is the mount point. The fields before it are numeric or device ids and
+// cannot contain a space; the mount point itself is escaped by the kernel, so a tab
+// or space in a path arrives as \011 or \040.
+func readMountPoints(r io.Reader) ([]string, error) {
+	var out []string
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	for s.Scan() {
+		fields := strings.Fields(s.Text())
+		if len(fields) < 5 {
+			continue
+		}
+		out = append(out, unescapeMountPath(fields[4]))
+	}
+	if err := s.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// pathIsUnderAMount reports whether dir, or any directory above it, is one of the
+// given mount points.
+//
+// The walk goes up because a volume mounted at /data makes /data/cache durable too,
+// and checking only the exact path would warn about a setup that is fine.
+//
+// The root is excluded on purpose, and this is the whole subtlety of the function:
+// everything is under /, so counting it would make every possible layout "on a
+// mount" and the check would never fire. In a container the interesting ancestors
+// are the volumes, and / is the disposable writable layer this is trying to warn
+// about.
+func pathIsUnderAMount(dir string, points []string) (bool, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return false, err
 	}
-	// Every ancestor that would carry the directory, root excluded: everything is
-	// under / and treating that as the answer would call any layout durable.
 	ancestors := map[string]bool{}
-	for p := filepath.Clean(abs); p != "/" && p != "."; p = filepath.Dir(p) {
+	for p := filepath.Clean(abs); p != "/" && p != "." && p != filepath.Dir(p); p = filepath.Dir(p) {
 		ancestors[p] = true
 	}
 	if len(ancestors) == 0 {
 		return false, errors.New("datacache: the cache directory has no mountable ancestor")
 	}
-
-	s := bufio.NewScanner(f)
-	s.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	for s.Scan() {
-		// mountinfo field 5 is the mount point. Fields before it are numeric or
-		// device ids and cannot contain a space; the mount point itself is escaped
-		// by the kernel, so a tab or space in a path arrives as \011 or \040.
-		fields := strings.Fields(s.Text())
-		if len(fields) < 5 {
-			continue
-		}
-		point := unescapeMountPath(fields[4])
+	for _, point := range points {
 		if ancestors[point] {
 			return true, nil
 		}
-	}
-	if err := s.Err(); err != nil {
-		return false, err
 	}
 	return false, nil
 }

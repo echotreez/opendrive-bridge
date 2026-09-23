@@ -180,7 +180,11 @@ else
 
   # The directory holds the user's files in the clear, so the mode is the whole of
   # its protection (§3.5.4).
-  mode=$(stat -f '%Lp' "$WORK/cache" 2>/dev/null || stat -c '%a' "$WORK/cache" 2>/dev/null)
+  # GNU stat first, BSD second. -f is "format" on BSD and "filesystem status" on
+  # GNU, so putting BSD first made GNU *succeed* at printing filesystem details and
+  # the fallback never ran — the check then compared "700" against a block of text
+  # and failed on Linux only.
+  mode=$(stat -c '%a' "$WORK/cache" 2>/dev/null || stat -f '%Lp' "$WORK/cache" 2>/dev/null)
   [ "$mode" = "700" ]
   check $? "the cache directory is 0700 (got ${mode:-unknown})"
 fi

@@ -181,13 +181,6 @@ func (j *journal) breakSyncWhen(pred func(journalRecord) error) {
 	j.failSyncWhen = pred
 }
 
-// needsCompaction reports whether the log has outgrown the index it describes.
-func (j *journal) needsCompaction() bool {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	return j.records > compactAfter
-}
-
 func (j *journal) close() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
