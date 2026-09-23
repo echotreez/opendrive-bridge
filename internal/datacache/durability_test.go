@@ -184,7 +184,10 @@ func TestCompactionKeepsTheIndex(t *testing.T) {
 		fill(t, c, "/clean/"+string(rune('a'+i)), bytesOf(256, byte(i)))
 	}
 	put(t, c, "/unsent/kept", bytesOf(512, 9))
-	before := c.snapshot()
+	// Objects() rather than snapshotLocked(): this test used the unlocked helper
+	// while a flush worker was moving an object between states, which the race
+	// detector caught on Linux and not on macOS.
+	before := c.Objects()
 	_ = c.jnl.close()
 
 	jnl, err := compactJournal(dir, before)

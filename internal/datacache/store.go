@@ -117,7 +117,9 @@ func Open(cfg Config) (*DataCache, error) {
 	// A compaction on the way up keeps the log from growing across restarts in a
 	// read-heavy deployment, where touch records outnumber everything else.
 	if replayed.records > compactAfter {
-		jnl, err := compactJournal(cfg.Dir, c.snapshot())
+		// Safe without the lock here and only here: no flush worker has been
+		// started yet, so nothing else can touch the index.
+		jnl, err := compactJournal(cfg.Dir, c.snapshotLocked())
 		if err != nil {
 			return nil, err
 		}
@@ -227,7 +229,16 @@ func (c *DataCache) unsentCount() int {
 	return n
 }
 
-func (c *DataCache) snapshot() []*Object {
+// snapshotLocked copies the index. **The caller must hold c.mu.**
+//
+// The requirement is in the name because it was not obvious enough anywhere else:
+// a test called the old `snapshot()` without the lock while a flush worker was
+// transitioning an object's state, and the race detector caught it on Linux. A
+// helper whose safety depends on something the call site cannot see is a footgun,
+// and renaming it is cheaper than remembering.
+//
+// Objects() is the locked accessor for callers outside this file.
+func (c *DataCache) snapshotLocked() []*Object {
 	out := make([]*Object, 0, len(c.objs))
 	for _, o := range c.objs {
 		out = append(out, o.Clone())
@@ -700,7 +711,7 @@ func (c *DataCache) Status() Status {
 // Objects lists what is cached, newest access first, for /v1/cache/objects.
 func (c *DataCache) Objects() []*Object {
 	c.mu.Lock()
-	out := c.snapshot()
+	out := c.snapshotLocked()
 	c.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].LastAccess.After(out[j].LastAccess) })
 	return out
