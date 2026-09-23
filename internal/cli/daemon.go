@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/kardianos/service"
@@ -14,10 +13,10 @@ import (
 	"golang.org/x/term"
 )
 
-// The daemon commands wrap kardianos/service, which speaks launchd, systemd and
-// the Windows Service Manager. Registering a background service is the one part
-// of odctl that changes the machine rather than the account, so each command
-// says what it did and where to look when it goes wrong.
+// The daemon commands wrap kardianos/service, which speaks launchd and systemd.
+// Registering a background service is the one part of odctl that changes the
+// machine rather than the account, so each command says what it did and where to
+// look when it goes wrong.
 
 // serviceProgram satisfies service.Interface. odctl never runs the daemon
 // in-process — it registers opendrived — so these are the no-ops the library
@@ -51,19 +50,23 @@ func daemonService(execPath string, args []string) (service.Service, error) {
 	// have no credential store, so the bridge would start and immediately report
 	// that it cannot reach one.
 	//
-	// Linux joins it since v1.2, for a reason that is the same shape: the
+	// Linux joins it since v1.1, for a reason that is the same shape: the
 	// credentials are an encrypted .env in the directory the user unpacked, and
 	// a system unit with DynamicUser=yes runs as a user that cannot read the
 	// user's home. §8.2 settles it — a user service, started with
 	// `systemctl --user`, running as whoever installed it.
 	//
-	// Windows keeps a machine service: it has no per-user service manager worth
-	// the name, and the Service Manager reads the absolute path below.
-	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
-		cfg.Option["UserService"] = true
-		cfg.Option["KeepAlive"] = true
-		cfg.Option["RunAtLoad"] = true
-	}
+	// Both supported platforms get a user service; there is no longer a third
+	// with its own rules (§8.1).
+	cfg.Option["UserService"] = true
+	cfg.Option["KeepAlive"] = true
+	cfg.Option["RunAtLoad"] = true
+	// Custom templates, for one directive each: a stop timeout long enough for the
+	// caching gateway to drain. Neither of the library's own templates sets one,
+	// and both platforms' defaults are shorter than the drain's budget — see
+	// daemon_template.go for what that would cost.
+	cfg.Option["SystemdScript"] = systemdUserUnit
+	cfg.Option["LaunchdConfig"] = launchdAgent
 	// The working directory is where .env lives, and it is set explicitly
 	// because no service manager inherits the shell's. Without it the daemon
 	// would start in / and look for credentials that are not there.
@@ -266,12 +269,11 @@ func resolveDaemonPath(override string) (string, error) {
 		"if you moved one of them, point at it with --exec.")
 }
 
-func daemonBinaryName() string {
-	if runtime.GOOS == "windows" {
-		return "opendrived.exe"
-	}
-	return "opendrived"
-}
+// daemonBinaryName is a function rather than a constant because it used to
+// answer differently on Windows. It is kept as one so that the call sites read
+// the same, and so that restoring a platform with its own executable suffix is a
+// change in one place.
+func daemonBinaryName() string { return "opendrived" }
 
 // uninstallCommand removes the service and the PATH block, and deliberately
 // leaves the credentials alone.

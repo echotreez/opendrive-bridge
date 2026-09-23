@@ -24,9 +24,7 @@ is worth being exact about the threat model rather than reassuring.
 
 **Where your credentials live.** In `.env`, in the folder you unpacked,
 encrypted with AES-256-CBC. The key is 32 random bytes in `.env.key`, generated
-on first run, sitting next to it. Both files are 0600 — on Windows, an access
-control list that resolves to the same thing, because NTFS ignores the Unix mode
-bits.
+on first run, sitting next to it. Both files are 0600.
 
 **It protects you from:**
 
@@ -92,9 +90,10 @@ project learned by having gates that only ran when someone tried to ship:
 | `trivy` | the container image, before it is pushed |
 
 Releases are built by GitHub Actions from a tag, with SHA256 checksums published
-alongside. **The macOS and Windows binaries are not code-signed**, because that
-needs a paid developer certificate. Verify the checksum before you run anything;
-`docs/first-run.md` has the command for each platform.
+alongside. **The macOS binaries are not code-signed**, because that needs a paid
+developer certificate — which is why macOS refuses to run them until you clear the
+quarantine flag. Verify the checksum before you run anything; `docs/first-run.md`
+has the command for each platform.
 
 ## Supported versions
 

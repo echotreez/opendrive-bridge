@@ -167,17 +167,24 @@ jobs:
       - name: Verify every archive is complete
         run: |
           set -euo pipefail
-          count=$(ls dist/*.tar.gz dist/*.zip | wc -l)
-          [ "$count" -eq 6 ] || { echo "expected 6 archives, got $count"; ls dist/; exit 1; }
+          # Three: linux/amd64, linux/arm64, darwin/arm64 (§8.1).
+          #
+          # This said six until now, which means it had been wrong since v1.1
+          # narrowed the matrix to four — in the release workflow, where no dry
+          # run reaches it, so the first tag cut after that refactor would have
+          # failed here. It is the same number as ci.yml's package job, and the
+          # reason both exist is that they run at different times; when the
+          # matrix changes next, they both change.
+          count=$(ls dist/*.tar.gz | wc -l)
+          [ "$count" -eq 3 ] || { echo "expected 3 archives, got $count"; ls dist/; exit 1; }
           ls dist/*SHA256SUMS >/dev/null
-          echo "6 archives and checksums"
+          echo "3 archives and checksums"
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-archives
           path: |
             dist/*.tar.gz
-            dist/*.zip
             dist/*SHA256SUMS
 
   image:
@@ -271,4 +278,4 @@ jobs:
             echo "deleted before anyone downloads half a release."
             exit 1
           fi
-          echo "Release complete: six archives, checksums, and a dual-architecture image."
+          echo "Release complete: three archives, checksums, and a dual-architecture image."

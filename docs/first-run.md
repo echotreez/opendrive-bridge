@@ -30,8 +30,7 @@ Pick your section:
 
 - [macOS](#macos) — **read the quarantine part first, it will stop you otherwise**
 - [Linux](#linux)
-- [Windows](#windows)
-- [Docker](#docker) — different setup, because a container has no password store
+- [Docker](#docker) — the same two files, mounted in
 
 For running it permanently in the background, see
 [deployment.md](./deployment.md). This page is only about the first five
@@ -163,60 +162,27 @@ sudo loginctl enable-linger $USER
 
 ---
 
-## Windows
-
-Download the `windows_amd64` zip and unpack it — it creates an
-`opendrive-bridge` folder. Keep it somewhere permanent.
-
-In **PowerShell**, inside that folder:
-
-```powershell
-Get-FileHash .\opendrive-bridge_1.1.0_windows_amd64.zip -Algorithm SHA256
-# compare that against the line for this file in the SHA256SUMS file
-
-Copy-Item .env.example .env
-notepad .env            # put your OpenDrive username and password in
-
-.\opendrived.exe
-```
-
-In a second PowerShell window, in the same folder:
-
-```powershell
-.\odctl.exe status
-.\odctl.exe ls /
-"hello from Windows" | Out-File -Encoding utf8 hello.txt
-.\odctl.exe up hello.txt /hello.txt
-.\odctl.exe down /hello.txt back.txt
-```
-
-`.env` and `.env.key` are locked down with `icacls` so that only your account can
-read them — NTFS ignores the Unix permission bits, so the bridge sets the access
-control list explicitly.
-
-### If you use Git Bash
-
-Use PowerShell or Command Prompt if you can. Git Bash rewrites any argument
-starting with a slash into a Windows path before `odctl` ever sees it, so
-
-```
-odctl ls /Documents
-```
-
-arrives as `odctl ls "C:/Program Files/Git/Documents"` and cannot work. `odctl`
-recognises the result and tells you what happened, but it cannot undo it. If you
-want to stay in Git Bash, put `MSYS_NO_PATHCONV=1` in front of the command:
-
-```bash
-MSYS_NO_PATHCONV=1 odctl ls /Documents
-```
-
-This affects paths in your OpenDrive account only. Local filenames are fine
-either way.
-
----
-
 ## Docker
+
+> ### Read this first: where the cache lives
+>
+> If you turn the cache on (`ODB_CACHE_DIR`) **and leave write-back on**, the
+> bridge answers an upload as soon as the file is on its own disk, and uploads it
+> to OpenDrive in the background. For those few seconds or minutes, **the bridge
+> is the only place that file exists.**
+>
+> A container's own filesystem is thrown away when the container is. `docker rm`,
+> `docker compose down`, upgrading the image — all routine, and all of them would
+> take unsent files with them, after you had been told they were stored.
+>
+> So: **put the cache on a named volume**, as `-v odb-cache:/data/cache` does
+> below and as `deploy/docker/docker-compose.yaml` does by default. The daemon
+> checks at startup and warns if you have not, but a warning in a log is a poor
+> second to getting it right.
+>
+> If you would rather not think about it, set `ODB_CACHE_WRITE_BACK=false`.
+> Uploads then wait for OpenDrive, as they always did, and nothing is ever held
+> here that OpenDrive does not have.
 
 The container takes **the same two files** as everywhere else. There is no
 container-specific setup any more — you prepare `.env` exactly as you would on a
@@ -229,8 +195,10 @@ $EDITOR .env          # put your OpenDrive username and password in
 docker run -d --name opendrive-bridge \
   -p 127.0.0.1:9750:9750 \
   -e ODB_API_KEY="$(openssl rand -hex 32)" \
+  -e ODB_CACHE_DIR=/data/cache \
   -v "$PWD/.env:/data/.env" \
   -v odb-state:/data/jobs \
+  -v odb-cache:/data/cache \
   ghcr.io/echotreez/opendrive-bridge:1.1.0
 ```
 
@@ -251,6 +219,28 @@ Three things to get right:
   a non-loopback address makes the daemon insist on a key. On your own machine it
   generates one into `.env` and you never see it.
 - **Back up `.env` and `.env.key` together.** Either one alone is useless.
+- **The cache directory is not encrypted.** `.env` is; the cache is not. It holds
+  your files exactly as they are, protected only by the directory's permissions
+  and by whatever the disk underneath gives you. The bridge sets the directory to
+  0700 — readable by nobody but the account it runs as — and that is the whole of
+  it. Before you check, no: nothing about "the bridge encrypts things" applies
+  here.
+
+### Is it safe to stop the container?
+
+```bash
+docker exec opendrive-bridge /usr/local/bin/odctl cache status
+```
+
+The last line answers it in words. If something is still waiting:
+
+```bash
+docker exec opendrive-bridge /usr/local/bin/odctl cache flush --wait
+```
+
+`docker stop` sends SIGTERM, and the daemon uses it to finish uploading before it
+exits. If it runs out of time it writes one log line per file it could not
+finish, naming each one, so nothing disappears quietly.
 
 Then, from your own machine:
 

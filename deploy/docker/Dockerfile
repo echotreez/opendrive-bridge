@@ -93,6 +93,14 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
 # installs, and an image is already an immutable deployment unit — there is no
 # sudo to avoid and nothing to uninstall. Only .env and .env.key are user data,
 # and they arrive as mounts.
+# No --cache-dir here, and that is the safe default rather than an omission.
+#
+# §8.3.1: with write-back on, the caching gateway holds bytes OpenDrive does not
+# have yet. A cache directory inside the container's own writable layer would lose
+# them the moment the container was replaced, which is a routine operation. So the
+# image ships with the gateway off, and it is switched on by a deployment that has
+# somewhere durable to put it — which is what docker-compose.yaml does, with a
+# named volume and ODB_CACHE_DIR=/data/cache.
 ENTRYPOINT ["/usr/local/bin/opendrived", \
             "--keystore-file", "/data/.env", \
             "--state-dir", "/data/jobs"]

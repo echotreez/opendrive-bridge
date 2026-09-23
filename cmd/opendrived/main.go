@@ -15,10 +15,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/echotreez/opendrive-bridge/internal/cache"
+	"github.com/echotreez/opendrive-bridge/internal/datacache"
 	"github.com/echotreez/opendrive-bridge/internal/jobs"
 	"github.com/echotreez/opendrive-bridge/internal/keystore"
 	"github.com/echotreez/opendrive-bridge/internal/server"
@@ -42,6 +44,16 @@ type options struct {
 	ephemeral bool
 	logLevel  string
 	showVer   bool
+
+	// The datacache block of §3.4. Named for that block and not for the metadata
+	// cache, which has no flags of its own — §3.5.4 asks for the two not to share
+	// a vocabulary, and a flag called --cache-dir that meant the metadata cache
+	// would be exactly the confusion it warns about.
+	cacheDir       string
+	cacheMaxBytes  int64
+	cacheMaxDirty  int64
+	cacheWriteBack bool
+	drainTimeout   time.Duration
 }
 
 func main() {
@@ -71,6 +83,19 @@ func run() error {
 	fs.StringVar(&o.logLevel, "log-level", envOr("ODB_LOG_LEVEL", "info"),
 		"debug, info, warn or error, or set ODB_LOG_LEVEL")
 	fs.BoolVar(&o.showVer, "version", false, "print the version and exit")
+	// The caching gateway (§3.5). Off unless a directory is given, because it is
+	// the one feature here that holds the user's data and turning that on should
+	// be somebody's decision rather than a default they discover afterwards.
+	fs.StringVar(&o.cacheDir, "cache-dir", os.Getenv("ODB_CACHE_DIR"),
+		"directory for the caching gateway; empty switches it off (or set ODB_CACHE_DIR)")
+	fs.Int64Var(&o.cacheMaxBytes, "cache-max-bytes", envInt64("ODB_CACHE_MAX_BYTES", 0),
+		"total the cache may occupy, in bytes; 0 uses the default")
+	fs.Int64Var(&o.cacheMaxDirty, "cache-max-dirty-bytes", envInt64("ODB_CACHE_MAX_DIRTY_BYTES", 0),
+		"most data the cache may hold that OpenDrive does not have yet; 0 uses the default")
+	fs.BoolVar(&o.cacheWriteBack, "cache-write-back", envBool("ODB_CACHE_WRITE_BACK", true),
+		"accept writes into the cache and upload them in the background; false writes straight through")
+	fs.DurationVar(&o.drainTimeout, "cache-drain-timeout", 0,
+		"how long shutdown waits for the cache to finish uploading; 0 uses the default")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
@@ -154,17 +179,29 @@ func run() error {
 		return err
 	}
 
+	// The caching gateway (§3.5), when a directory was given. It is opened before
+	// the server so that a directory it cannot use is a refusal to start rather
+	// than a feature that quietly is not there.
+	dc, err := newDataCache(o, client, log)
+	if err != nil {
+		return err
+	}
+
+	srvOpts := []server.Option{
+		server.WithKeystore(store),
+		server.WithClient(client),
+		server.WithPathCache(pathCache),
+		server.WithJobEngine(engine),
+	}
+	if dc != nil {
+		srvOpts = append(srvOpts, server.WithDataCache(dc))
+	}
 	srv, err := server.New(server.Config{
 		Addr:             o.addr,
 		APIKey:           o.apiKey,
 		APIKeyConfigured: apiKeyConfigured,
 		Logger:           log,
-	}, auth,
-		server.WithKeystore(store),
-		server.WithClient(client),
-		server.WithPathCache(pathCache),
-		server.WithJobEngine(engine),
-	)
+	}, auth, srvOpts...)
 	if err != nil {
 		return err
 	}
@@ -188,8 +225,80 @@ func run() error {
 	if err := srv.ListenAndServe(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
+
+	// Rule 4 of §3.5.2: the drain happens after the listener has stopped, so that
+	// nothing new arrives while it works, and before the process exits. A drain
+	// that ran in a goroutine alongside the shutdown would be racing the exit it
+	// is supposed to delay.
+	//
+	// It uses a fresh context on purpose. ctx is already cancelled — that is why
+	// we are here — and handing a cancelled context to the drain would make it
+	// give up instantly and report everything as unfinished, which is the opposite
+	// of what SIGTERM is supposed to achieve.
+	if dc != nil {
+		drainCtx, cancelDrain := context.WithCancel(context.Background())
+		if err := dc.Drain(drainCtx); err != nil {
+			log.Error("the cache could not finish uploading before shutdown; the objects it "+
+				"could not send are listed above and their data is still on disk",
+				slog.String("error", err.Error()))
+		}
+		cancelDrain()
+		if err := dc.Close(); err != nil {
+			log.Error("closing the cache reported a problem", slog.String("error", err.Error()))
+		}
+	}
 	log.Info("stopped")
 	return nil
+}
+
+// newDataCache opens the caching gateway, or returns nil when it is switched off.
+func newDataCache(o options, c *opendrive.Client, log *slog.Logger) (*datacache.DataCache, error) {
+	if o.cacheDir == "" {
+		return nil, nil
+	}
+	dc, err := datacache.Open(datacache.Config{
+		Dir:           o.cacheDir,
+		MaxBytes:      o.cacheMaxBytes,
+		MaxDirtyBytes: o.cacheMaxDirty,
+		WriteBack:     o.cacheWriteBack,
+		DrainTimeout:  o.drainTimeout,
+		Upstream:      datacache.NewSDKUploader(c),
+		Logger:        log,
+	})
+	if err != nil {
+		return nil, err
+	}
+	st := dc.Status()
+	log.Info("caching gateway ready",
+		slog.String("datacache_dir", st.Dir),
+		slog.Bool("datacache_write_back", st.WriteBack),
+		slog.Int64("datacache_max_bytes", st.MaxBytes),
+		slog.Int64("datacache_max_dirty_bytes", st.MaxDirtyBytes),
+		slog.Int("datacache_objects", st.Objects),
+		slog.Int("datacache_dirty_objects", st.DirtyObjects))
+	return dc, nil
+}
+
+// envInt64 reads an integer from the environment, ignoring anything unparseable:
+// a malformed value falls back to the default rather than stopping the daemon over
+// a number.
+func envInt64(name string, fallback int64) int64 {
+	if v := os.Getenv(name); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+// envBool reads a boolean from the environment.
+func envBool(name string, fallback bool) bool {
+	if v := os.Getenv(name); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return fallback
 }
 
 // envOr reads an environment variable with a fallback, so a container can be

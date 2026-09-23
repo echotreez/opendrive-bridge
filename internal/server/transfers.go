@@ -123,6 +123,13 @@ func (s *Server) uploadTarget(r *http.Request, remote string, overwrite bool) (s
 // It is synchronous on purpose: a script doing `curl --upload-file` wants the
 // response to mean the bytes arrived, not that a job was queued.
 func (s *Server) handleUploadStream(w http.ResponseWriter, r *http.Request) {
+	// With write-back on, the body lands in the cache and the answer is 202. The
+	// reasoning, and why POST /v1/upload deliberately does not do the same, is in
+	// cache_transfers.go.
+	if s.writeBackEnabled() {
+		s.handleUploadStreamCached(w, r)
+		return
+	}
 	remote, err := normalisePath(r.URL.Query().Get("path"))
 	if err != nil {
 		WriteError(w, r, err)
@@ -211,6 +218,22 @@ func (s *Server) handleDownloadStream(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, r, err)
 		return
 	}
+	// The cache is asked *before* the path is resolved upstream, and the order is
+	// load-bearing rather than an optimisation.
+	//
+	// Resolving first would defeat the whole read-after-write promise: a file that
+	// has been written through the gateway but not yet uploaded does not exist
+	// upstream, so resolve answers 404 and the cache is never consulted. A client
+	// would write a file, read it back immediately, and be told there is no such
+	// path — which is the failure §3.5.3 exists to prevent, arrived at from the
+	// other direction. A test caught exactly that.
+	//
+	// It is also simply right for a hit: an upstream metadata round trip to serve
+	// bytes that are already on this disk is a round trip for nothing.
+	if s.serveFromCache(w, r, remote, baseNameOf(remote)) {
+		return
+	}
+
 	t, err := s.resolve(r.Context(), remote)
 	if err != nil {
 		WriteError(w, r, err)
@@ -226,10 +249,12 @@ func (s *Server) handleDownloadStream(w http.ResponseWriter, r *http.Request) {
 	// file the caller would save and only later find broken.
 	pr, pw := io.Pipe()
 	errc := make(chan error, 1)
+	var dlResult *opendrive.DownloadResult
 	go func() {
-		_, dlErr := s.client.Downloads().Download(r.Context(), pw, opendrive.DownloadParams{
+		res, dlErr := s.client.Downloads().Download(r.Context(), pw, opendrive.DownloadParams{
 			FileID: t.ID, Size: t.Entry.Size,
 		})
+		dlResult = res
 		_ = pw.CloseWithError(dlErr)
 		errc <- dlErr
 	}()
@@ -252,12 +277,59 @@ func (s *Server) handleDownloadStream(w http.ResponseWriter, r *http.Request) {
 	// kind of metadata this project has learned not to trust (D27, D43).
 	// Chunked encoding costs a progress percentage in curl and cannot lie.
 	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write(buf[:n]); err != nil {
+
+	// On the way to the client, into the cache as well. The client's copy comes
+	// first: a cache write that fails does not fail the download (see
+	// fillingWriter).
+	fill := s.beginFill(remote)
+	fill.dst = w
+	complete := false
+	defer func() { fill.commit(s, remote, complete) }()
+
+	if _, err := fill.Write(buf[:n]); err != nil {
 		_ = pr.CloseWithError(err)
 		return
 	}
-	_, _ = io.Copy(w, pr)
-	<-errc
+	if _, err := io.Copy(fill, pr); err != nil {
+		_ = pr.CloseWithError(err)
+		return
+	}
+	dlErr := <-errc
+	// Only a transfer that finished is worth keeping. A truncated download that
+	// became a hit would hand the same truncated file to everyone afterwards, and
+	// nothing would ever notice.
+	//
+	// "No error" is not enough to conclude it finished, which a test found by
+	// serving a 206 that announced 1024 bytes and sent five. The download pipeline
+	// reports that honestly — Written 5, Total 1024 — and does not treat it as an
+	// error, because without an expected hash it has nothing to check against and
+	// a short read is upstream's business to explain. So the byte count is compared
+	// here: when upstream said how big the file was, the cache keeps it only if
+	// that is how much arrived.
+	complete = dlErr == nil && downloadArrivedWhole(dlResult)
+}
+
+// downloadArrivedWhole reports whether as many bytes arrived as upstream said
+// there would be. A result with no total is treated as whole: upstream did not
+// say, so there is nothing to disagree with.
+func downloadArrivedWhole(res *opendrive.DownloadResult) bool {
+	if res == nil {
+		return false
+	}
+	if res.Total <= 0 {
+		return true
+	}
+	return res.Written == res.Total
+}
+
+// baseNameOf is the last element of a remote path, which always uses forward
+// slashes whatever this machine's separator is. It gives a cache hit a filename
+// for Content-Disposition without an upstream lookup.
+func baseNameOf(p string) string {
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
 
 // handleArchive downloads a folder as a ZIP.

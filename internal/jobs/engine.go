@@ -177,6 +177,7 @@ func (e *Engine) Submit(spec Spec) (*Job, error) {
 		ID:         newJobID(),
 		Kind:       spec.Kind,
 		State:      StateQueued,
+		Phase:      phaseFor(spec.Kind),
 		LocalPath:  spec.LocalPath,
 		RemotePath: spec.RemotePath,
 		BytesTotal: spec.Size,

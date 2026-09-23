@@ -120,8 +120,8 @@ From inside the folder you unpacked:
 ./odctl status
 ```
 
-That registers the daemon with whatever your system uses — systemd, launchd or
-the Windows Service Manager — so it starts when you log in. It runs **from this
+That registers the daemon with whatever your system uses — systemd on Linux,
+launchd on macOS — so it starts when you log in. It runs **from this
 folder**, with the absolute path written into the service definition, because no
 service manager reads your shell configuration.
 
@@ -182,17 +182,6 @@ LaunchDaemon would start earlier, run as root, and be looking for a file it has
 no business reading. Nothing prompts you for anything — macOS is not holding the
 credentials.
 
-### Windows
-
-`odctl daemon install` from an Administrator prompt registers a Windows Service,
-pointed at the folder you unpacked. `deploy/windows/README.txt` has the manual
-equivalent.
-
-`.env` and `.env.key` live in that folder like everywhere else. NTFS ignores the
-POSIX mode bits Go sets, so the bridge tightens the access control list with
-`icacls` instead: both files end up readable by your account and nobody else,
-including Administrators.
-
 ---
 
 ## 4. Containers
@@ -239,7 +228,95 @@ Four things worth getting right:
 
 ---
 
-## 5. The credential files
+## 5. The local cache
+
+Off by default. Turn it on by giving it a directory:
+
+```bash
+./opendrived --cache-dir ./cache
+```
+
+It does two different things, and the second one changes what a successful upload
+means, so it is worth a minute.
+
+**Reading** is the easy half. A file you have read once is served from your own
+disk the next time, and `X-Cache: HIT` on the response says so. Losing the cache
+costs a download; nothing else.
+
+**Writing** is the half to understand. With write-back on — the default when the
+cache is on — `odctl up` and `PUT /v1/upload/stream` come back as soon as the file
+is on the bridge's disk, and the bridge uploads it to OpenDrive afterwards. Your
+script gets on with its work instead of waiting for the network.
+
+The cost is that for a while, **the bridge is the only place that file exists.**
+Everything below follows from that one sentence.
+
+### Is it safe to stop?
+
+```bash
+./odctl cache status
+```
+
+The last line says so in words — not a number to interpret:
+
+```
+Not yet on OpenDrive: 41.2 MB in 3 file(s), limit 5.0 GB
+Longest wait:         12s
+
+NOT safe to stop the bridge yet: 41.2 MB has not reached OpenDrive.
+Run `odctl cache flush --wait` to send it now.
+```
+
+`odctl cache flush --wait` returns when there is nothing left. `odctl cache
+objects --unsent` lists what is outstanding, and why, if an upload keeps failing.
+
+Stopping the service is handled for you: on SIGTERM the daemon stops accepting
+writes, finishes uploading what it can, and only then exits. If it runs out of
+time it writes one log line per unfinished file, naming each one and where its
+data is, so nothing vanishes without a record. `TimeoutStopSec` in the systemd
+unit is set high enough to let that happen.
+
+### What it will not do
+
+- **It never discards a file to make room.** Under capacity pressure only files
+  OpenDrive already has are evicted. If the unsent data reaches
+  `--cache-max-dirty-bytes`, new writes are **refused** — HTTP 507, and a message
+  saying nothing was lost — rather than something being thrown away.
+- **`cache refresh` and `cache clear` refuse to touch anything unsent.** They
+  answer 409 and say what is in the way.
+- **A crash loses nothing that was acknowledged.** Every write is recorded in a
+  journal that is flushed to the platter before the bridge answers, so a restart
+  finds the unsent files and re-queues them. The only thing a crash costs is a
+  write that was still in flight, which was never acknowledged.
+
+### The cache directory is not encrypted
+
+`.env` is encrypted. **The cache is not.** It holds your files as they are,
+protected by the directory's permissions — the bridge sets 0700, so only the
+account running the bridge can read it — and by whatever encryption the disk
+itself provides. If that is not enough for the files you work with, either leave
+the cache off or put it on an encrypted volume.
+
+### In a container
+
+Put the cache on a named volume. A container's own filesystem is disposable and
+recreating a container is routine, so a cache inside it would take unsent files
+with it. `deploy/docker/docker-compose.yaml` does this by default; §8.3.1 of the
+whitepaper has the full argument. The daemon also checks at startup and reports
+`durable: false` on `/v1/cache/status`, which `odctl cache status` prints as a
+warning — but a default that is right beats a warning that is read.
+
+### Turning it off again
+
+`--cache-write-back=false` keeps the read cache and sends writes straight to
+OpenDrive, which is the honest setting anywhere the cache directory might not
+survive. Removing `--cache-dir` switches the whole thing off. Neither loses
+anything: if files are still waiting when you turn write-back off, the daemon says
+so at startup and they stay on disk until you turn it back on.
+
+---
+
+## 6. The credential files
 
 Two files, in the folder you unpacked, on every platform:
 
@@ -272,7 +349,7 @@ start.
 
 ---
 
-## 6. When something is wrong
+## 7. When something is wrong
 
 Every message the bridge produces is meant to be actionable on its own. If one
 is not, that is a bug worth reporting.
@@ -300,26 +377,6 @@ even when OpenDrive is unreachable, and it will say which of these you are in:
 | 6 | no bridge is running to talk to |
 | 7 | OpenDrive refused this and will refuse it again; retrying will not help |
 
-**On Windows, if you use Git Bash.** Git Bash changes any argument that starts
-with a slash into a Windows path before `odctl` ever runs, so
-
-```
-odctl ls /Documents
-```
-
-reaches the program as `odctl ls "C:/Program Files/Git/Documents"` and cannot
-work. `odctl` recognises the result and says so, but it cannot undo it. Either
-
-```
-MSYS_NO_PATHCONV=1 odctl ls /Documents
-```
-
-or use PowerShell or Command Prompt, where nothing is rewritten. This affects
-only paths in your OpenDrive account; local filenames are unaffected, so
-`odctl up report.pdf /Documents/report.pdf` needs the same treatment while
-`odctl up C:\reports\report.pdf .` does not. (If you use MSYS2 rather than Git
-for Windows, the equivalent is `MSYS2_ARG_CONV_EXCL='*'`.)
-
 **Logs.** `journalctl -u opendrived` on Linux, `log show --predicate 'process ==
 "opendrived"'` on macOS, `docker logs opendrive-bridge` for a container. Every
 line has a `request_id`; quote it in a bug report and it can be matched to the
@@ -335,7 +392,7 @@ nothing behind.
 
 ---
 
-## 7. Using it from your own programs
+## 8. Using it from your own programs
 
 The daemon is an ordinary HTTP API on `127.0.0.1:9750`; the full specification is
 `docs/bridge-openapi.yaml`, which you can hand to most code generators.
@@ -395,6 +452,6 @@ One more is suppressed at the call site: the retry backoff uses a
 non-cryptographic random source for jitter. Jitter exists so that many clients do
 not retry in lockstep, which needs spread rather than unpredictability.
 
-The three OS keyring backends that used to appear here are gone — v1.2 removed
+The three OS keyring backends that used to appear here are gone — v1.1 removed
 them along with about a thousand lines of code and the CI jobs that tested each
 vault on its own runner.

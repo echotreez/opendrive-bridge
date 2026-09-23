@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"strconv"
+	"text/template"
+
+	"github.com/echotreez/opendrive-bridge/internal/datacache"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -92,16 +95,13 @@ func TestTheServiceRunsInTheFolderItWasInstalledFrom(t *testing.T) {
 	}
 }
 
-func TestTheDaemonBinaryIsNamedForThePlatform(t *testing.T) {
-	got := daemonBinaryName()
-	if runtime.GOOS == "windows" {
-		if !strings.HasSuffix(got, ".exe") {
-			t.Errorf("on Windows the daemon is %q", got)
-		}
-		return
-	}
-	if strings.Contains(got, ".exe") {
-		t.Errorf("off Windows the daemon is %q", got)
+// Both supported platforms name the daemon the same way, and neither wants an
+// executable suffix. This used to branch on Windows; it is kept as a test rather
+// than deleted because resolveDaemonPath looks for this exact filename beside
+// odctl, so the two must not drift apart.
+func TestTheDaemonBinaryHasNoExecutableSuffix(t *testing.T) {
+	if got := daemonBinaryName(); got != "opendrived" {
+		t.Errorf("the daemon is %q, want %q", got, "opendrived")
 	}
 }
 
@@ -194,12 +194,11 @@ func TestInstallWritesTheBlockWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the profile was not written: %v", err)
 	}
-	// Assert the line the code actually writes, not the bare directory. They are
-	// the same string on a POSIX path and not on a Windows one, because pathLine
-	// formats with %q and %q escapes the backslashes — so this read as a failure
-	// on Windows while the block was perfectly correct. Comparing against
-	// pathLine is also the real contract: the block contains the PATH line for
-	// this directory, however that line has to be spelled.
+	// Assert the line the code actually writes, not the bare directory: the block
+	// contains the PATH line for this directory, however that line is spelled.
+	// The two differ whenever pathLine's %q has anything to escape, which is how
+	// this test came to fail on a Windows path while the block it was reading was
+	// perfectly correct.
 	if !strings.Contains(string(raw), profileBegin) ||
 		!strings.Contains(string(raw), pathLine(dir)) {
 		t.Errorf("the block is not what was expected:\n%s", raw)
@@ -241,4 +240,66 @@ func runCLI(t *testing.T, args ...string) (int, string, string) {
 	opts.SetOutput(&out, &errOut)
 	code := Execute(args, opts)
 	return code, out.String(), errOut.String()
+}
+
+// The service definition odctl installs has to allow the cache time to drain.
+//
+// A constant nobody checks is a wish. These assert the two templates carry the
+// directive, that it is the same number as the Go constant, and — the part worth
+// the test — that it is larger than the cache's own drain budget, because the
+// daemon must be the thing that decides it has run out of time. If it is killed
+// first, the files it could not finish are lost with no record of which they were.
+func TestTheInstalledServiceAllowsTheCacheTimeToDrain(t *testing.T) {
+	if stopTimeoutSecondsLiteral != strconv.Itoa(stopTimeoutSeconds) {
+		t.Fatalf("the templates say %s seconds and the constant says %d",
+			stopTimeoutSecondsLiteral, stopTimeoutSeconds)
+	}
+
+	// Larger than datacache's DefaultDrainTimeout, with room to spare. If somebody
+	// raises the drain default without raising this, the service manager becomes
+	// the thing that ends the drain, and it ends it silently.
+	drain := int(datacache.DefaultDrainTimeout.Seconds())
+	if stopTimeoutSeconds <= drain {
+		t.Errorf("the service stop timeout is %ds and the cache's drain budget is %ds; "+
+			"the service manager would kill the daemon before it could report what it "+
+			"had not finished", stopTimeoutSeconds, drain)
+	}
+
+	if !strings.Contains(systemdUserUnit, "TimeoutStopSec="+stopTimeoutSecondsLiteral) {
+		t.Error("the systemd unit odctl writes has no TimeoutStopSec")
+	}
+	if !strings.Contains(launchdAgent, "<key>ExitTimeOut</key>") ||
+		!strings.Contains(launchdAgent, "<integer>"+stopTimeoutSecondsLiteral+"</integer>") {
+		t.Error("the launchd plist odctl writes has no ExitTimeOut")
+	}
+
+	// Both templates must still be the shape the library expects: ExecStart and
+	// ProgramArguments are what actually start the daemon, and a copy that lost one
+	// would install a service that does nothing.
+	for _, want := range []string{"ExecStart={{.Path|cmdEscape}}", "WorkingDirectory"} {
+		if !strings.Contains(systemdUserUnit, want) {
+			t.Errorf("the systemd template no longer contains %q", want)
+		}
+	}
+	for _, want := range []string{"<key>ProgramArguments</key>", "{{html .Path}}", "WorkingDirectory"} {
+		if !strings.Contains(launchdAgent, want) {
+			t.Errorf("the launchd template no longer contains %q", want)
+		}
+	}
+}
+
+// And the templates parse as the templates the library will execute. A syntax
+// error would only surface when somebody ran `daemon install`.
+func TestTheServiceTemplatesParse(t *testing.T) {
+	funcs := template.FuncMap{
+		"cmd":       func(s string) string { return s },
+		"cmdEscape": func(s string) string { return s },
+		"bool":      func(b bool) string { return "true" },
+	}
+	if _, err := template.New("systemd").Funcs(funcs).Parse(systemdUserUnit); err != nil {
+		t.Errorf("the systemd template does not parse: %v", err)
+	}
+	if _, err := template.New("launchd").Funcs(funcs).Parse(launchdAgent); err != nil {
+		t.Errorf("the launchd template does not parse: %v", err)
+	}
 }

@@ -5,12 +5,19 @@
 // Pointing it at the real OpenDrive would make that test depend on somebody's
 // account and on the network, and would say nothing extra about the binary.
 //
-// It answers the handful of endpoints a login and a listing touch, and it
-// answers them the way the live API does — including the details the SDK was
-// built around, because a mock that is politer than the real thing tests
-// nothing. In particular: idbypath takes the path without a leading slash
-// (D22), the listing splits folders and files into separate arrays, and numbers
-// arrive as strings (D19).
+// It answers the endpoints a login, a listing and a transfer touch, and it answers
+// them the way the live API does — including the details the SDK was built around,
+// because a mock that is politer than the real thing tests nothing. In particular:
+// idbypath takes the path without a leading slash (D22), the listing splits folders
+// and files into separate arrays, numbers arrive as strings (D19), and the upload
+// chunk endpoint reports TotalWritten for *this chunk* rather than a running total
+// (D35).
+//
+// The transfer endpoints were added for the caching gateway. Until then the smoke
+// test proved a login and a listing and stopped there, which meant no transfer had
+// ever been driven end to end on a freshly built binary — and the gateway is the
+// first part of this program that holds somebody's data, so "it compiled" was a
+// long way from good enough.
 package main
 
 import (
@@ -22,6 +29,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -106,6 +114,55 @@ func handle(w http.ResponseWriter, r *http.Request) {
 
 	case strings.Contains(path, "folder.json") && r.Method == http.MethodPost:
 		_, _ = io.WriteString(w, `{"FolderID":"FNEW","Name":"created"}`)
+
+	// The four-step upload of §2.4, in the order the SDK sends it.
+	case strings.Contains(path, "create_file"):
+		// A hash was supplied and this is not a dedupe hit, so a temp location
+		// comes back and the content is expected.
+		_, _ = io.WriteString(w, `{"FileId":"UPLOADED","TempLocation":"tmp/smoke","DuplicateFile":false}`)
+
+	case strings.Contains(path, "open_file_upload"):
+		_, _ = io.WriteString(w, `{"TempLocation":"tmp/smoke"}`)
+
+	case strings.Contains(path, "upload_file_chunk"):
+		// TotalWritten is this chunk's size, not the running total (D35). Echoing
+		// the declared chunk_size reproduces that exactly, and a mock that returned
+		// a cumulative figure would let a regression through.
+		//
+		// Parsed rather than echoed as text. Two reasons, and gosec pointed at the
+		// second: a malformed chunk_size would otherwise produce invalid JSON, which
+		// would confuse a test rather than catch a bug — and copying a query
+		// parameter into a response body is reflection, which is a habit worth not
+		// having even in a test double.
+		n, err := strconv.ParseInt(r.URL.Query().Get("chunk_size"), 10, 64)
+		if err != nil || n < 0 {
+			n = 0
+		}
+		_, _ = fmt.Fprintf(w, `{"TotalWritten":%d}`, n)
+
+	case strings.Contains(path, "close_file_upload"):
+		// The hash the client declared is echoed back as the stored file's hash.
+		// The caching gateway checks the two against each other rather than
+		// trusting the success (a 200 proves nothing), so a mock that invented a
+		// hash here would make every flush look like corruption.
+		hash, _ := body["file_hash"].(string)
+		size, _ := body["file_size"]
+		_, _ = fmt.Fprintf(w, `{"FileId":"UPLOADED","Name":"uploaded","Size":%q,"FileHash":%q}`,
+			fmt.Sprint(size), hash)
+
+	case strings.Contains(path, "file/info.json"), strings.Contains(path, "file/filesettings"):
+		_, _ = io.WriteString(w, `{"FileId":"FILE1","Name":"hello.txt","Size":"11",
+			"FileHash":"5d41402abc4b2a76b9719d911017c592","DateModified":1785000000}`)
+
+	// Download. test=1 is the cheap pre-flight; anything else is the bytes.
+	case strings.Contains(path, "download/file.json"):
+		if r.URL.Query().Get("test") == "1" {
+			_, _ = io.WriteString(w, `{"result":true,"dl_stream_status":true,"BWExceeded":false}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", `attachment; filename="hello.txt"`)
+		_, _ = w.Write([]byte("hello world"))
 
 	default:
 		_, _ = io.WriteString(w, `{}`)
