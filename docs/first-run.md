@@ -222,8 +222,9 @@ Three more things worth knowing:
   bridge sets it so only your account can read it) and by whatever your disk
   provides. If that is not enough for what you work with, leave the cache off or put
   it on an encrypted volume.
-- **In a container, put it on a named volume.** See the warning at the top of the
-  Docker section below — this is the one place where getting it wrong loses data.
+- **In a container, put it outside the container** — a host directory, or a named
+  volume on Docker Desktop. See the warning at the top of the Docker section below;
+  this is the one place where getting it wrong loses data.
 
 If you would rather keep the faster reads and none of the above,
 `--cache-write-back=false` sends writes straight to OpenDrive as they always were.
@@ -245,10 +246,16 @@ If you would rather keep the faster reads and none of the above,
 > `docker compose down`, upgrading the image — all routine, and all of them would
 > take unsent files with them, after you had been told they were stored.
 >
-> So: **put the cache on a named volume**, as `-v odb-cache:/data/cache` does
-> below and as `deploy/docker/docker-compose.yaml` does by default. The daemon
-> checks at startup and warns if you have not, but a warning in a log is a poor
-> second to getting it right.
+> So: **put the cache in a directory on the host**, mounted into the container,
+> as the command below and `deploy/docker/docker-compose.yaml` both do. If the
+> container dies part-way, starting it again replays the cache's journal from
+> that directory and sends whatever had not gone up. Docker's own clean-up
+> commands (`docker compose down -v`, `docker volume prune`) cannot touch it, and
+> you can see what is in it.
+>
+> On **Docker Desktop for Mac or Windows**, use a named volume
+> (`-v odb-cache:/data/cache`) instead for now: a host directory there goes through
+> the VM's file-sharing layer, and whether that honours fsync has not been measured.
 >
 > If you would rather not think about it, set `ODB_CACHE_WRITE_BACK=false`.
 > Uploads then wait for OpenDrive, as they always did, and nothing is ever held
@@ -262,15 +269,21 @@ laptop and mount it in.
 cp .env.example .env
 $EDITOR .env          # put your OpenDrive username and password in
 
+# The cache directory has to belong to the user the image runs as (uid 65532).
+mkdir -p cache && sudo chown 65532:65532 cache
+
 docker run -d --name opendrive-bridge \
   -p 127.0.0.1:9750:9750 \
   -e ODB_API_KEY="$(openssl rand -hex 32)" \
   -e ODB_CACHE_DIR=/data/cache \
   -v "$PWD/.env:/data/.env" \
   -v odb-state:/data/jobs \
-  -v odb-cache:/data/cache \
+  -v "$PWD/cache:/data/cache" \
   ghcr.io/echotreez/opendrive-bridge:1.1.0
 ```
+
+Skip the `chown` and the bridge refuses to start, naming the directory and the
+command to run — it will not quietly run without its cache.
 
 The first start rewrites `.env` encrypted and creates `.env.key` next to it — on
 your machine, through the mount. Nothing is baked into the image.
@@ -289,6 +302,11 @@ Three things to get right:
   a non-loopback address makes the daemon insist on a key. On your own machine it
   generates one into `.env` and you never see it.
 - **Back up `.env` and `.env.key` together.** Either one alone is useless.
+- **One bridge per cache directory.** The bridge locks it, so a second container —
+  or a bridge on the host — pointed at the same folder refuses to start, rather
+  than two of them writing one journal and losing files between them. The lock is
+  released when the holder exits, however it exits, so a crash never leaves the
+  directory stuck.
 - **The cache directory is not encrypted.** `.env` is; the cache is not. It holds
   your files exactly as they are, protected only by the directory's permissions
   and by whatever the disk underneath gives you. The bridge sets the directory to

@@ -21,6 +21,9 @@ import (
 // The name is not Cache, because `internal/cache` already owns that word for the
 // metadata cache and §3.5.4 asks for the two to be impossible to confuse.
 type DataCache struct {
+	// lock is held for the gateway's whole life; see lock.go.
+	lock *dirLock
+
 	cfg Config
 	log *slog.Logger
 	jnl *journal
@@ -86,8 +89,35 @@ func Open(cfg Config) (*DataCache, error) {
 	// that just created it. 0700 is the tightest mode a usable directory has, and
 	// it is the same mode §9.2.2 uses for the credential file's directory.
 	if err := os.Chmod(cfg.Dir, 0o700); err != nil {
+		// The usual cause is a directory owned by somebody else — most often a host
+		// directory bind-mounted into a container without being chowned first,
+		// because the image runs as uid 65532 and the host created the folder as
+		// the host user or as root. "operation not permitted" is accurate and gives
+		// the reader nothing to do, so the fix goes in the message.
+		if errors.Is(err, os.ErrPermission) {
+			return nil, fmt.Errorf("datacache: cannot use %s: the bridge runs as uid %d and has to "+
+				"own its cache directory, but this one belongs to someone else. On the host, "+
+				"`chown %d %s` (in a container, chown the host directory you mounted there)",
+				cfg.Dir, os.Getuid(), os.Getuid(), cfg.Dir)
+		}
 		return nil, fmt.Errorf("datacache: cannot restrict %s: %w", cfg.Dir, err)
 	}
+
+	// The lock comes before the journal is read, not after: reading a journal
+	// another instance is appending to would build an index from half of its
+	// records. See lock.go for why flock and not a pid file.
+	lock, err := lockDir(cfg.Dir)
+	if err != nil {
+		return nil, err
+	}
+	// Every failure from here on has to give the directory back, or a start that
+	// failed for some unrelated reason would leave the next attempt refused.
+	opened := false
+	defer func() {
+		if !opened {
+			_ = lock.release()
+		}
+	}()
 
 	replayed, err := replayJournal(cfg.Dir)
 	if err != nil {
@@ -95,6 +125,7 @@ func Open(cfg Config) (*DataCache, error) {
 	}
 
 	c := &DataCache{
+		lock:     lock,
 		cfg:      cfg,
 		log:      cfg.Logger,
 		objs:     replayed.objects,
@@ -153,6 +184,7 @@ func Open(cfg Config) (*DataCache, error) {
 			slog.Int("datacache_unsent_objects", unsent),
 			slog.String("datacache_dir", cfg.Dir))
 	}
+	opened = true
 	return c, nil
 }
 
@@ -735,7 +767,13 @@ func (c *DataCache) Close() error {
 		}
 	})
 	c.workers.Wait()
-	return c.jnl.close()
+	err := c.jnl.close()
+	// Last, after the journal is closed: releasing first would let a new instance
+	// open the directory while this one could still be writing to it.
+	if lerr := c.lock.release(); err == nil {
+		err = lerr
+	}
+	return err
 }
 
 // unixNano converts a journal timestamp back to a time, treating zero as zero
