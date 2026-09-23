@@ -211,6 +211,36 @@ else
   check $? "the cache directory is 0700 (got ${mode:-unknown})"
 fi
 
+say "the web interface"
+# Compiled into the binary with go:embed, so this proves the assets are really in the
+# release rather than only in the source tree — which is the kind of thing that breaks
+# silently when a build tag or an embed pattern changes.
+if command -v curl >/dev/null 2>&1; then
+  code=$(curl -sS -o "$WORK/ui.html" -w '%{http_code}' -L "http://127.0.0.1:$PORT/ui/")
+  [ "$code" = "200" ]
+  check $? "the interface is served (got $code)"
+  grep -q "OpenDrive Bridge" "$WORK/ui.html"
+  check $? "the page is the interface"
+
+  # Every panel §12.1.1 asks for, and the shutdown verdict element in particular,
+  # since that one is a contract rather than a feature.
+  for id in panel-status panel-auth panel-rate panel-jobs panel-cache cache-verdict; do
+    grep -q "id=\"$id\"" "$WORK/ui.html"
+    check $? "the page has $id"
+  done
+
+  # The assets it pulls in are served too, and from this daemon.
+  for asset in app.js style.css; do
+    code=$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/ui/$asset")
+    [ "$code" = "200" ]
+    check $? "$asset is served (got $code)"
+  done
+
+  # And the browser is told not to fetch anything from anywhere.
+  curl -sS -D - -o /dev/null "http://127.0.0.1:$PORT/ui/" | grep -qi "content-security-policy"
+  check $? "a Content-Security-Policy is sent"
+fi
+
 say "a failure reports itself properly"
 "$ODCTL" --addr "127.0.0.1:$PORT" stat /Smoke/nope.txt > "$WORK/err.txt" 2>&1
 code=$?

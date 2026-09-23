@@ -13,6 +13,10 @@ odctl up ./report.pdf /Documents/report.pdf     # a command line
 curl 127.0.0.1:9750/v1/ls?path=/Documents       # and a plain local HTTP API
 ```
 
+There is also a small web page at `http://127.0.0.1:9750/ui` — the account, the
+transfers in progress, and whether it is safe to shut the bridge down. It is served
+by the same daemon and fetches nothing from the internet.
+
 **Who it is for.** Anyone who wants OpenDrive in a script, a backup job or a
 program of their own — and does not want to write an API client to get there.
 You need a terminal; you do not need Go, and you do not need to have heard of

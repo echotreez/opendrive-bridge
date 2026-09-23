@@ -325,7 +325,46 @@ so at startup and they stay on disk until you turn it back on.
 
 ---
 
-## 6. The credential files
+## 6. The web interface
+
+`http://127.0.0.1:9750/ui`, served by the daemon itself. Nothing to install, nothing
+to build, and no new files in the release: it is compiled into `opendrived`.
+
+Five things, all of them the same figures `odctl` reports:
+
+- the account, the sign-in state and how much of your storage is used
+- somewhere to sign in, which is the natural place to fix it if your password changed
+  elsewhere
+- a transfer-rate line
+- the transfers in progress, with the leg each one is on and a button to stop it
+- the cache, with **whether it is safe to stop the bridge** in the largest text on the
+  page
+
+**It fetches nothing from the internet.** No fonts, no chart library, no analytics.
+A local service holding your OpenDrive password has no business making outbound
+requests because you opened a page, and a machine with no internet should not have a
+broken interface. A `Content-Security-Policy` makes the browser enforce that rather
+than leaving it to good intentions.
+
+**On loopback there is nothing to configure.** The daemon generates an API key for
+clients that need one and does not require it on `127.0.0.1`, so opening the page
+works. If the bridge listens on any other address it will not answer without the key
+you configured, and the page asks for it — kept for that browser tab only, sent as a
+header, and never put in a web address, because a URL reaches the browser history and
+every log in between.
+
+**It is a client, not a back door.** The page has no other route to OpenDrive: every
+number on it arrives over the same HTTP API `odctl` uses, and every error it shows is
+the daemon's own wording, unedited.
+
+If you would rather it were not there, bind the daemon to loopback — which is the
+default — and it is reachable only from that machine. There is no switch to remove
+it, because there is nothing to remove: it is a few static files inside a binary you
+are already running.
+
+---
+
+## 7. The credential files
 
 Two files, in the folder you unpacked, on every platform:
 
@@ -358,7 +397,7 @@ start.
 
 ---
 
-## 7. When something is wrong
+## 8. When something is wrong
 
 Every message the bridge produces is meant to be actionable on its own. If one
 is not, that is a bug worth reporting.
@@ -401,7 +440,7 @@ nothing behind.
 
 ---
 
-## 8. Using it from your own programs
+## 9. Using it from your own programs
 
 The daemon is an ordinary HTTP API on `127.0.0.1:9750`; the full specification is
 `docs/bridge-openapi.yaml`, which you can hand to most code generators.
