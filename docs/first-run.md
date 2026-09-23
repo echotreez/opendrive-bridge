@@ -32,6 +32,11 @@ Pick your section:
 - [Linux](#linux)
 - [Docker](#docker) — the same two files, mounted in
 
+Once it is running, `http://127.0.0.1:9750/ui` shows the same things `odctl` does in
+a browser: the account, transfers in progress, and — if you turn the cache on —
+whether anything is still waiting to be uploaded. It is part of the daemon; there is
+nothing to install and it fetches nothing from the internet.
+
 For running it permanently in the background, see
 [deployment.md](./deployment.md). This page is only about the first five
 minutes.

@@ -1,0 +1,230 @@
+/*
+  The interface's appearance (whitepaper §12.1.1).
+
+  System fonts only. A web font would be either a file to ship and review or a
+  request to somewhere else, and neither is worth it for a status page that has to
+  work on a machine with no internet.
+
+  Light and dark both come from prefers-color-scheme, because the person opening this
+  did not choose to visit a website and should not have to adjust to one.
+*/
+
+:root {
+  --ink: #1a1a1a;
+  --quiet: #5a5a5a;
+  --faint: #d4d4d4;
+  --paper: #fdfdfc;
+  --panel: #ffffff;
+  --line: #e4e4e1;
+  --safe: #1d6b3f;
+  --safe-bg: #e8f5ec;
+  --unsafe: #97400b;
+  --unsafe-bg: #fdf0e4;
+  --bad: #9b1c1c;
+  --bad-bg: #fdeaea;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e8e8e6;
+    --quiet: #a0a09c;
+    --faint: #4a4a48;
+    --paper: #17171a;
+    --panel: #1f1f23;
+    --line: #32323a;
+    --safe: #7fd3a0;
+    --safe-bg: #14291d;
+    --unsafe: #f0b078;
+    --unsafe-bg: #2d1f12;
+    --bad: #f0a0a0;
+    --bad-bg: #2d1414;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 1.5rem 3rem;
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  max-width: 62rem;
+  margin-inline: auto;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem 0 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+h1 { font-size: 1.25rem; margin: 0; font-weight: 600; }
+h2 { font-size: 1rem; margin: 0 0 .75rem; font-weight: 600; }
+
+main {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+}
+
+section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1rem 1.1rem 1.1rem;
+}
+
+/* The cache panel is the widest, because its verdict is the thing people came for. */
+#panel-cache, #panel-jobs { grid-column: 1 / -1; }
+#panel-cache.off { opacity: .6; }
+
+dl {
+  display: grid;
+  grid-template-columns: minmax(8rem, auto) 1fr;
+  gap: .3rem .9rem;
+  margin: 0;
+}
+dt { color: var(--quiet); }
+dd { margin: 0; overflow-wrap: anywhere; }
+
+.quiet { color: var(--quiet); font-size: .875rem; }
+footer { margin-top: 2rem; text-align: center; }
+
+a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .9em;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 .25em;
+}
+
+/* ---------------------------------------------------------------- the verdict */
+
+/*
+  §3.5.2 rule 3 on the screen. Deliberately loud: not knowing whether data is in
+  flight at shutdown is how this kind of gateway hurts people, so the answer gets the
+  most prominent element on the page rather than a row in a table.
+*/
+.verdict {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  padding: .7rem .9rem;
+  border-radius: 5px;
+  margin-bottom: 1rem;
+  border: 1px solid transparent;
+}
+.verdict-safe { color: var(--safe); background: var(--safe-bg); border-color: var(--safe); }
+.verdict-unsafe { color: var(--unsafe); background: var(--unsafe-bg); border-color: var(--unsafe); }
+.verdict-unknown { color: var(--quiet); background: var(--paper); border-color: var(--line); }
+
+/* §8.3.1's container warning. Not a verdict, but not a footnote either. */
+.warning {
+  color: var(--unsafe);
+  background: var(--unsafe-bg);
+  border: 1px solid var(--unsafe);
+  border-radius: 5px;
+  padding: .6rem .8rem;
+  margin-bottom: 1rem;
+  font-size: .9375rem;
+}
+
+/* ---------------------------------------------------------------- errors */
+
+#errors { margin-top: 1rem; }
+.error {
+  position: relative;
+  color: var(--bad);
+  background: var(--bad-bg);
+  border: 1px solid var(--bad);
+  border-radius: 5px;
+  padding: .6rem 2.2rem .6rem .8rem;
+  margin-bottom: .5rem;
+}
+.dismiss {
+  position: absolute;
+  top: .3rem;
+  right: .4rem;
+  background: none;
+  border: 0;
+  color: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0 .3rem;
+}
+.joberror { color: var(--bad); font-size: .875rem; padding-top: 0 !important; }
+
+/* ---------------------------------------------------------------- tables */
+
+table { width: 100%; border-collapse: collapse; margin-top: .75rem; }
+th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line); }
+th { color: var(--quiet); font-weight: 500; font-size: .8125rem; }
+td { overflow-wrap: anywhere; }
+
+.state-failed { color: var(--bad); }
+.state-succeeded { color: var(--safe); }
+.unsent { color: var(--unsafe); font-weight: 600; }
+.sent { color: var(--quiet); }
+
+/* ---------------------------------------------------------------- controls */
+
+button {
+  font: inherit;
+  padding: .35rem .8rem;
+  border-radius: 5px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+}
+button.secondary { background: transparent; color: var(--ink); border-color: var(--line); }
+button:hover { opacity: .85; }
+
+form { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 .6rem; }
+input {
+  font: inherit;
+  padding: .35rem .5rem;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper);
+  color: var(--ink);
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+#cache-actions { display: flex; gap: .5rem; margin: 1rem 0 .5rem; flex-wrap: wrap; }
+
+#keybox {
+  margin-top: 1rem;
+  border-color: var(--unsafe);
+}
+
+canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--paper);
+}
+
+/* ---------------------------------------------------------------- the pill */
+
+.pill {
+  font-size: .8125rem;
+  padding: .2rem .6rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--quiet);
+  white-space: nowrap;
+}
+.pill-ok { color: var(--safe); border-color: var(--safe); background: var(--safe-bg); }
+.pill-down { color: var(--bad); border-color: var(--bad); background: var(--bad-bg); }
+.pill-auth { color: var(--unsafe); border-color: var(--unsafe); background: var(--unsafe-bg); }
