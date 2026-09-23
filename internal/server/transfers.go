@@ -190,20 +190,28 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	t, err := s.resolve(r.Context(), remote)
-	if err != nil {
-		WriteError(w, r, err)
-		return
+	// The cache is consulted before the path is resolved upstream, for the same
+	// reason the streaming endpoint does it in that order: a file the gateway is
+	// holding but has not uploaded yet does not exist upstream, and resolving first
+	// would answer "no such path" for a file the caller just wrote. It also saves a
+	// metadata round trip on every hit.
+	spec := jobs.Spec{
+		Kind: jobs.KindDownload, LocalPath: req.LocalPath, RemotePath: remote,
 	}
-	if t.Kind != kindFile {
-		WriteError(w, r, BadRequest(remote+" is a folder. Use the archive download for a whole folder."))
-		return
+	if s.datacache == nil || !s.datacache.Has(remote) {
+		t, err := s.resolve(r.Context(), remote)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		if t.Kind != kindFile {
+			WriteError(w, r, BadRequest(remote+" is a folder. Use the archive download for a whole folder."))
+			return
+		}
+		spec.FileID, spec.Size = t.ID, t.Entry.Size
 	}
 
-	job, err := s.engine.Submit(jobs.Spec{
-		Kind: jobs.KindDownload, FileID: t.ID, LocalPath: req.LocalPath,
-		RemotePath: remote, Size: t.Entry.Size,
-	})
+	job, err := s.engine.Submit(spec)
 	if err != nil {
 		WriteError(w, r, err)
 		return

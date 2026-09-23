@@ -244,9 +244,18 @@ disk the next time, and `X-Cache: HIT` on the response says so. Losing the cache
 costs a download; nothing else.
 
 **Writing** is the half to understand. With write-back on — the default when the
-cache is on — `odctl up` and `PUT /v1/upload/stream` come back as soon as the file
-is on the bridge's disk, and the bridge uploads it to OpenDrive afterwards. Your
-script gets on with its work instead of waiting for the network.
+cache is on — a file you upload is copied to the bridge's own disk first and sent to
+OpenDrive afterwards. `PUT /v1/upload/stream` answers 202 as soon as that first step
+is done; `odctl up` waits for both, and `odctl jobs` shows which leg it is on.
+
+The point is not that `odctl up` returns sooner. It is that once the first leg is
+done the file is safe on the bridge: a crash, a network outage or OpenDrive having a
+bad afternoon no longer loses it, because the bridge keeps retrying and picks up
+again after a restart. It also means a file you just wrote can be read back
+immediately, which OpenDrive itself does not guarantee.
+
+A file too large for `--cache-max-dirty-bytes` skips the cache and goes straight up,
+so the cache being full never stops an upload.
 
 The cost is that for a while, **the bridge is the only place that file exists.**
 Everything below follows from that one sentence.

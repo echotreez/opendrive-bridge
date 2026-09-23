@@ -92,9 +92,9 @@ var (
 	// through the classification layer — it is this gateway's own state — but it
 	// owes the user the same plain sentence: nothing was lost, it is only not
 	// sent yet.
-	ErrCacheFull = errors.New("the cache is holding as much unsent data as it is allowed to; " +
-		"nothing has been lost, but nothing more can be accepted until some of it reaches " +
-		"OpenDrive — wait, or run `odctl cache flush --wait`")
+	ErrCacheFull error = cacheFullError("the cache is holding as much unsent data as it is " +
+		"allowed to; nothing has been lost, but nothing more can be accepted until some of it " +
+		"reaches OpenDrive — wait, or run `odctl cache flush --wait`")
 	// ErrDirty is returned by operations that would discard unsent data:
 	// refreshing or clearing a dirty entry. It becomes HTTP 409.
 	ErrDirty = errors.New("that would throw away data this cache is still the only copy of; " +
@@ -202,3 +202,16 @@ func (discardHandler) Enabled(context.Context, slog.Level) bool  { return false 
 func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
 func (h discardHandler) WithAttrs([]slog.Attr) slog.Handler      { return h }
 func (h discardHandler) WithGroup(string) slog.Handler           { return h }
+
+// cacheFullError carries a CacheFull() marker so that a caller can recognise this
+// condition without importing this package.
+//
+// The job engine is the caller that needs it: a file too large for the gateway's
+// unsent allowance is a file to upload directly, not a failed transfer, and the
+// engine decides that by asking the error rather than by comparing it to a sentinel
+// it would have to import. §3.3 asks for the dependency list to stay short, and that
+// argument applies to internal packages depending on each other too.
+type cacheFullError string
+
+func (e cacheFullError) Error() string   { return string(e) }
+func (e cacheFullError) CacheFull() bool { return true }

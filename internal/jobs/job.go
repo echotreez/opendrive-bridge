@@ -78,16 +78,6 @@ const (
 	KindDownload Kind = "download"
 )
 
-// phaseFor is the phase a job the engine owns runs in from start to finish. The
-// engine moves bytes between this machine and OpenDrive; it never has a caching
-// leg, because a job's source or destination is already a local file.
-func phaseFor(k Kind) Phase {
-	if k == KindDownload {
-		return PhaseDownloading
-	}
-	return PhaseUploading
-}
-
 // Error is the failure shape the Bridge REST API serialises (§4.3, §4.5).
 //
 // Every field comes from the classification layer. Code is the stable

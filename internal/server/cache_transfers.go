@@ -24,48 +24,31 @@ import (
 //     journalled; they are not on OpenDrive, and 202 is the status that says
 //     exactly that.
 //
-// # What does not, and why
+// # POST /v1/upload goes through it too, and the story of getting there
 //
-// §4.4.1 lists POST /v1/upload alongside the stream endpoint. That endpoint takes
-// a `local_path` — a file on the machine running the daemon — and it already
-// answers 202 with a job id, because the job engine has owned delivery, retry and
-// crash recovery for it since P3.
+// It did not, at first. The reasoning was that `local_path` names a file already on
+// the daemon's own disk, so copying it into the cache would double the disk it
+// occupies for no durability gain — the job engine has owned retry and crash
+// recovery for that path since P3.
 //
-// Routing it through the cache as well would copy the whole file into the cache
-// directory, doubling the disk it occupies, to gain nothing: the bytes are already
-// on this disk, and the engine already re-queues the transfer after a crash. The
-// one thing a copy would add is protection against the user deleting their own
-// file between the 202 and the upload — which the pre-cache behaviour did not
-// offer either, and which no wording in §4.3 ever promised.
+// The efficiency argument was right and the conclusion was wrong, in a way the smoke
+// test made obvious: `odctl up` and `odctl down` both use the job endpoints, so the
+// entire gateway was unreachable from the command line. A user following the
+// documentation got no caching at all, and §3.5.1 describes the gateway as the thing
+// clients exchange data with rather than a side door for people who write their own
+// HTTP. There was a clue in the specification too, read past at the time: §4.4.1
+// adds a `phase` field distinguishing "client to gateway" from "gateway to
+// OpenDrive", and a job only has two legs if it goes through the gateway.
 //
-// So POST /v1/upload keeps the job engine, and reports `phase` like every other
-// job. The stream endpoint is the one where write-back genuinely matters, because
-// there the bytes arrive in a request body and exist nowhere else once it ends.
+// So it does now — see internal/jobs/cache.go. An upload copies the file in, then
+// waits for the flusher, and does not report success until the second leg finishes. A
+// file too large for the unsent allowance falls back to a direct upload, which is
+// what keeps the disk cost bounded: the honest answer to "the cache is full" is to
+// send the file straight up, not to refuse it.
 //
-// # That reasoning was wrong, and here is what it cost
-//
-// The efficiency argument holds. The conclusion does not, and the smoke test found
-// out why: `odctl up` and `odctl down` both use the job endpoints, so with this
-// design **the entire caching gateway is unreachable from the CLI.** A user
-// following the documentation gets no caching at all, and §3.5.1 describes the
-// gateway as the thing clients exchange data with rather than a side door for
-// people who write their own HTTP.
-//
-// There is also a clue in the specification that was read past. §4.4.1 adds a
-// `phase` field to jobs precisely to distinguish "client to gateway" from "gateway
-// to OpenDrive" — two legs, which a job only has if it goes through the gateway.
-// The field is evidence that POST /v1/upload was meant to.
-//
-// What is missing is the coupling: a job would have to stay open across both legs,
-// moving from `caching` to `uploading`, which means the job engine needs to learn
-// when the flusher finished a particular object. That is a real piece of design —
-// the flusher has its own worker pool on purpose (§10.2d), so that flushing does
-// not compete with transfers a user is watching — and it is not something to
-// improvise at the end of the change that revealed the need for it.
-//
-// So it is written down instead of half-built. Until it exists: the gateway works,
-// it is correct, it is reachable over HTTP, and the CLI does not use it. That is a
-// gap, not a decision, and CLAUDE.md says so where the next person will look.
+// The copy is a real cost and it is the price of the promise. Once a job reports the
+// caching leg done, the gateway owns delivery — and owning delivery while depending
+// on somebody else's file is not owning it.
 
 // cacheState is the response field §4.4.1 asks for.
 const (
