@@ -50,6 +50,25 @@ func (s State) Terminal() bool {
 	return s == StateSucceeded || s == StateFailed || s == StateCancelled
 }
 
+// Phase says which leg of a transfer is in progress (§4.4.1, v1.2).
+//
+// With the caching gateway in front, a write has two segments that can fail and
+// progress independently — client to gateway, then gateway to OpenDrive — and a
+// single progress bar covering both would be a lie in whichever direction it was
+// wrong. The field exists on every job so that a client does not have to work out
+// which shape it is looking at.
+type Phase string
+
+// Job phases.
+const (
+	// PhaseCaching is client to gateway: the bytes are arriving here.
+	PhaseCaching Phase = "caching"
+	// PhaseUploading is gateway to OpenDrive.
+	PhaseUploading Phase = "uploading"
+	// PhaseDownloading is OpenDrive to here.
+	PhaseDownloading Phase = "downloading"
+)
+
 // Kind distinguishes the two transfer directions.
 type Kind string
 
@@ -58,6 +77,16 @@ const (
 	KindUpload   Kind = "upload"
 	KindDownload Kind = "download"
 )
+
+// phaseFor is the phase a job the engine owns runs in from start to finish. The
+// engine moves bytes between this machine and OpenDrive; it never has a caching
+// leg, because a job's source or destination is already a local file.
+func phaseFor(k Kind) Phase {
+	if k == KindDownload {
+		return PhaseDownloading
+	}
+	return PhaseUploading
+}
 
 // Error is the failure shape the Bridge REST API serialises (§4.3, §4.5).
 //
@@ -133,9 +162,15 @@ type Spec struct {
 // Job is one unit of work, and the exact shape /v1/jobs serialises (§4.3). It
 // is also what is persisted, so a crash loses nothing but the in-flight bytes.
 type Job struct {
-	ID         string `json:"id"`
-	Kind       Kind   `json:"kind"`
-	State      State  `json:"state"`
+	ID    string `json:"id"`
+	Kind  Kind   `json:"kind"`
+	State State  `json:"state"`
+	// Phase says which leg is in progress (§4.4.1). A job the engine owns moves
+	// bytes between this machine and OpenDrive, so it is uploading or
+	// downloading throughout; the caching gateway's own writes report their
+	// second leg through /v1/cache/objects rather than as a job, and the reason
+	// is written up in internal/server/transfers.go.
+	Phase      Phase  `json:"phase,omitempty"`
 	LocalPath  string `json:"local_path,omitempty"`
 	RemotePath string `json:"remote_path,omitempty"`
 

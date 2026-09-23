@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/echotreez/opendrive-bridge/internal/datacache"
 	"github.com/echotreez/opendrive-bridge/internal/jobs"
 	"github.com/echotreez/opendrive-bridge/internal/keystore"
 	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
@@ -92,9 +93,14 @@ type Server struct {
 	store  keystore.Store
 	client *opendrive.Client
 	engine *jobs.Engine
-	cache  opendrive.PathCache
-	router chi.Router
-	http   *http.Server
+	// cache is the *metadata* cache: path to folder id (§10.3). datacache is the
+	// caching gateway that holds file contents (§3.5). The two are different
+	// things with different risks and §3.5.4 asks for them not to be confused, so
+	// they keep different names here as well as in their packages.
+	cache     opendrive.PathCache
+	datacache *datacache.DataCache
+	router    chi.Router
+	http      *http.Server
 }
 
 // Option configures a Server.
@@ -120,6 +126,13 @@ func WithPathCache(pc opendrive.PathCache) Option {
 // WithJobEngine supplies the transfer engine that backs /v1/jobs.
 func WithJobEngine(e *jobs.Engine) Option {
 	return func(srv *Server) { srv.engine = e }
+}
+
+// WithDataCache supplies the caching gateway (§3.5). Without it the cache
+// endpoints answer that the feature is switched off, and transfers go straight
+// through to OpenDrive as they did before v1.2.
+func WithDataCache(dc *datacache.DataCache) Option {
+	return func(srv *Server) { srv.datacache = dc }
 }
 
 // New builds the daemon.
@@ -213,6 +226,16 @@ func (s *Server) routes(keyRequired bool) chi.Router {
 		r.Delete("/jobs/{id}", s.handleJobCancel)
 
 		// Sharing (§4.4).
+		// The caching gateway (§4.4.1). Present whether or not it is enabled, so
+		// that a client can ask and get a plain answer rather than a 404.
+		r.Route("/cache", func(r chi.Router) {
+			r.Get("/status", s.handleCacheStatus)
+			r.Get("/objects", s.handleCacheObjects)
+			r.Post("/flush", s.handleCacheFlush)
+			r.Post("/refresh", s.handleCacheRefresh)
+			r.Delete("/", s.handleCacheClear)
+		})
+
 		r.Post("/share/link", s.handleShareCreate)
 		r.Get("/share/list", s.handleShareList)
 		r.Delete("/share", s.handleShareRevoke)

@@ -25,6 +25,12 @@ type fakeBridge struct {
 	fail     map[string]failure
 	requests []string
 	files    map[string]int64
+
+	// The caching gateway's answers, set by the tests that need them. Nil means
+	// the endpoints report the gateway switched off, which is the default a
+	// deployment without --cache-dir gets.
+	cacheStatus  map[string]any
+	cacheObjects []map[string]any
 }
 
 type failure struct {
@@ -143,6 +149,33 @@ func (b *fakeBridge) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(j)
 
+	case path == "/v1/cache/status", path == "/v1/cache/flush":
+		b.mu.Lock()
+		st := b.cacheStatus
+		b.mu.Unlock()
+		if st == nil {
+			st = map[string]any{"enabled": false, "safe_to_shut_down": true}
+		}
+		_ = json.NewEncoder(w).Encode(st)
+
+	case path == "/v1/cache/objects":
+		b.mu.Lock()
+		objs := b.cacheObjects
+		b.mu.Unlock()
+		if objs == nil {
+			objs = []map[string]any{}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"objects": objs})
+
+	case path == "/v1/cache/refresh", path == "/v1/cache":
+		b.mu.Lock()
+		st := b.cacheStatus
+		b.mu.Unlock()
+		if st == nil {
+			st = map[string]any{"enabled": true, "safe_to_shut_down": true, "bytes": 0}
+		}
+		_ = json.NewEncoder(w).Encode(st)
+
 	case path == "/v1/jobs":
 		b.mu.Lock()
 		list := make([]map[string]any, 0, len(b.jobs))
@@ -157,6 +190,14 @@ func (b *fakeBridge) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"error":{"code":"not_found","http":404,
 			"message":"This bridge has nothing at that address."}}`)
 	}
+}
+
+// withCache gives the fake bridge a caching gateway to report on.
+func (b *fakeBridge) withCache(status map[string]any, objects []map[string]any) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.cacheStatus = status
+	b.cacheObjects = objects
 }
 
 func (b *fakeBridge) failOn(path string, f failure) {
@@ -174,6 +215,12 @@ func (b *fakeBridge) run(args ...string) (int, string, string) {
 	full := append([]string{"--addr", b.srv.URL}, args...)
 	code := Execute(full, opts)
 	return code, out.String(), errOut.String()
+}
+
+// runJSON is run with --json, for the tests that assert a script's view rather
+// than a person's.
+func (b *fakeBridge) runJSON(args ...string) (int, string, string) {
+	return b.run(append([]string{"--json"}, args...)...)
 }
 
 // ---------------------------------------------------------------- exit codes

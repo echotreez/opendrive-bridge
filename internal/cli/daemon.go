@@ -61,6 +61,12 @@ func daemonService(execPath string, args []string) (service.Service, error) {
 	cfg.Option["UserService"] = true
 	cfg.Option["KeepAlive"] = true
 	cfg.Option["RunAtLoad"] = true
+	// Custom templates, for one directive each: a stop timeout long enough for the
+	// caching gateway to drain. Neither of the library's own templates sets one,
+	// and both platforms' defaults are shorter than the drain's budget — see
+	// daemon_template.go for what that would cost.
+	cfg.Option["SystemdScript"] = systemdUserUnit
+	cfg.Option["LaunchdConfig"] = launchdAgent
 	// The working directory is where .env lives, and it is set explicitly
 	// because no service manager inherits the shell's. Without it the daemon
 	// would start in / and look for credentials that are not there.
