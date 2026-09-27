@@ -117,16 +117,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// 1.1 and 1.2 kept credentials in .env (+ .env.key), prepared by the user.
-	// If that is what is here, it is read once into credentials.key. A failure
-	// is not a reason to stop: the user can sign in again.
-	if from, err := keystore.Import(context.Background(), store); err != nil {
-		log.Warn("could not import the credentials of an earlier version; sign in again",
-			slog.String("error", opendrive.RedactString(err.Error())))
-	} else if from != "" {
-		log.Info("imported the credentials of an earlier version; that file is no longer used "+
-			"and can be deleted", slog.String("from", from))
-	}
 	log.Info("credential store ready", slog.String("backend", string(store.Backend())))
 
 	// The Bridge's own API key is optional (1.3). Set one with --api-key or

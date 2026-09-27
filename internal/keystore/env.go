@@ -32,26 +32,13 @@ import (
 //
 // Inside, after a comment saying how to read it by hand, one line holds a random
 // key and the rest is the credentials encrypted with it, in OpenSSL's own `enc`
-// format (envelope.go). Key and ciphertext side by side is the same protection
-// as the two files 1.1 and 1.2 used, and it was always this much: it keeps the
-// password out of casual view, out of git and out of a cloud backup's plain
+// format (envelope.go). Key and ciphertext side by side keeps the password out
+// of casual view, out of git and out of a cloud backup's plain
 // text, and does not protect it from someone who can already read your files.
 // §9.2.3 says so, and so does docs/first-run.md.
-//
-// 1.1 and 1.2 asked the user to copy .env.example to .env, type the password
-// in, and let the first start encrypt it into .env plus .env.key. Import reads
-// either shape once and writes credentials.key from it.
 const (
 	// CredentialsFileName is the one credential file.
 	CredentialsFileName = "credentials.key"
-	// LegacyEnvFileName and LegacyKeyFileName are what 1.1 and 1.2 wrote.
-	LegacyEnvFileName = ".env"
-	LegacyKeyFileName = ".env.key"
-
-	// The placeholders 1.1 and 1.2 shipped in .env.example. A copy nobody
-	// filled in is not an account, and importing it would sign in as nobody.
-	templateUsername = "you@example.com"
-	templatePassword = "your-opendrive-password" // #nosec G101 -- a placeholder, not a credential
 )
 
 // Keys used inside the encrypted document.
@@ -242,67 +229,6 @@ func splitCredentialFile(raw []byte) (key, sealed []byte) {
 		return nil, nil
 	}
 	return []byte(lines[0]), []byte(strings.Join(lines[1:], "\n") + "\n")
-}
-
-// ---------------------------------------------------------------- 1.1/1.2 import
-
-// Import brings credentials from the .env (and .env.key) that 1.1 and 1.2 used
-// into credentials.key, once. It does nothing when credentials.key exists, when
-// there is nothing to import, or for a store that is not the file store. The old
-// files are left where they are — they are the user's — and the returned path
-// names the one that was read, so the daemon can say it may be deleted.
-func Import(ctx context.Context, st Store) (from string, err error) {
-	s, ok := st.(*envStore)
-	if !ok {
-		return "", nil
-	}
-	if _, err := os.Stat(s.path); err == nil {
-		return "", nil
-	}
-	dir := filepath.Dir(s.path)
-	legacy := filepath.Join(dir, LegacyEnvFileName)
-	raw, err := os.ReadFile(legacy) // #nosec G304 -- a fixed name beside the credential file
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("keystore: cannot read %s to import it: %w", legacy, err)
-	}
-
-	plain := raw
-	if isEncrypted(raw) {
-		keyRaw, err := os.ReadFile(filepath.Join(dir, LegacyKeyFileName)) // #nosec G304 -- fixed name
-		if err != nil {
-			return "", fmt.Errorf("keystore: %s is encrypted and %s cannot be read, so it "+
-				"cannot be imported; sign in again instead: %w", legacy, LegacyKeyFileName, err)
-		}
-		plain, err = open(raw, trimKey(keyRaw))
-		if err != nil {
-			return "", fmt.Errorf("keystore: %s could not be decrypted with %s, so it cannot "+
-				"be imported; sign in again instead: %w", legacy, LegacyKeyFileName, err)
-		}
-	}
-	fields := parseEnv(plain)
-	if fields[envUsername] == "" || fields[envPassword] == "" ||
-		fields[envUsername] == templateUsername || fields[envPassword] == templatePassword {
-		return "", nil // .env.example copied and never filled in
-	}
-	cred, err := credentialsFromFields(fields)
-	if err != nil {
-		return "", err
-	}
-	if err := s.Save(ctx, cred); err != nil {
-		return "", err
-	}
-	return legacy, nil
-}
-
-func trimKey(raw []byte) []byte {
-	s := string(raw)
-	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
-		s = s[:i]
-	}
-	return []byte(strings.TrimSpace(s))
 }
 
 // ---------------------------------------------------------------- field format

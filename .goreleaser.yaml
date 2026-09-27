@@ -5,10 +5,9 @@
 # and the tag are the same string by construction — a binary can always be
 # traced back to the commit it was built from.
 #
-# v1.1 dropped darwin/amd64 and windows/arm64 from the *release matrix* only,
-# leaving them cross-compiling and covered by CI; 1.2.1 stops building and
-# smoking darwin/amd64 too — Intel Macs are not supported. v1.2 removes Windows
-# altogether, and that is a different kind of removal: it is the only platform
+# Intel Macs (darwin/amd64) are not supported: not released, not built, not
+# smoked. Windows is not supported either, and for a different reason: it is the
+# only platform
 # that needed a parallel implementation of things the others share — an icacls
 # ACL for the credential file because NTFS ignores the mode bits, a Windows
 # Service instead of a user-level systemd or launchd unit, zip instead of
@@ -108,6 +107,10 @@ snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"
 
 changelog:
+  # The first release (and its first candidate) has no earlier version to be
+  # compared with; the release workflow sets ODB_FIRST_RELEASE, and the header
+  # carries the introduction instead.
+  disable: '{{ isEnvSet "ODB_FIRST_RELEASE" }}'
   use: git
   sort: asc
   # Without this every line of the release notes begins with a 40-character
@@ -166,30 +169,32 @@ release:
     `docs/first-run.md` inside the archive is the five-minute version, with a
     section for each platform, one for Docker and one for the cache.
 
-    ### New in 1.3 — no setup step
+    ### What it does
 
-    - **Sign in instead of preparing a file.** 1.1 and 1.2 asked you to copy
-      `.env.example` to `.env`, type your password into it and let the first start
-      encrypt it. Now the bridge starts with nothing and asks: sign in on the web
-      page or with `odctl login`, and it encrypts and keeps what you typed in one
-      file, `credentials.key`, beside the programs. If your OpenDrive password
-      changes, the page asks you to sign in again — no restart.
-    - **Upgrading from 1.2** needs nothing: an existing `.env` (and `.env.key`) is
-      read once into `credentials.key`. The old files are left alone; delete them
-      when you are satisfied.
-    - **Docker is `docker compose up -d`.** No `.env`, no data folder to create, no
-      `chown`, no API key to generate. The image runs as root, as containers
-      ordinarily do; everything it keeps is in `./data`.
+    - **No setup step.** The bridge starts with nothing prepared and asks you to
+      sign in — on the web page or with `odctl login`. It encrypts what you typed
+      into one file, `credentials.key`, beside the programs, and keeps itself
+      signed in across restarts. If your OpenDrive password changes, the page asks
+      you to sign in again; nothing needs restarting.
+    - **Docker is `docker compose up -d`**, then sign in. No files to create, no
+      folders to prepare, no `chown`, no key to generate; everything the bridge
+      keeps is in `./data`.
+    - **A local cache, off on a host unless you turn it on** (on in the compose
+      file). It serves files you have read before from your own disk, and can
+      accept an upload before it reaches OpenDrive. Read the cache section of
+      `docs/first-run.md` before relying on it: `odctl cache status` is how you
+      tell whether everything has actually reached OpenDrive.
+    - **A web page** at `/ui`: the account, sign-in, transfers and the cache.
     - **The API key is optional.** Set `ODB_API_KEY` and every caller must send it;
-      leave it unset and the API answers anything that can reach the port —
-      loopback by default, and `127.0.0.1` in the compose file.
+      leave it unset and the API answers whatever can reach the port — loopback
+      by default, and `127.0.0.1` in the compose file.
 
-    ### Still true
+    ### Good to know
 
     - `credentials.key` is encrypted with a key kept in the same file. That keeps
       your password out of casual view, out of git and out of a backup's plain
       text; it does not protect it from someone who can already read your files.
-    - macOS on Apple silicon and Linux (x86-64, ARM64) only. On Windows, run the
+    - macOS on Apple silicon and Linux (x86-64, ARM64). On Windows, run the
       container.
 
   footer: |

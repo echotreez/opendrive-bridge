@@ -721,7 +721,7 @@ components:
       type: http
       scheme: bearer
       description: |
-        Optional (1.3). When the daemon is started with an API key (--api-key or
+        Optional. When the daemon is started with an API key (--api-key or
         ODB_API_KEY), every request must carry it, loopback included. Without
         one the API answers whatever can reach the listen address — loopback by
         default, and a port published to 127.0.0.1 in the container — and the
