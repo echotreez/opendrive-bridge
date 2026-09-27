@@ -3,7 +3,7 @@
 # Two things shape it. First, there is nothing in the runtime layer but the two
 # programs and a set of CA certificates — no shell, no package manager, nothing
 # for an intruder to pick up. Second, the container takes exactly the same
-# credential path as a host install (§8.3, 1.3): nothing to prepare; you sign in,
+# credential path as a host install (§8.3): nothing to prepare; you sign in,
 # and the daemon writes credentials.key into /data.
 #
 # /data must be writable: signing in writes credentials.key, and every token
@@ -64,10 +64,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
  && mkdir -p /out/data/cache /out/data/jobs
 
 # distroless/static carries CA certificates, /etc/passwd and nothing else, and runs
-# as root — the ordinary container arrangement, and since 1.3 on purpose. Until
-# 1.2 the image ran as uid 65532, which meant every bind-mounted folder had to be
-# chowned to that uid first; a step a user had to know about before
-# `docker compose up -d` would work. Root in a container with no shell and no
+# as root — the ordinary container arrangement, and on purpose. A non-root uid
+# would mean every bind-mounted folder had to be chowned to that uid first; a step
+# a user would have to know about before `docker compose up -d` would work. Root in a container with no shell and no
 # package manager, a read-only root filesystem and no-new-privileges (both in the
 # compose file) is the trade chosen for a setup with no preparation.
 FROM gcr.io/distroless/static
@@ -82,7 +81,7 @@ COPY --from=builder /out/data /data
 WORKDIR /data
 
 # Loopback would be unreachable from outside the container, so the image binds all
-# interfaces. No API key is required (1.3); the compose file publishes the port to
+# interfaces. No API key is required; the compose file publishes the port to
 # 127.0.0.1 only, and the daemon logs a warning when it listens beyond loopback
 # without one. Set ODB_API_KEY to require one.
 ENV ODB_LISTEN=0.0.0.0:9750

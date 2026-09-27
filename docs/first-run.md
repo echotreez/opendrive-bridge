@@ -203,7 +203,7 @@ A few things worth knowing:
 - **On Docker Desktop**, whether fsync crosses into the host through a bind mount
   has not been measured, and the cache's guarantees rest on it. The compose file
   has a commented line that keeps the cache on a named volume instead.
-- **On a Mac with Apple's `container`** (measured with 1.2.0): an upload accepted by
+- **On a Mac with Apple's `container`** (measured): an upload accepted by
   the cache, followed at once by `container kill --signal KILL`, was sent after the
   next start and arrived byte for byte.
 
@@ -306,11 +306,6 @@ help; the account's administrator controls it.
 `no bridge is running to talk to` means `opendrived` is not started, or is
 listening somewhere other than where `odctl` is looking — check `--addr` and
 `ODB_ADDR`.
-
-**Coming from 1.1 or 1.2?** Nothing to do. If the folder still has the `.env` (and
-`.env.key`) those versions used, the first start reads them into `credentials.key`
-and says so in its log. The old files are then unused; delete them when you are
-satisfied.
 
 Every message this program prints is meant to tell you what to do next. If one
 does not, that is a bug worth reporting.

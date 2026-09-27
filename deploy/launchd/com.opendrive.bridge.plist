@@ -12,8 +12,8 @@
   This is a LaunchAgent, not a LaunchDaemon, and deliberately so: an agent runs
   as you, which is what lets it keep credentials.key in the folder you unpacked. A
   LaunchDaemon starts earlier and runs as root, and would be looking at a file it
-  has no business reading — and, since v1.1 puts the credentials beside the
-  binaries rather than in a system directory, would not find one at all.
+  has no business reading — and, since the credentials live beside the binaries
+  rather than in a system directory, would not find one at all.
 
   Nothing prompts you for anything after you sign in once. The credentials are in
   credentials.key, encrypted; macOS is not involved.
@@ -26,7 +26,7 @@
     <!-- The absolute path to the folder you unpacked, not /usr/local/bin.
 
          This template said /usr/local/bin/opendrived until now, which had been
-         wrong since v1.1 stopped installing anything there: §8.2 runs the
+         wrong since nothing is installed there: §8.2 runs the
          programs in place, so that credentials.key sits beside them and uninstalling is
          deleting a folder. A plist pointing at a path that does not exist fails
          with "no such file", which at least says so — but it says it about the

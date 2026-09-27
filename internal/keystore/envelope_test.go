@@ -142,14 +142,27 @@ func TestRoundTripWithoutOpenssl(t *testing.T) {
 	}
 }
 
-func TestTheWrongKeyIsRefusedRatherThanGuessedAt(t *testing.T) {
+// The wrong key never yields the plaintext.
+//
+// This used to assert that open *refuses* a wrong key, and it failed about one
+// run in 256: CBC has no authentication, so a wrong key decrypts to noise, and
+// noise ends in valid PKCS#7 padding with probability ~1/256 (measured: 73 of
+// 20000, 0.36%). The envelope cannot promise a refusal; what it can promise is
+// that the password never comes back, and the store — which requires the
+// checksum it always writes — turns the noise into a refusal
+// (TestAWrongKeyIsAlwaysRefusedByTheStore).
+func TestTheWrongKeyNeverYieldsThePlaintext(t *testing.T) {
 	cheapKDF(t)
-	sealed, err := seal([]byte("ODB_PASSWORD=secret\n"), []byte("the right key"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := open(sealed, []byte("the wrong key")); err == nil {
-		t.Fatal("the wrong key produced a result")
+	plain := []byte("ODB_PASSWORD=secret\n")
+	for i := 0; i < 300; i++ {
+		sealed, err := seal(plain, []byte("the right key"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := open(sealed, []byte("the wrong key"))
+		if err == nil && bytes.Contains(got, []byte("secret")) {
+			t.Fatalf("the wrong key recovered the plaintext: %q", got)
+		}
 	}
 }
 

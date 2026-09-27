@@ -153,7 +153,14 @@ jobs:
             *-*) prev=$(git tag -l 'v*' --merged "$tag^" --sort=-creatordate | head -1 || true) ;;
             *)   prev=$(git tag -l 'v*' --merged "$tag^" --sort=-creatordate | grep -v -- '-' | head -1 || true) ;;
           esac
-          [ -n "$prev" ] || prev=$(git rev-list --max-parents=0 HEAD)
+          # Nothing before it: this is the first release of its kind. Its notes
+          # are the introduction in the header, not every development commit
+          # since the repository began — which is what "since the root" would
+          # list, about a hundred of them.
+          if [ -z "$prev" ]; then
+            prev=$(git rev-list --max-parents=0 HEAD)
+            echo "ODB_FIRST_RELEASE=1" >> "$GITHUB_ENV"
+          fi
           echo "GORELEASER_CURRENT_TAG=$tag" >> "$GITHUB_ENV"
           echo "GORELEASER_PREVIOUS_TAG=$prev" >> "$GITHUB_ENV"
           echo "releasing $tag; changelog since $prev"

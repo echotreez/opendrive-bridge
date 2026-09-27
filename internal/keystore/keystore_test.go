@@ -2,7 +2,9 @@ package keystore
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -188,6 +190,35 @@ func TestAnAlteredFileIsRefused(t *testing.T) {
 	}
 }
 
+// A key line that is not the one the file was written with is refused every
+// time — including the ~1 in 256 wrong keys whose noise passes CBC's padding
+// check, which is why the store requires the checksum rather than trusting a
+// clean decrypt.
+func TestAWrongKeyIsAlwaysRefusedByTheStore(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Save(context.Background(), sampleCredentials()); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(s.path)
+	lines := strings.Split(string(raw), "\n")
+	keyLine := -1
+	for i, l := range lines {
+		if l != "" && !strings.HasPrefix(l, "#") {
+			keyLine = i
+			break
+		}
+	}
+	for i := 0; i < 600; i++ {
+		lines[keyLine] = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("a different key %04d......", i)))
+		_ = os.WriteFile(s.path, []byte(strings.Join(lines, "\n")), 0o600)
+		fresh, _ := newEnvStore(s.path)
+		_, err := fresh.Load(context.Background())
+		if err == nil || errors.Is(err, opendrive.ErrNoCredentials) {
+			t.Fatalf("wrong key %d: Load = %v; want a refusal, not a success or 'not signed in'", i, err)
+		}
+	}
+}
+
 // Signing out removes the file; the next start asks to be signed in again.
 func TestSigningOutRemovesTheFile(t *testing.T) {
 	s := newTestStore(t)
@@ -246,100 +277,6 @@ func TestAnUnwritableDirectoryNamesTheCredentialFileNotATempFile(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), ".tmp") {
 		t.Errorf("the message names a temporary file: %v", err)
-	}
-}
-
-// ---------------------------------------------------------------- from 1.1 and 1.2
-
-func writeLegacy(t *testing.T, dir string, encrypted bool) {
-	t.Helper()
-	plain := "ODB_USERNAME=derek@example.com\nODB_PASSWORD=\"correct horse\"\nODB_API_KEY=abc\n"
-	if !encrypted {
-		if err := os.WriteFile(filepath.Join(dir, LegacyEnvFileName), []byte(plain), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	key := []byte("bGVnYWN5LWtleS1mb3ItdGhlLXRlc3Q=")
-	sealed, err := seal([]byte(plain), key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, LegacyEnvFileName), sealed, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, LegacyKeyFileName), append(key, '\n'), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestImportReadsWhat12Wrote(t *testing.T) {
-	for _, encrypted := range []bool{true, false} {
-		cheapKDF(t)
-		dir := t.TempDir()
-		writeLegacy(t, dir, encrypted)
-		s, _ := newEnvStore(filepath.Join(dir, CredentialsFileName))
-		from, err := Import(context.Background(), s)
-		if err != nil {
-			t.Fatalf("encrypted=%v: Import: %v", encrypted, err)
-		}
-		if from != filepath.Join(dir, LegacyEnvFileName) {
-			t.Errorf("encrypted=%v: from = %q", encrypted, from)
-		}
-		got, err := s.Load(context.Background())
-		if err != nil || got.Username != "derek@example.com" || got.Password != "correct horse" {
-			t.Fatalf("encrypted=%v: after import Load = %+v, %v", encrypted, got, err)
-		}
-		// The old files are the user's; they stay.
-		if _, err := os.Stat(filepath.Join(dir, LegacyEnvFileName)); err != nil {
-			t.Errorf("encrypted=%v: the old .env was removed", encrypted)
-		}
-		// Once is enough: a second call does nothing.
-		if from, err := Import(context.Background(), s); from != "" || err != nil {
-			t.Errorf("encrypted=%v: second import = %q, %v", encrypted, from, err)
-		}
-	}
-}
-
-// .env.example copied and never filled in is not an account.
-func TestImportIgnoresTheUntouchedTemplate(t *testing.T) {
-	cheapKDF(t)
-	dir := t.TempDir()
-	tmpl := "ODB_USERNAME=you@example.com\nODB_PASSWORD=your-opendrive-password\n"
-	_ = os.WriteFile(filepath.Join(dir, LegacyEnvFileName), []byte(tmpl), 0o600)
-	s, _ := newEnvStore(filepath.Join(dir, CredentialsFileName))
-	if from, err := Import(context.Background(), s); from != "" || err != nil {
-		t.Fatalf("Import = %q, %v; the template is not credentials", from, err)
-	}
-	if _, err := os.Stat(s.path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("a credentials file was written from the template")
-	}
-}
-
-func TestImportWithoutTheOldKeySaysSo(t *testing.T) {
-	cheapKDF(t)
-	dir := t.TempDir()
-	writeLegacy(t, dir, true)
-	_ = os.Remove(filepath.Join(dir, LegacyKeyFileName))
-	s, _ := newEnvStore(filepath.Join(dir, CredentialsFileName))
-	_, err := Import(context.Background(), s)
-	if err == nil || !strings.Contains(err.Error(), "sign in again") {
-		t.Fatalf("Import = %v, want a refusal that says to sign in again", err)
-	}
-}
-
-func TestImportLeavesAnExistingCredentialsFileAlone(t *testing.T) {
-	s := newTestStore(t)
-	if err := s.Save(context.Background(), &opendrive.StoredCredentials{Username: "new@example.com", Password: "new"}); err != nil {
-		t.Fatal(err)
-	}
-	writeLegacy(t, filepath.Dir(s.path), false)
-	if from, err := Import(context.Background(), s); from != "" || err != nil {
-		t.Fatalf("Import = %q, %v", from, err)
-	}
-	got, _ := s.Load(context.Background())
-	if got.Username != "new@example.com" {
-		t.Fatalf("an old .env overwrote newer credentials: %+v", got)
 	}
 }
 

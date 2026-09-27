@@ -209,10 +209,9 @@ docker run -d --name opendrive-bridge -p 127.0.0.1:9750:9750 \
 
 Things worth knowing:
 
-- **It runs as root**, as containers ordinarily do. Until 1.3 it ran as uid 65532,
-  which meant every folder mounted into it had to be `chown`ed first. On Linux the
-  files in `./data` belong to root as a result; reading them for a backup takes
-  `sudo`. The root filesystem is read-only and `no-new-privileges` is set.
+- **It runs as root**, as containers ordinarily do, so no folder mounted into it
+  has to be `chown`ed first. On Linux the files in `./data` belong to root as a
+  result; reading them for a backup takes `sudo`. The root filesystem is read-only and `no-new-privileges` is set.
 - **No API key by default.** The container listens on all interfaces, because
   loopback inside a container is unreachable, and the compose file publishes the
   port to `127.0.0.1` so only this machine can reach it. If you publish it more
@@ -227,7 +226,7 @@ Things worth knowing:
 - **Docker Desktop for Mac or Windows** is unmeasured for bind mounts: whether fsync
   crosses its file-sharing layer has not been checked. Keep the cache on a named
   volume there (the compose file has the line, commented).
-- **Apple's `container` on macOS** was measured with 1.2.0: an upload acknowledged
+- **Apple's `container` on macOS** was measured: an upload acknowledged
   with 202 survived `container kill --signal KILL` and was delivered intact after a
   restart. What survives a power cut on the Mac itself is not measured. The cache
   directory lock does **not** hold between two containers there, because each is
@@ -414,10 +413,6 @@ suite.
 **If it is lost or damaged**, sign in again; the bridge writes a new one. Nothing in
 your OpenDrive account is affected.
 
-**Coming from 1.1 or 1.2**, which used `.env` and `.env.key`: the first start of 1.3
-reads them into `credentials.key` and says so in its log. It leaves the old files
-where they are; delete them when you are satisfied.
-
 `--ephemeral` keeps the sign-in in memory and forgets it on exit. It exists for
 tests and one-off runs; the bridge never chooses it for you.
 
@@ -525,7 +520,3 @@ fails on anything medium or higher, so these pass and a new one does not.
 One more is suppressed at the call site: the retry backoff uses a
 non-cryptographic random source for jitter. Jitter exists so that many clients do
 not retry in lockstep, which needs spread rather than unpredictability.
-
-The three OS keyring backends that used to appear here are gone — v1.1 removed
-them along with about a thousand lines of code and the CI jobs that tested each
-vault on its own runner.

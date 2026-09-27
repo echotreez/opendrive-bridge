@@ -29,9 +29,8 @@ AES-256-CBC. You never type your password into a file.
 
 **It protects you from:**
 
-- committing your password to git — `credentials.key` (and 1.2's `.env` and
-  `.env.key`) are in `.gitignore`, and the release archives and container images
-  are checked in CI for them;
+- committing your password to git — `credentials.key` is in `.gitignore`, and
+  the release archives and container images are checked in CI for it;
 - a cloud backup or file sync carrying your password away in the clear;
 - someone reading it over your shoulder, or finding it in a screen recording;
 - your password appearing in a log file, a crash report or a process listing.
@@ -53,7 +52,7 @@ AES-256-CBC. You never type your password into a file.
   publish the port more widely, set an API key (`--api-key` or `ODB_API_KEY`) and
   it is required for every request. The daemon logs a warning when it listens
   beyond loopback without one.
-- **root inside the container.** Since 1.3 the image runs as root, so that no
+- **root inside the container.** The image runs as root, so that no
   folder mounted into it needs a `chown`. It has no shell and no package manager,
   its root filesystem is read-only in the compose file, and `no-new-privileges`
   is set.
