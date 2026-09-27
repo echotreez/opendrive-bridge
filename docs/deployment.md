@@ -238,6 +238,15 @@ Things worth getting right:
   fsync crosses its file-sharing layer has not been checked. Put the cache on a
   named volume there (`-v odb-cache:/data/cache` after the folder mount), and check
   whether your setup needs the `chown`.
+- **Apple's `container` on macOS** was measured with 1.2.0. The folder mount works
+  without the `chown` (files appear on the Mac as yours), and an upload
+  acknowledged with 202 survived `container kill --signal KILL` and was delivered
+  intact after a restart. What survives a power cut on the Mac itself is not
+  measured. Two limits: `odctl up`/`down` cannot move files through a containerised
+  bridge (they send a path the container cannot see — use the `/v1/upload/stream`
+  and `/v1/download/stream` endpoints), and the cache directory lock does **not**
+  hold between two containers, because each is its own virtual machine: a second
+  container on the same folder starts normally. Run one per folder.
 
 ---
 
