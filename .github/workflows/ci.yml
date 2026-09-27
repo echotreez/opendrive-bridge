@@ -55,6 +55,13 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-go@v5
         with: { go-version: 'stable' }
+      # Formatting is a gate like the rest. golangci-lint's default linters never
+      # looked at it, and a misformatted test file reached main through a green
+      # pipeline; its `run` does not report formatters either, so this is plain gofmt.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          [ -z "$unformatted" ] || { echo "not gofmt-formatted:"; echo "$unformatted"; exit 1; }
       - uses: golangci/golangci-lint-action@v8
 
       # The security scanners run here, on every pull request, and not only in
