@@ -174,10 +174,14 @@ func (s *envStore) read() (map[string]string, error) {
 			"or edited. Remove it and sign in again: %w", s.path, err)
 	}
 	fields := parseEnv(plain)
-	if want, ok := fields[envChecksum]; ok && want != checksumOf(fields) {
-		return nil, fmt.Errorf("keystore: %s decrypted but its contents do not match their "+
-			"checksum, so it has been altered since the bridge wrote it. Remove it and "+
-			"sign in again", s.path)
+	// The checksum is required, not merely checked when present. The bridge always
+	// writes one, and CBC has no authentication: a wrong key (or a key line from
+	// another file) decrypts to noise that passes the padding check about one time
+	// in 256, and noise parses to no fields at all — which, with an optional
+	// checksum, read as "nobody has signed in" instead of "this file is damaged".
+	if want, ok := fields[envChecksum]; !ok || want != checksumOf(fields) {
+		return nil, fmt.Errorf("keystore: %s does not decrypt to what the bridge wrote: "+
+			"it has been damaged or edited. Remove it and sign in again", s.path)
 	}
 	s.key = key
 	return fields, nil

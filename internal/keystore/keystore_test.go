@@ -2,7 +2,9 @@ package keystore
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -185,6 +187,35 @@ func TestAnAlteredFileIsRefused(t *testing.T) {
 	fresh, _ := newEnvStore(s.path)
 	if _, err := fresh.Load(context.Background()); err == nil {
 		t.Fatal("an altered file was accepted")
+	}
+}
+
+// A key line that is not the one the file was written with is refused every
+// time — including the ~1 in 256 wrong keys whose noise passes CBC's padding
+// check, which is why the store requires the checksum rather than trusting a
+// clean decrypt.
+func TestAWrongKeyIsAlwaysRefusedByTheStore(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Save(context.Background(), sampleCredentials()); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(s.path)
+	lines := strings.Split(string(raw), "\n")
+	keyLine := -1
+	for i, l := range lines {
+		if l != "" && !strings.HasPrefix(l, "#") {
+			keyLine = i
+			break
+		}
+	}
+	for i := 0; i < 600; i++ {
+		lines[keyLine] = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("a different key %04d......", i)))
+		_ = os.WriteFile(s.path, []byte(strings.Join(lines, "\n")), 0o600)
+		fresh, _ := newEnvStore(s.path)
+		_, err := fresh.Load(context.Background())
+		if err == nil || errors.Is(err, opendrive.ErrNoCredentials) {
+			t.Fatalf("wrong key %d: Load = %v; want a refusal, not a success or 'not signed in'", i, err)
+		}
 	}
 }
 
