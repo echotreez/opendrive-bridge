@@ -144,7 +144,7 @@ release:
   header: |
     ## opendrive-bridge {{ .Tag }}
 
-    A local REST API and command line for OpenDrive.com.
+    A local REST API, command line and web page for OpenDrive.com.
 
     Unpack it, start the daemon, then:
 
@@ -155,12 +155,36 @@ release:
     ./odctl up ./report.pdf /Documents/report.pdf
     ```
 
+    Then open `http://127.0.0.1:9750/ui` for the same things in a browser. It is
+    part of the daemon and fetches nothing from the internet.
+
     **On macOS, clear the quarantine flag first** — see below, it is the first
     thing that stops people.
 
-    `docs/first-run.md` inside the archive is the five-minute version with a
-    section for each platform and one for Docker. `docs/deployment.md` covers
-    running it as a background service and which credential store to use where.
+    `docs/first-run.md` inside the archive is the five-minute version, with a
+    section for each platform, one for Docker and one for the cache.
+    `docs/deployment.md` covers running it as a background service.
+
+    ### New in 1.2
+
+    - **A local cache, off unless you turn it on.** With it on, the bridge keeps
+      recently used files on your disk and can accept an upload before it has
+      reached OpenDrive, sending it on in the background. Read the cache section
+      of `docs/first-run.md` before switching it on: it changes what a finished
+      upload means, and `odctl cache status` is how you tell whether everything
+      has actually reached OpenDrive. It does not yet accept writes while
+      OpenDrive itself is unreachable.
+    - **A web page** at `/ui`, showing the account, transfers in progress and the
+      cache.
+    - **One credential file.** Your username and password live in an encrypted
+      `.env` beside the programs, with its key in `.env.key`. Back them up
+      together.
+
+    ### No longer supported
+
+    - **Windows.** 1.2 ships for macOS on Apple silicon and for Linux (x86-64
+      and ARM64). On Windows, run the container. There is no Intel Mac archive;
+      build from source there (`go build ./cmd/...`).
   footer: |
     ### Checking what you downloaded
 
@@ -182,3 +206,8 @@ release:
 
     The container takes the same two files as a host install: mount `.env`
     writable and `.env.key` read-only. Neither is in the image.
+
+    If you turn the cache on, put it outside the container — a host directory
+    (`chown 65532` it first) or, on Docker Desktop, a named volume. A cache inside
+    the container is deleted with it, unsent files included.
+    `docs/first-run.md` has the commands.
