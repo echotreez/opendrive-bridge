@@ -176,9 +176,11 @@ release:
       OpenDrive itself is unreachable.
     - **A web page** at `/ui`, showing the account, transfers in progress and the
       cache.
-    - **One credential file.** Your username and password live in an encrypted
-      `.env` beside the programs, with its key in `.env.key`. Back them up
-      together.
+    - **Everything in one folder.** Your username and password live in an
+      encrypted `.env` beside the programs, with its key in `.env.key` — back them
+      up together — and transfer state is in `jobs/` beside them too. Deleting the
+      folder uninstalls it. (1.0 kept transfer state in your user configuration
+      folder; a transfer 1.0 left unfinished is not resumed by 1.2.)
 
     ### No longer supported
 

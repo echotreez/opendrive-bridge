@@ -228,3 +228,9 @@ canvas {
 .pill-ok { color: var(--safe); border-color: var(--safe); background: var(--safe-bg); }
 .pill-down { color: var(--bad); border-color: var(--bad); background: var(--bad-bg); }
 .pill-auth { color: var(--unsafe); border-color: var(--unsafe); background: var(--unsafe-bg); }
+
+/* Short words in narrow columns: "succeeded" broken as "succeede / d" is worse
+   than a slightly wider table. */
+.nowrap {
+  white-space: nowrap;
+}

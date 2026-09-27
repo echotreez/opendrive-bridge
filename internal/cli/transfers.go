@@ -70,7 +70,13 @@ func newUploadCommand(o *Options) *cobra.Command {
 					args[1], humanBytes(size), j.ID)
 				return nil
 			}
-			return follow(cmd.Context(), o, j.ID, "Uploading "+localName(args[1]))
+			if err := follow(cmd.Context(), o, j.ID, "Uploading "+localName(args[1])); err != nil {
+				return err
+			}
+			// Said in these words because with the cache on, "finished" could
+			// mean two things; odctl waits for the one that matters.
+			_, _ = fmt.Fprintf(o.Out(), "Uploaded to %s. It is on OpenDrive.\n", args[1])
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace anything already there")

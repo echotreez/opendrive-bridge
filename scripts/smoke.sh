@@ -69,6 +69,15 @@ UPSTREAM="$(cat "$WORK/upstream.addr" 2>/dev/null)"
 
 say "the daemon starts and signs in"
 PORT=9761
+# Run it from a folder of its own, as an unpacked archive does, and with a HOME
+# of its own, so that where it keeps things can be checked afterwards. This run
+# used to pass --state-dir, which is why nothing noticed that without it the
+# daemon kept its transfer state in the user's configuration directory rather
+# than beside itself (found by walking first-run.md on a fresh unpack).
+INSTALL="$WORK/unpacked"
+mkdir -p "$INSTALL" "$WORK/home"
+cp "$OPENDRIVED" "$INSTALL/opendrived"
+OPENDRIVED="$INSTALL/opendrived"
 # An ephemeral credential store, chosen explicitly: this is a throwaway run and
 # the daemon refuses to guess that for itself (§9.2).
 # The caching gateway is on for this run. "It compiles" is not evidence that it
@@ -76,9 +85,9 @@ PORT=9761
 # this program that holds the user's data — so it is exercised here, on the real
 # daemon, on every platform that has a runner, rather than only in unit tests on
 # whatever machine happened to run them.
-ODB_BASE_URL="http://$UPSTREAM/api/v1" \
+HOME="$WORK/home" XDG_CONFIG_HOME="" ODB_BASE_URL="http://$UPSTREAM/api/v1" \
   "$OPENDRIVED" --addr "127.0.0.1:$PORT" --keystore ephemeral --ephemeral \
-  --state-dir "$WORK/jobs" --cache-dir "$WORK/cache" --log-level error &
+  --cache-dir "$WORK/cache" --log-level error &
 DPID=$!
 
 for _ in $(seq 1 50); do
@@ -246,6 +255,10 @@ say "a failure reports itself properly"
 code=$?
 [ "$code" = "5" ]; check $? "a missing path exits 5 (got $code)"
 sed 's/^/      /' "$WORK/err.txt"
+
+say "everything it keeps is in its own folder"
+[ -d "$INSTALL/jobs" ]; check $? "transfer state is in jobs/ beside the binary"
+[ -z "$(find "$WORK/home" -mindepth 1 -print -quit)" ]; check $? "nothing was written to the home directory"
 
 printf '\n=== smoke %s\n' "$([ $FAIL -eq 0 ] && echo PASSED || echo FAILED)"
 exit $FAIL

@@ -439,6 +439,11 @@ func TestUploadReportsProgressAndFinishes(t *testing.T) {
 	if !strings.Contains(out, "Uploading") {
 		t.Errorf("no indication the upload started:\n%s", out)
 	}
+	// And that it ended. `down` always said "Saved to"; `up` said nothing, and a
+	// first run could not tell whether it had finished or hung.
+	if !strings.Contains(out, "Uploaded to /Docs/payload.bin. It is on OpenDrive.") {
+		t.Errorf("no word that the upload finished:\n%s", out)
+	}
 }
 
 func TestUploadRefusesAMissingFileBeforeCallingTheBridge(t *testing.T) {
