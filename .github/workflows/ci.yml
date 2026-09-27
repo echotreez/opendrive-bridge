@@ -382,6 +382,41 @@ jobs:
             VERSION=ci-${{ github.sha }}
             COMMIT=${{ github.sha }}
 
+      - name: "EXPERIMENT: the documented credential mounts, exactly as written"
+        continue-on-error: true
+        run: |
+          set -u
+          show() { echo "--- host: $1"; ls -la "$1" 2>&1; }
+          seed() { printf 'ODB_USERNAME=ci@example.com\nODB_PASSWORD=not-a-real-password\n' > "$1"; }
+
+          echo "===== A. first-run.md: -v \$PWD/.env:/data/.env (single file, no .env.key mount)"
+          d=$(mktemp -d); cd "$d"; seed .env; chmod 0666 .env
+          docker run -d --name a -e ODB_API_KEY=$(openssl rand -hex 32) -v "$d/.env:/data/.env" opendrive-bridge:ci
+          sleep 8; docker logs a 2>&1 | tail -15; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' a)"
+          show "$d"; head -c 60 "$d/.env"; echo
+          docker rm -f a >/dev/null
+
+          echo "===== B. docker-compose.yaml: .env and .env.key as two single-file mounts, .env.key absent on first run"
+          d=$(mktemp -d); cd "$d"; seed .env; chmod 0666 .env
+          docker run -d --name b -e ODB_API_KEY=$(openssl rand -hex 32) \
+            -v "$d/.env:/data/.env" -v "$d/.env.key:/data/.env.key:ro" opendrive-bridge:ci
+          sleep 8; docker logs b 2>&1 | tail -15; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' b)"
+          show "$d"
+          docker rm -f b >/dev/null
+
+          echo "===== C. a directory mount, owned by the image user"
+          d=$(mktemp -d); mkdir "$d/creds"; seed "$d/creds/.env"; sudo chown -R 65532:65532 "$d/creds"
+          docker run -d --name c -e ODB_API_KEY=$(openssl rand -hex 32) \
+            -v "$d/creds:/data/creds" opendrive-bridge:ci --keystore-file /data/creds/.env
+          sleep 8; docker logs c 2>&1 | tail -15; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' c)"
+          sudo ls -la "$d/creds"; sudo head -c 60 "$d/creds/.env"; echo
+          docker rm -f c >/dev/null
+          echo "--- C again, a fresh container on the same directory: does it decrypt?"
+          docker run -d --name c2 -e ODB_API_KEY=$(openssl rand -hex 32) \
+            -v "$d/creds:/data/creds" opendrive-bridge:ci --keystore-file /data/creds/.env
+          sleep 8; docker logs c2 2>&1 | tail -8; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' c2)"
+          docker rm -f c2 >/dev/null
+
       # Scanned here as well as before publication, for the reason this project
       # has now met four times: a gate that only runs at release time turns every
       # slow-moving problem into a surprise on the day you want to ship. This one
