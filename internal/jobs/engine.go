@@ -44,6 +44,8 @@ type Engine struct {
 	sleep    func(context.Context, time.Duration) error
 	// verify makes an uploaded file's visibility check overridable in tests.
 	verify func(context.Context, string) error
+	// cache is the caching gateway, when there is one (§4.4.1). See cache.go.
+	cache Cache
 
 	mu      sync.Mutex
 	jobs    map[string]*Job
@@ -177,7 +179,7 @@ func (e *Engine) Submit(spec Spec) (*Job, error) {
 		ID:         newJobID(),
 		Kind:       spec.Kind,
 		State:      StateQueued,
-		Phase:      phaseFor(spec.Kind),
+		Phase:      e.initialPhase(spec.Kind),
 		LocalPath:  spec.LocalPath,
 		RemotePath: spec.RemotePath,
 		BytesTotal: spec.Size,
@@ -222,8 +224,14 @@ func validateSpec(spec *Spec) error {
 			spec.Name = filepath.Base(spec.LocalPath)
 		}
 	case KindDownload:
-		if spec.FileID == "" {
-			return fmt.Errorf("a download needs a file id")
+		// A file id or a remote path: the first is what a download from OpenDrive
+		// needs, and the second is enough when the caching gateway already has the
+		// object. Requiring the id unconditionally would mean a file that exists
+		// only in the cache could not be fetched by a job — which is the same
+		// ordering mistake the streaming endpoint made, where resolving upstream
+		// first turned a just-written file into a 404.
+		if spec.FileID == "" && spec.RemotePath == "" {
+			return fmt.Errorf("a download needs either a file id or a remote path")
 		}
 		if spec.LocalPath == "" {
 			return fmt.Errorf("a download needs a local path")
@@ -473,6 +481,14 @@ func (e *Engine) transfer(ctx context.Context, id string, spec Spec) error {
 }
 
 func (e *Engine) runUpload(ctx context.Context, id string, spec Spec) error {
+	// Through the gateway when there is one and the file fits: leg one copies it
+	// in, leg two waits for it to reach OpenDrive (§4.4.1). handled=false means
+	// either there is no gateway or it had no room, and the direct upload below is
+	// the right answer in both cases.
+	if handled, err := e.uploadThroughCache(ctx, id, spec); handled || err != nil {
+		return err
+	}
+
 	tracker := newSpeed(e.now)
 
 	_, err := e.client.Uploads().UploadFile(ctx, spec.LocalPath, opendrive.UploadParams{
@@ -531,6 +547,18 @@ func (e *Engine) runUpload(ctx context.Context, id string, spec Spec) error {
 }
 
 func (e *Engine) runDownload(ctx context.Context, id string, spec Spec) error {
+	// A hit costs a local copy and no request at all.
+	if served, err := e.downloadThroughCache(ctx, id, spec); err != nil {
+		return err
+	} else if served {
+		e.mu.Lock()
+		if j, ok := e.jobs[id]; ok && j.BytesTotal > 0 {
+			j.BytesDone = j.BytesTotal
+		}
+		e.mu.Unlock()
+		return nil
+	}
+
 	tracker := newSpeed(e.now)
 
 	if dir := filepath.Dir(spec.LocalPath); dir != "" {
@@ -544,6 +572,15 @@ func (e *Engine) runDownload(ctx context.Context, id string, spec Spec) error {
 	var already int64
 	if info, statErr := os.Stat(spec.LocalPath); statErr == nil && !info.IsDir() {
 		already = info.Size()
+	}
+
+	if spec.FileID == "" {
+		// The cache did not have it and there is nothing to ask OpenDrive for. This
+		// is reachable only when a caller submitted a path the gateway was holding
+		// and it was evicted or refreshed in between, which is rare and is not a
+		// reason to be vague about it.
+		return fmt.Errorf("%s is not in the cache and no OpenDrive file id was given, "+
+			"so there is nothing to download", spec.RemotePath)
 	}
 
 	_, err := e.client.Downloads().DownloadFile(ctx, spec.LocalPath, opendrive.DownloadParams{

@@ -57,6 +57,10 @@ func TestMain(m *testing.M) {
 		crashChild(dir)
 		return // unreachable; crashChild blocks until it is killed
 	}
+	if dir := os.Getenv(lockChildEnv); dir != "" {
+		lockChild(dir)
+		return // unreachable; lockChild blocks until it is killed
+	}
 	os.Exit(m.Run())
 }
 
@@ -281,7 +285,7 @@ func TestRule4AnInterruptedWriteDoesNotComeBackAsAnObject(t *testing.T) {
 		t.Fatal(err)
 	}
 	put(t, c, "/crashed/whole.bin", bytesOf(1024, 1))
-	_ = c.jnl.close()
+	crashed(c)
 
 	// A torn tail: half a record, as an interrupted append leaves.
 	journalPath := filepath.Join(dir, journalName)
@@ -326,4 +330,30 @@ func TestRule4AnInterruptedWriteDoesNotComeBackAsAnObject(t *testing.T) {
 		t.Errorf("the orphaned content file survived: %v", err)
 	}
 	up.release()
+}
+
+// crashed stands in for the process dying, for the tests that simulate a crash
+// without forking one.
+//
+// When a process dies the kernel closes every descriptor it had: the journal takes
+// no further writes and the directory lock is released. Nothing orderly runs — no
+// drain, no final state records. That is what this does, in that order. The journal
+// is closed first so that a flush worker still winding down cannot append a record
+// a dead process never would have.
+//
+// Before the directory lock existed these tests simply abandoned the gateway without
+// closing it and opened a second one on the same directory. The lock now refuses
+// that, correctly: an abandoned gateway whose descriptors are still open is not a
+// dead one, and treating it as dead would be two writers on one journal. The tests
+// had been relying on exactly the situation the lock exists to prevent.
+func crashed(c *DataCache) {
+	_ = c.jnl.close()
+	_ = c.lock.release()
+	c.stopOnce.Do(func() {
+		close(c.stop)
+		if c.flushCancel != nil {
+			c.flushCancel()
+		}
+	})
+	c.workers.Wait()
 }

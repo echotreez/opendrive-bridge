@@ -14,9 +14,14 @@ import (
 // job mirrors the /v1/jobs schema. The daemon owns that shape; this is a read
 // of it, not a second definition.
 type job struct {
-	ID         string  `json:"id"`
-	Kind       string  `json:"kind"`
-	State      string  `json:"state"`
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	State string `json:"state"`
+	// Phase is which leg of the transfer is running (§4.4.1). With the caching
+	// gateway in front, an upload has two — this machine to the gateway, then the
+	// gateway to OpenDrive — and one progress figure covering both would be wrong
+	// in whichever direction it was wrong.
+	Phase      string  `json:"phase"`
 	LocalPath  string  `json:"local_path"`
 	RemotePath string  `json:"remote_path"`
 	BytesDone  int64   `json:"bytes_done"`
@@ -182,8 +187,15 @@ func describe(j job) string {
 	case "queued":
 		return fmt.Sprintf("%s %s — waiting to start", j.Kind, j.RemotePath)
 	default:
-		return fmt.Sprintf("%s %s — %s of %s", j.Kind, j.RemotePath,
-			humanBytes(j.BytesDone), humanBytes(j.BytesTotal))
+		// The phase is only worth saying when it is not the obvious one: "uploading"
+		// on an upload tells the reader nothing, but "caching" says why a big file
+		// finished its first leg instantly.
+		leg := ""
+		if j.Phase == "caching" {
+			leg = " (copying to the bridge)"
+		}
+		return fmt.Sprintf("%s %s — %s of %s%s", j.Kind, j.RemotePath,
+			humanBytes(j.BytesDone), humanBytes(j.BytesTotal), leg)
 	}
 }
 

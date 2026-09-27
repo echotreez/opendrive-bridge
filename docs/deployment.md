@@ -244,9 +244,18 @@ disk the next time, and `X-Cache: HIT` on the response says so. Losing the cache
 costs a download; nothing else.
 
 **Writing** is the half to understand. With write-back on — the default when the
-cache is on — `odctl up` and `PUT /v1/upload/stream` come back as soon as the file
-is on the bridge's disk, and the bridge uploads it to OpenDrive afterwards. Your
-script gets on with its work instead of waiting for the network.
+cache is on — a file you upload is copied to the bridge's own disk first and sent to
+OpenDrive afterwards. `PUT /v1/upload/stream` answers 202 as soon as that first step
+is done; `odctl up` waits for both, and `odctl jobs` shows which leg it is on.
+
+The point is not that `odctl up` returns sooner. It is that once the first leg is
+done the file is safe on the bridge: a crash, a network outage or OpenDrive having a
+bad afternoon no longer loses it, because the bridge keeps retrying and picks up
+again after a restart. It also means a file you just wrote can be read back
+immediately, which OpenDrive itself does not guarantee.
+
+A file too large for `--cache-max-dirty-bytes` skips the cache and goes straight up,
+so the cache being full never stops an upload.
 
 The cost is that for a while, **the bridge is the only place that file exists.**
 Everything below follows from that one sentence.
@@ -299,12 +308,51 @@ the cache off or put it on an encrypted volume.
 
 ### In a container
 
-Put the cache on a named volume. A container's own filesystem is disposable and
-recreating a container is routine, so a cache inside it would take unsent files
-with it. `deploy/docker/docker-compose.yaml` does this by default; §8.3.1 of the
-whitepaper has the full argument. The daemon also checks at startup and reports
-`durable: false` on `/v1/cache/status`, which `odctl cache status` prints as a
-warning — but a default that is right beats a warning that is read.
+Put the cache outside the container. A container's own filesystem is disposable and
+recreating a container is routine, so a cache inside it would take unsent files with
+it. §8.3.1 of the whitepaper has the full argument.
+
+**On a Linux host, use a directory on the host**, mounted in — this is what
+`deploy/docker/docker-compose.yaml` does by default:
+
+```bash
+mkdir -p cache && sudo chown 65532:65532 cache
+# ... -v "$PWD/cache:/data/cache" -e ODB_CACHE_DIR=/data/cache
+```
+
+It is the most robust option. Docker's clean-up commands (`docker compose down -v`,
+`docker volume prune`) delete named volumes and leave host directories alone; the
+journal and the unsent files are somewhere you can see and back up; and after a
+crash, starting the container again replays the journal and sends what had not gone
+up. An interrupted file is sent again from the start rather than resumed mid-way — if
+it had actually arrived, OpenDrive recognises it by hash and the resend is nearly
+free.
+
+The `chown` is needed because the image runs as uid 65532 and the bridge must own its
+cache directory. Without it the bridge refuses to start and says which directory and
+what to run.
+
+**On Docker Desktop for Mac or Windows, use a named volume** (`-v
+odb-cache:/data/cache`) until somebody measures the alternative. A host directory
+there goes through the VM's file-sharing layer, and whether an fsync inside the
+container reaches the Mac's disk through it has not been checked. Everything the
+cache promises rests on fsync, so this guide does not recommend it on a guess. A
+named volume lives on the VM's own disk and needs no `chown` — the image creates
+`/data/cache` owned by the right user, and a new volume inherits that.
+
+**One bridge per cache directory.** The daemon takes a lock on the directory at
+startup, so a second bridge pointed at the same folder — another container, or
+`opendrived` on the host — refuses to start instead of two of them writing one
+journal. It is a kernel lock, released when the holder exits however it exits, so a
+crash never leaves the directory stuck and there is nothing to clean up by hand. It
+holds between processes on the same Linux kernel, which covers containers and the
+host on a Linux machine; it is not guaranteed across Docker Desktop's VM boundary,
+or on a network filesystem.
+
+The daemon also checks at startup and reports `durable: false` on
+`/v1/cache/status` if the cache directory is not a mount at all, which `odctl cache
+status` prints as a warning — but a default that is right beats a warning that is
+read.
 
 ### Turning it off again
 
@@ -316,7 +364,46 @@ so at startup and they stay on disk until you turn it back on.
 
 ---
 
-## 6. The credential files
+## 6. The web interface
+
+`http://127.0.0.1:9750/ui`, served by the daemon itself. Nothing to install, nothing
+to build, and no new files in the release: it is compiled into `opendrived`.
+
+Five things, all of them the same figures `odctl` reports:
+
+- the account, the sign-in state and how much of your storage is used
+- somewhere to sign in, which is the natural place to fix it if your password changed
+  elsewhere
+- a transfer-rate line
+- the transfers in progress, with the leg each one is on and a button to stop it
+- the cache, with **whether it is safe to stop the bridge** in the largest text on the
+  page
+
+**It fetches nothing from the internet.** No fonts, no chart library, no analytics.
+A local service holding your OpenDrive password has no business making outbound
+requests because you opened a page, and a machine with no internet should not have a
+broken interface. A `Content-Security-Policy` makes the browser enforce that rather
+than leaving it to good intentions.
+
+**On loopback there is nothing to configure.** The daemon generates an API key for
+clients that need one and does not require it on `127.0.0.1`, so opening the page
+works. If the bridge listens on any other address it will not answer without the key
+you configured, and the page asks for it — kept for that browser tab only, sent as a
+header, and never put in a web address, because a URL reaches the browser history and
+every log in between.
+
+**It is a client, not a back door.** The page has no other route to OpenDrive: every
+number on it arrives over the same HTTP API `odctl` uses, and every error it shows is
+the daemon's own wording, unedited.
+
+If you would rather it were not there, bind the daemon to loopback — which is the
+default — and it is reachable only from that machine. There is no switch to remove
+it, because there is nothing to remove: it is a few static files inside a binary you
+are already running.
+
+---
+
+## 7. The credential files
 
 Two files, in the folder you unpacked, on every platform:
 
@@ -349,7 +436,7 @@ start.
 
 ---
 
-## 7. When something is wrong
+## 8. When something is wrong
 
 Every message the bridge produces is meant to be actionable on its own. If one
 is not, that is a bug worth reporting.
@@ -392,7 +479,7 @@ nothing behind.
 
 ---
 
-## 8. Using it from your own programs
+## 9. Using it from your own programs
 
 The daemon is an ordinary HTTP API on `127.0.0.1:9750`; the full specification is
 `docs/bridge-openapi.yaml`, which you can hand to most code generators.

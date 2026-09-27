@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenDrive Bridge</title>
+<!--
+  Everything this page loads comes from this daemon. No CDN, no fonts, no
+  analytics — see internal/ui/ui.go for why, and the Content-Security-Policy
+  that enforces it.
+-->
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>OpenDrive Bridge</h1>
+  <div id="conn" class="pill pill-unknown">connecting…</div>
+</header>
+
+<!--
+  The key box. Only shown when the bridge asks for one, which on a loopback
+  deployment it does not: the daemon generates a key for clients that need it and
+  does not enforce it on 127.0.0.1, so opening this page locally simply works.
+
+  The key is kept in sessionStorage and never put in a URL. §9.4 is about exactly
+  this: a URL reaches the browser history, the Referer header and any log in
+  between, and an API key in one is an API key published.
+-->
+<section id="keybox" hidden>
+  <h2>This bridge wants an API key</h2>
+  <p>
+    It is listening on an address other than <code>127.0.0.1</code>, so it will not
+    answer without one. The key is the <code>ODB_API_KEY</code> you configured.
+  </p>
+  <form id="keyform">
+    <input type="password" id="keyinput" autocomplete="off" spellcheck="false"
+           placeholder="API key">
+    <button type="submit">Use this key</button>
+  </form>
+  <p class="quiet">
+    Kept for this browser tab only, and never included in a web address.
+  </p>
+</section>
+
+<!-- Errors are the daemon's own words. See app.js. -->
+<div id="errors" role="alert"></div>
+
+<main>
+
+  <!-- 1. Service status -->
+  <section id="panel-status">
+    <h2>Status</h2>
+    <dl id="status-fields">
+      <dt>Account</dt><dd id="s-account">—</dd>
+      <dt>Sign-in</dt><dd id="s-state">—</dd>
+      <dt>Stays signed in</dt><dd id="s-seamless">—</dd>
+      <dt>Credentials</dt><dd id="s-keystore">—</dd>
+      <dt>Storage used</dt><dd id="s-quota">—</dd>
+    </dl>
+  </section>
+
+  <!-- 2. Authentication -->
+  <section id="panel-auth">
+    <h2>Sign in</h2>
+    <p id="auth-explain" class="quiet">—</p>
+    <form id="loginform">
+      <input type="email" id="username" autocomplete="username" placeholder="OpenDrive email">
+      <input type="password" id="password" autocomplete="current-password" placeholder="Password">
+      <button type="submit">Sign in</button>
+    </form>
+    <p class="quiet">
+      Your password goes to this bridge and to OpenDrive, and nowhere else. It is
+      stored encrypted in <code>.env</code> beside the program so the bridge can keep
+      itself signed in — <a href="https://github.com/echotreez/opendrive-bridge/blob/main/SECURITY.md#what-this-protects-you-from-and-what-it-does-not">what
+      that does and does not protect you from</a>.
+    </p>
+    <button id="logout" type="button" class="secondary">Sign out</button>
+  </section>
+
+  <!-- 3. Transfer rate -->
+  <section id="panel-rate">
+    <h2>Transfer rate</h2>
+    <canvas id="ratechart" width="600" height="140"></canvas>
+    <p class="quiet">
+      The total of what the daemon reports for running transfers, sampled every two
+      seconds. Drawn from <code>/v1/jobs</code>; nothing here measures anything
+      itself, because the daemon is the only thing that knows.
+    </p>
+  </section>
+
+  <!-- 4. Jobs -->
+  <section id="panel-jobs">
+    <h2>Transfers</h2>
+    <table id="jobs">
+      <thead>
+        <tr>
+          <th>File</th><th>Direction</th><th>State</th><th>Leg</th>
+          <th>Progress</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="jobs-body">
+        <tr><td colspan="6" class="quiet">No transfers.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!--
+    5. The cache.
+
+    The line in #cache-verdict is not decoration. §3.5.2 rule 3 says a user must be
+    able to see what has not reached OpenDrive yet, and the answer they actually want
+    is "can I turn this off". The daemon computes it — this only displays it, so that
+    the web page, odctl and a script cannot reach three different conclusions from the
+    same numbers.
+  -->
+  <section id="panel-cache">
+    <h2>Cache</h2>
+    <div id="cache-verdict" class="verdict verdict-unknown">—</div>
+    <div id="cache-warning" class="warning" hidden></div>
+    <dl id="cache-fields">
+      <dt>Holding</dt><dd id="c-holding">—</dd>
+      <dt>Not yet on OpenDrive</dt><dd id="c-dirty">—</dd>
+      <dt>Longest wait</dt><dd id="c-oldest">—</dd>
+      <dt>Reads served locally</dt><dd id="c-hits">—</dd>
+      <dt>Directory</dt><dd id="c-dir">—</dd>
+    </dl>
+    <div id="cache-actions">
+      <button id="flush" type="button">Send everything now</button>
+      <button id="clear" type="button" class="secondary">Empty the cache</button>
+    </div>
+    <p class="quiet">
+      The cache directory holds your files <strong>as they are</strong>. Unlike
+      <code>.env</code>, nothing in it is encrypted; its protection is the directory's
+      permissions and whatever the disk underneath provides.
+    </p>
+    <table id="cache-objects">
+      <thead><tr><th>File</th><th>Size</th><th>State</th></tr></thead>
+      <tbody id="cache-objects-body">
+        <tr><td colspan="3" class="quiet">The cache is empty.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</main>
+
+<footer class="quiet">
+  Served by this daemon. Every figure above comes from the same HTTP API
+  <code>odctl</code> uses — this page has no other way to reach OpenDrive.
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

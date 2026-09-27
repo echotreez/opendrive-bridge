@@ -102,12 +102,10 @@ grep -q "Smoke" "$WORK/ls.txt"; check $? "ls / shows the folder"
 grep -q "hello.txt" "$WORK/ls2.txt"; check $? "ls /Smoke shows the file"
 
 say "the caching gateway"
-# The gateway is reached through the streaming endpoints, so this part uses curl
-# rather than odctl. That is not a stylistic choice and it is worth stating plainly:
-# `odctl up` and `odctl down` go through the *job* endpoints, which do not use the
-# cache at all yet. See the note in internal/server/cache_transfers.go — coupling
-# the job engine to the gateway is the piece that is not built, and until it is, the
-# cache is only reachable by a caller that speaks HTTP.
+# Both routes into the gateway are exercised: the streaming endpoints with curl, and
+# the job endpoints through odctl. The second used to bypass the cache entirely,
+# which meant the feature was unreachable from the command line — see the two legs
+# in internal/jobs/cache.go.
 if ! command -v curl >/dev/null 2>&1; then
   say "curl is not available; skipping the cache checks"
 else
@@ -174,6 +172,30 @@ else
   cmp -s "$WORK/first.txt" "$WORK/second.txt"
   check $? "the cached copy matches what was downloaded"
 
+  # And now through odctl, which is how almost everybody will actually use this.
+  # `up` copies the file into the cache (leg one) and waits for the gateway to send
+  # it (leg two); the job reports which leg it is on throughout.
+  printf 'uploaded by odctl through the cache\n' > "$WORK/viaodctl.txt"
+  "$ODCTL" --addr "127.0.0.1:$PORT" up "$WORK/viaodctl.txt" /Smoke/viaodctl.txt \
+    > "$WORK/odctlup.txt" 2>&1
+  check $? "odctl up goes through the cache"
+
+  "$ODCTL" --addr "127.0.0.1:$PORT" --json jobs > "$WORK/jobs.json" 2>&1
+  grep -q '"phase"' "$WORK/jobs.json"
+  check $? "the job reports which leg it was on"
+
+  "$ODCTL" --addr "127.0.0.1:$PORT" cache objects > "$WORK/objs2.txt" 2>&1
+  grep -q "/Smoke/viaodctl.txt" "$WORK/objs2.txt"
+  check $? "the file odctl uploaded is in the cache"
+
+  # And a download of it is served locally: the file is already here, so this costs
+  # no request to OpenDrive at all.
+  "$ODCTL" --addr "127.0.0.1:$PORT" down /Smoke/viaodctl.txt "$WORK/viaodctl-back.txt" \
+    > "$WORK/odctldown.txt" 2>&1
+  check $? "odctl down of a cached file"
+  cmp -s "$WORK/viaodctl.txt" "$WORK/viaodctl-back.txt"
+  check $? "the round trip through odctl preserved the bytes"
+
   # Clearing works once nothing is outstanding.
   "$ODCTL" --addr "127.0.0.1:$PORT" cache clear > "$WORK/cacheclear.txt" 2>&1
   check $? "cache clear"
@@ -187,6 +209,36 @@ else
   mode=$(stat -c '%a' "$WORK/cache" 2>/dev/null || stat -f '%Lp' "$WORK/cache" 2>/dev/null)
   [ "$mode" = "700" ]
   check $? "the cache directory is 0700 (got ${mode:-unknown})"
+fi
+
+say "the web interface"
+# Compiled into the binary with go:embed, so this proves the assets are really in the
+# release rather than only in the source tree — which is the kind of thing that breaks
+# silently when a build tag or an embed pattern changes.
+if command -v curl >/dev/null 2>&1; then
+  code=$(curl -sS -o "$WORK/ui.html" -w '%{http_code}' -L "http://127.0.0.1:$PORT/ui/")
+  [ "$code" = "200" ]
+  check $? "the interface is served (got $code)"
+  grep -q "OpenDrive Bridge" "$WORK/ui.html"
+  check $? "the page is the interface"
+
+  # Every panel §12.1.1 asks for, and the shutdown verdict element in particular,
+  # since that one is a contract rather than a feature.
+  for id in panel-status panel-auth panel-rate panel-jobs panel-cache cache-verdict; do
+    grep -q "id=\"$id\"" "$WORK/ui.html"
+    check $? "the page has $id"
+  done
+
+  # The assets it pulls in are served too, and from this daemon.
+  for asset in app.js style.css; do
+    code=$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/ui/$asset")
+    [ "$code" = "200" ]
+    check $? "$asset is served (got $code)"
+  done
+
+  # And the browser is told not to fetch anything from anywhere.
+  curl -sS -D - -o /dev/null "http://127.0.0.1:$PORT/ui/" | grep -qi "content-security-policy"
+  check $? "a Content-Security-Policy is sent"
 fi
 
 say "a failure reports itself properly"

@@ -24,6 +24,7 @@ import (
 	"github.com/echotreez/opendrive-bridge/internal/datacache"
 	"github.com/echotreez/opendrive-bridge/internal/jobs"
 	"github.com/echotreez/opendrive-bridge/internal/keystore"
+	"github.com/echotreez/opendrive-bridge/internal/ui"
 	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
@@ -192,6 +193,16 @@ func (s *Server) routes(keyRequired bool) chi.Router {
 	r.Use(recoverPanic)
 	r.Use(accessLog)
 
+	// The embedded interface (§12.1.1), mounted outside /v1 and outside the API key
+	// requirement.
+	//
+	// The assets are a page, not data: every figure it displays comes from a /v1 call
+	// that is authenticated normally. Serving the shell unauthenticated is what gives
+	// a user of a non-loopback bridge somewhere to type their key — which is the
+	// design §12.1.1 describes, and the alternative would be a 401 with no way to
+	// answer it.
+	r.Mount(ui.Path, ui.Handler())
+
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(apiKeyAuth(s.cfg.APIKey, keyRequired))
 
@@ -263,6 +274,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("cannot listen on %s: %w", s.cfg.Addr, err)
 	}
+	s.log.Info("the web interface is at "+ui.Path,
+		slog.String("url", "http://"+s.cfg.Addr+ui.Path))
 	s.log.Info("bridge listening",
 		slog.String("addr", ln.Addr().String()),
 		slog.Bool("api_key", s.cfg.APIKey != ""),

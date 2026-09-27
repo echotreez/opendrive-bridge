@@ -397,6 +397,11 @@ paths:
       tags: [transfers]
       operationId: download
       summary: Queue a download and return a job.
+      description: |
+        With the caching gateway enabled the path is looked up in the cache before
+        OpenDrive, so a file that was written through the gateway and has not been
+        uploaded yet can be downloaded — and costs no request at all. Without that
+        ordering, a write followed immediately by a read would answer 404.
       requestBody:
         required: true
         content:
@@ -971,10 +976,14 @@ components:
             client to gateway, then gateway to OpenDrive — and one progress bar
             covering both would be wrong in whichever direction it was wrong.
 
-            A job the engine owns moves bytes between this machine and OpenDrive,
-            so it is `uploading` or `downloading` from start to finish. A write
-            that landed in the cache reports its second leg through
-            /v1/cache/objects rather than as a job.
+            With the caching gateway on, an upload job starts on `caching` while
+            the file is copied to the bridge and moves to `uploading` while the
+            bridge sends it to OpenDrive. It does not report success until the
+            second leg finishes. Without the gateway there is one leg and the
+            phase is `uploading` throughout.
+
+            A download is `downloading` either way: a cache hit is not a separate
+            phase, it is the same leg served from nearer by.
         local_path: { type: string }
         remote_path: { type: string }
         bytes_done: { type: integer }

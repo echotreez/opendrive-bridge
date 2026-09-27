@@ -30,7 +30,17 @@ Pick your section:
 
 - [macOS](#macos) — **read the quarantine part first, it will stop you otherwise**
 - [Linux](#linux)
+- [The cache](#the-cache-if-you-turn-it-on) — optional, and off until you ask for it
 - [Docker](#docker) — the same two files, mounted in
+
+Once it is running, `http://127.0.0.1:9750/ui` shows the same things `odctl` does in
+a browser: the account, the transfers in progress, and the cache if you have turned
+it on. It is part of the daemon; there is nothing to install and it fetches nothing
+from the internet.
+
+There is also a [local cache](#the-cache-if-you-turn-it-on) you can switch on later.
+It is **off** unless you ask for it, so you can ignore it today — but read that
+section before you turn it on, because it changes what a finished upload means.
 
 For running it permanently in the background, see
 [deployment.md](./deployment.md). This page is only about the first five
@@ -162,6 +172,67 @@ sudo loginctl enable-linger $USER
 
 ---
 
+## The cache, if you turn it on
+
+You do not need this today. It is off unless you give the daemon a directory for it,
+and everything above works without it. Read this before you switch it on, though,
+because it changes what a finished upload means.
+
+```bash
+./opendrived --cache-dir ./cache
+```
+
+Two things then happen.
+
+**Reading gets faster.** A file you have read once is served from your own disk next
+time instead of being fetched again. Nothing to think about; losing the cache costs a
+download.
+
+**Writing gets different, and this is the part to understand.** The bridge copies
+your file to its own disk first and sends it to OpenDrive afterwards. For a short
+while — usually seconds — **the bridge is the only place that file exists.**
+
+That is a genuinely useful trade: if your network drops or OpenDrive has a bad
+minute, the bridge keeps trying and picks up again after a restart, instead of the
+upload simply failing. But it means "the upload finished" and "OpenDrive has it" stop
+being the same sentence, so the bridge gives you a way to ask:
+
+```bash
+./odctl cache status
+```
+
+The last line answers it in words:
+
+```
+NOT safe to stop the bridge yet: 41.2 MB has not reached OpenDrive.
+Run `odctl cache flush --wait` to send it now.
+```
+
+`odctl cache flush --wait` returns when there is nothing left. You do not normally
+need it — stopping the service gives the bridge time to finish by itself — but it is
+there for when you want to be sure before closing a laptop.
+
+Three more things worth knowing:
+
+- **It never throws away a file to make room.** If it runs out of space for things it
+  has not uploaded yet, it refuses new writes and says so, rather than discarding
+  something OpenDrive does not have.
+- **Nothing in the cache directory is encrypted.** `.env` is; this is not. It holds
+  your files exactly as they are, protected by the directory's permissions (the
+  bridge sets it so only your account can read it) and by whatever your disk
+  provides. If that is not enough for what you work with, leave the cache off or put
+  it on an encrypted volume.
+- **In a container, put it outside the container** — a host directory, or a named
+  volume on Docker Desktop. See the warning at the top of the Docker section below;
+  this is the one place where getting it wrong loses data.
+
+If you would rather keep the faster reads and none of the above,
+`--cache-write-back=false` sends writes straight to OpenDrive as they always were.
+
+[deployment.md](./deployment.md#5-the-local-cache) has the rest.
+
+---
+
 ## Docker
 
 > ### Read this first: where the cache lives
@@ -175,10 +246,16 @@ sudo loginctl enable-linger $USER
 > `docker compose down`, upgrading the image — all routine, and all of them would
 > take unsent files with them, after you had been told they were stored.
 >
-> So: **put the cache on a named volume**, as `-v odb-cache:/data/cache` does
-> below and as `deploy/docker/docker-compose.yaml` does by default. The daemon
-> checks at startup and warns if you have not, but a warning in a log is a poor
-> second to getting it right.
+> So: **put the cache in a directory on the host**, mounted into the container,
+> as the command below and `deploy/docker/docker-compose.yaml` both do. If the
+> container dies part-way, starting it again replays the cache's journal from
+> that directory and sends whatever had not gone up. Docker's own clean-up
+> commands (`docker compose down -v`, `docker volume prune`) cannot touch it, and
+> you can see what is in it.
+>
+> On **Docker Desktop for Mac or Windows**, use a named volume
+> (`-v odb-cache:/data/cache`) instead for now: a host directory there goes through
+> the VM's file-sharing layer, and whether that honours fsync has not been measured.
 >
 > If you would rather not think about it, set `ODB_CACHE_WRITE_BACK=false`.
 > Uploads then wait for OpenDrive, as they always did, and nothing is ever held
@@ -192,15 +269,21 @@ laptop and mount it in.
 cp .env.example .env
 $EDITOR .env          # put your OpenDrive username and password in
 
+# The cache directory has to belong to the user the image runs as (uid 65532).
+mkdir -p cache && sudo chown 65532:65532 cache
+
 docker run -d --name opendrive-bridge \
   -p 127.0.0.1:9750:9750 \
   -e ODB_API_KEY="$(openssl rand -hex 32)" \
   -e ODB_CACHE_DIR=/data/cache \
   -v "$PWD/.env:/data/.env" \
   -v odb-state:/data/jobs \
-  -v odb-cache:/data/cache \
+  -v "$PWD/cache:/data/cache" \
   ghcr.io/echotreez/opendrive-bridge:1.1.0
 ```
+
+Skip the `chown` and the bridge refuses to start, naming the directory and the
+command to run — it will not quietly run without its cache.
 
 The first start rewrites `.env` encrypted and creates `.env.key` next to it — on
 your machine, through the mount. Nothing is baked into the image.
@@ -219,6 +302,11 @@ Three things to get right:
   a non-loopback address makes the daemon insist on a key. On your own machine it
   generates one into `.env` and you never see it.
 - **Back up `.env` and `.env.key` together.** Either one alone is useless.
+- **One bridge per cache directory.** The bridge locks it, so a second container —
+  or a bridge on the host — pointed at the same folder refuses to start, rather
+  than two of them writing one journal and losing files between them. The lock is
+  released when the holder exits, however it exits, so a crash never leaves the
+  directory stuck.
 - **The cache directory is not encrypted.** `.env` is; the cache is not. It holds
   your files exactly as they are, protected only by the directory's permissions
   and by whatever the disk underneath gives you. The bridge sets the directory to
@@ -283,6 +371,7 @@ does not, that is a bug worth reporting.
 ## Where to go next
 
 - [deployment.md](./deployment.md) — running it in the background permanently, on
-  all three platforms and in containers, and what the two credential files are
+  macOS and Linux and in containers, what the two credential files are, and the
+  cache in full
 - [bridge-openapi.yaml](./bridge-openapi.yaml) — the HTTP API, if you want to
   drive it from your own programs rather than from `odctl`
