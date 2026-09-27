@@ -366,4 +366,3 @@ func TestThePageCountsBytesTheWayOdctlDoes(t *testing.T) {
 		t.Errorf("bytes() does not step by 1024:\n%s", body)
 	}
 }
-

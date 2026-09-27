@@ -39,6 +39,10 @@ type upstream struct {
 	// downloaded counts real downloads, so a test can assert that a cache hit cost
 	// no request at all rather than inferring it from timing.
 	downloaded int
+	// infoBody and infoStatus answer file/info.json. The default, {}, is what an
+	// unclosed record looks like: no size, no hash (D52).
+	infoBody   string
+	infoStatus int
 }
 
 func newUpstream(t *testing.T) *upstream {
@@ -121,6 +125,18 @@ func (u *upstream) serve(w http.ResponseWriter, r *http.Request) {
 		u.reclaimed = append(u.reclaimed, parts[len(parts)-1])
 		u.mu.Unlock()
 		_, _ = io.WriteString(w, `{"result":true}`)
+
+	case strings.Contains(path, "file/info.json"):
+		u.mu.Lock()
+		body, status := u.infoBody, u.infoStatus
+		u.mu.Unlock()
+		if body == "" {
+			body = `{}`
+		}
+		if status != 0 {
+			w.WriteHeader(status)
+		}
+		_, _ = io.WriteString(w, body)
 
 	case strings.Contains(path, "users/info.json"):
 		_, _ = io.WriteString(w, `{"UserID":"1"}`)
