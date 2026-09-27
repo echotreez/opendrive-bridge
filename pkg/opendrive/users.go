@@ -80,8 +80,14 @@ type AccountInfo struct {
 // IsAccountUser reports whether the login is an account user rather than the
 // account owner. Account users are refused by the whole sharing module and
 // cannot write to the account root (D25, D33).
+//
+// An owner's AccessUserID is "0", not its own UserID (D47). The first version of
+// this read "differs from UserID" as "account user", which was right for every
+// login anyone had tested — all of them account users — and wrong for the first
+// owner that logged in.
 func (a AccountInfo) IsAccountUser() bool {
-	return a.AccessUserID != "" && a.AccessUserID != a.UserID
+	id := string(a.AccessUserID)
+	return id != "" && id != "0" && id != string(a.UserID)
 }
 
 // String keeps the personal and credential fields out of casual output. Use

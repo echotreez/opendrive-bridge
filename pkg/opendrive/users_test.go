@@ -98,6 +98,20 @@ func TestUsersOwnerAccountIsNotAnAccountUser(t *testing.T) {
 	}
 }
 
+// D47: an owner's AccessUserID is "0", not its own UserID. Recorded from an
+// owner login on 2026-09-27.
+func TestUsersOwnerWithAccessUserIDZeroIsNotAnAccountUser(t *testing.T) {
+	m, users := newUsersFixture(t)
+	m.push(200, `{"UserID":"1000001","AccessUserID":"0","UserName":"owner@example.com"}`)
+	got, err := users.Info(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.IsAccountUser() {
+		t.Error(`AccessUserID "0" is how upstream says "no access user"; this is the owner`)
+	}
+}
+
 func TestUsersLogsPagesByNumber(t *testing.T) {
 	m, users := newUsersFixture(t)
 	m.push(200, moduleFixture(t, "users", "userlogs.json"))
