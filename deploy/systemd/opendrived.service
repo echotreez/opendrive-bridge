@@ -11,8 +11,8 @@
 #   systemctl --user status opendrived
 #
 # No sudo anywhere. That is the point of §8.2: the programs run from the folder
-# you unpacked, your .env sits beside them, and uninstalling is deleting the
-# folder.
+# you unpacked, your credentials.key is written beside them when you sign in,
+# and uninstalling is deleting the folder.
 #
 # If you want the bridge to keep running when you are not logged in:
 #
@@ -22,7 +22,7 @@
 #
 # It was, with DynamicUser=yes — a throwaway account with one writable
 # directory. That is a good shape for a service with no user data and the wrong
-# one here: the credentials are an encrypted .env in the user's own folder, and
+# one here: the credentials are an encrypted file in the user's own folder, and
 # a dynamic user cannot read it. Neither could ProtectHome=yes, which was also
 # in the old file. The hardening and the credential design were pulling in
 # opposite directions, and the hardening would have won by breaking the daemon.
@@ -38,7 +38,7 @@ Type=simple
 
 # Absolute paths, both of them. A service manager does not read your shell
 # configuration, so PATH is of no use here, and without WorkingDirectory the
-# daemon would start in / and look for a .env that is not there.
+# daemon would start in / and keep its credentials.key there, if it could.
 ExecStart=/path/to/opendrive-bridge/opendrived
 WorkingDirectory=/path/to/opendrive-bridge
 
@@ -73,8 +73,8 @@ TimeoutStopSec=5min
 #     ProtectControlGroups, ProtectClock, RemoveIPC — these need privileges a
 #     user service does not have, and systemd documents them as having no effect
 #     for user units. Left in, they are decoration that reads like protection.
-#   - ProtectHome=yes — actively wrong here: it hides /home, which is where .env
-#     is. This one line would have broken the credential store.
+#   - ProtectHome=yes — actively wrong here: it hides /home, which is where
+#     credentials.key is. This one line would have broken the credential store.
 #   - DynamicUser, StateDirectory — system-unit concepts, and both at odds with
 #     "the user's own folder".
 #
@@ -84,9 +84,9 @@ NoNewPrivileges=yes
 
 # Everything outside the unpacked folder is read-only. ReadWritePaths has to
 # name that folder explicitly — strict mode makes even $HOME read-only, and the
-# daemon writes .env on first run and again on every token rotation.
+# daemon writes credentials.key when you sign in and on every token rotation.
 ProtectSystem=strict
-# One entry covers .env, the job state and the cache directory, because §8.2 puts
+# One entry covers credentials.key, the job state and the cache directory, because §8.2 puts
 # all three in the folder the user unpacked. A cache directory placed anywhere
 # else — another disk, say — needs its own ReadWritePaths line, and without one
 # the daemon will report that it cannot write there rather than failing obscurely.

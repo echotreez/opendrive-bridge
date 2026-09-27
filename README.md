@@ -22,9 +22,10 @@ program of their own — and does not want to write an API client to get there.
 You need a terminal; you do not need Go, and you do not need to have heard of
 OpenDrive's API.
 
-**Sign in once.** Your username and password go into a `.env` file, once. The
-first run encrypts it and the plaintext disappears; after that the daemon keeps
-itself signed in and nothing else ever handles your password.
+**Nothing to set up.** Start it and sign in once — on its web page or with
+`odctl login`. The bridge encrypts what you typed into `credentials.key` beside
+itself and keeps itself signed in from then on; nothing else ever handles your
+password. In Docker it is `docker compose up -d`, then sign in.
 [What that protects you from, and what it does not.](./SECURITY.md#what-this-protects-you-from-and-what-it-does-not)
 
 Linux and macOS, or as a container. MIT licensed.
@@ -39,14 +40,11 @@ sha256sum --check --ignore-missing opendrive-bridge_*_SHA256SUMS
 tar xzf opendrive-bridge_*_linux_amd64.tar.gz
 cd opendrive-bridge
 
-# 3. Put your OpenDrive username and password in, once
-cp .env.example .env
-$EDITOR .env
-
-# 4. Start it once. This encrypts .env and your password stops being readable
+# 3. Start it
 ./opendrived
 
-# 5. In another terminal, in the same folder
+# 4. In another terminal, in the same folder: sign in once (or use http://127.0.0.1:9750/ui)
+./odctl login you@example.com
 ./odctl ls /
 ./odctl up ./report.pdf /Documents/report.pdf
 ./odctl down /Documents/report.pdf ./back.pdf

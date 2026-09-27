@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,413 +31,362 @@ func sampleCredentials() *opendrive.StoredCredentials {
 func newTestStore(t *testing.T) *envStore {
 	t.Helper()
 	cheapKDF(t)
-	s, err := newEnvStore(filepath.Join(t.TempDir(), EnvFileName), nil)
+	s, err := newEnvStore(filepath.Join(t.TempDir(), CredentialsFileName))
 	if err != nil {
 		t.Fatalf("newEnvStore: %v", err)
 	}
 	return s
 }
 
-func TestRoundTrip(t *testing.T) {
-	ctx := context.Background()
-	s := newTestStore(t)
-	want := sampleCredentials()
+// ---------------------------------------------------------------- nothing to prepare
 
-	if err := s.Save(ctx, want); err != nil {
-		t.Fatalf("Save: %v", err)
+// No file is the normal first state: nobody has signed in yet. It is not an
+// error the daemon has to refuse over, and nothing is created by looking.
+func TestNoFileMeansNobodyHasSignedIn(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.Load(context.Background()); !errors.Is(err, opendrive.ErrNoCredentials) {
+		t.Fatalf("Load = %v, want ErrNoCredentials", err)
 	}
-	got, err := s.Load(ctx)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	if err := s.Available(context.Background()); err != nil {
+		t.Fatalf("Available = %v; an absent file is not a fault", err)
 	}
-	if got.Username != want.Username || got.Password != want.Password {
-		t.Errorf("account = %q/%q", got.Username, got.Password)
-	}
-	if got.Token == nil || got.Token.AccessToken != want.Token.AccessToken ||
-		got.Token.RefreshToken != want.Token.RefreshToken {
-		t.Errorf("token = %+v", got.Token)
-	}
-	if !got.Token.Expiry.Equal(want.Token.Expiry) {
-		t.Errorf("expiry = %v, want %v", got.Token.Expiry, want.Token.Expiry)
-	}
-	if got.AuthMode != want.AuthMode || got.UserID != want.UserID || got.AccType != want.AccType {
-		t.Errorf("metadata = %+v", got)
+	if _, err := os.Stat(s.path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reading created %s", s.path)
 	}
 }
 
-// The file must be ciphertext *and* readable only by its owner. Both halves of
-// §9.2.2 in one test, because a file that is encrypted but world-readable and
-// one that is 0600 but plaintext are both failures.
-func TestTheFileIsEncryptedAndPrivate(t *testing.T) {
-	ctx := context.Background()
-	s := newTestStore(t)
-	if err := s.Save(ctx, sampleCredentials()); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	raw, err := os.ReadFile(s.path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "correct horse") || strings.Contains(string(raw), "derek") {
-		t.Fatalf("the file holds readable credentials:\n%s", raw)
-	}
-	if !isEncrypted(raw) {
-		t.Fatal("the file is not in the encrypted format")
-	}
-
-	// The mode is now checked unconditionally. It used to be skipped on Windows,
-	// where NTFS ignores the mode bits and a separate icacls implementation did
-	// the work; both platforms left support the same character (§8.1).
-	for _, p := range []string{s.path, s.keyPath} {
-		info, err := os.Stat(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if mode := info.Mode().Perm(); mode != 0o600 {
-			t.Errorf("%s mode = %04o, want 0600", filepath.Base(p), mode)
-		}
-	}
-}
-
-// The first run is the point of the design: a user copies the example, types
-// their password in the clear, and starting the daemon once takes it away again.
-func TestFirstRunSealsThePlaintextTheUserWrote(t *testing.T) {
-	ctx := context.Background()
+// Signing in writes the one file, in a directory that did not have to exist, and
+// a second store — the next start — reads it back.
+func TestSigningInWritesOneFileTheNextStartReads(t *testing.T) {
 	cheapKDF(t)
-	dir := t.TempDir()
-	path := filepath.Join(dir, EnvFileName)
-
-	plaintext := "# copied from .env.example\n" +
-		"ODB_USERNAME=derek@example.com\n" +
-		"ODB_PASSWORD=correct horse battery staple\n"
-	if err := os.WriteFile(path, []byte(plaintext), 0o600); err != nil {
-		t.Fatal(err)
+	dir := filepath.Join(t.TempDir(), "not", "there", "yet")
+	path := filepath.Join(dir, CredentialsFileName)
+	s, _ := newEnvStore(path)
+	want := sampleCredentials()
+	if err := s.Save(context.Background(), want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 || entries[0].Name() != CredentialsFileName {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("the directory holds %v; want only %s", names, CredentialsFileName)
 	}
 
-	s, err := newEnvStore(path, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cred, err := s.Load(ctx)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cred.Username != "derek@example.com" || cred.Password != "correct horse battery staple" {
-		t.Fatalf("credentials = %q/%q", cred.Username, cred.Password)
-	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "correct horse") {
-		t.Fatal("the plaintext password is still on disk after the first run")
-	}
-	if _, err := os.Stat(filepath.Join(dir, KeyFileName)); err != nil {
-		t.Fatalf("the key file was not created: %v", err)
-	}
-
-	// And a second store, as a restarted daemon would be, reads it back.
-	again, err := newEnvStore(path, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cred2, err := again.Load(ctx)
+	again, _ := newEnvStore(path)
+	got, err := again.Load(context.Background())
 	if err != nil {
 		t.Fatalf("Load after restart: %v", err)
 	}
-	if cred2.Password != "correct horse battery staple" {
-		t.Fatalf("password after restart = %q", cred2.Password)
+	if got.Username != want.Username || got.Password != want.Password ||
+		got.Token == nil || got.Token.RefreshToken != want.Token.RefreshToken ||
+		!got.Token.Expiry.Equal(want.Token.Expiry) || got.AccType != want.AccType {
+		t.Fatalf("round trip lost something:\ngot  %+v\nwant %+v", got, want)
 	}
 }
 
-// The API key is generated once and then stays. One that changed on every start
-// would break every client the user had configured.
-func TestTheAPIKeyIsGeneratedOnceAndKept(t *testing.T) {
-	ctx := context.Background()
+func TestTheFileIsEncryptedAndPrivate(t *testing.T) {
 	s := newTestStore(t)
-
-	first, err := s.APIKey(ctx)
-	if err != nil {
-		t.Fatalf("APIKey: %v", err)
-	}
-	if len(first) < 32 {
-		t.Fatalf("API key is %d characters, not enough to be worth having", len(first))
-	}
-	second, err := s.APIKey(ctx)
-	if err != nil {
+	if err := s.Save(context.Background(), sampleCredentials()); err != nil {
 		t.Fatal(err)
 	}
-	if first != second {
-		t.Fatal("the API key changed between calls")
-	}
-
-	reopened, err := newEnvStore(s.path, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	third, err := reopened.APIKey(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if third != first {
-		t.Fatal("the API key changed across a restart")
-	}
-}
-
-// Signing out clears the account and keeps the API key: a user logging out of
-// OpenDrive has not asked to re-key the programs talking to their bridge.
-func TestLogoutKeepsTheAPIKey(t *testing.T) {
-	ctx := context.Background()
-	s := newTestStore(t)
-	if err := s.Save(ctx, sampleCredentials()); err != nil {
-		t.Fatal(err)
-	}
-	key, err := s.APIKey(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.Delete(ctx); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if _, err := s.Load(ctx); !errors.Is(err, opendrive.ErrNoCredentials) {
-		t.Errorf("Load after delete = %v, want ErrNoCredentials", err)
-	}
-	after, err := s.APIKey(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after != key {
-		t.Error("the API key was regenerated by a logout")
-	}
-}
-
-// Losing .env.key must be reported as what it is. This is the "no persistence =
-// configuration error" gate: name the missing file, say what to do, and do it
-// without touching the network.
-func TestAMissingKeyFileSaysWhatIsMissing(t *testing.T) {
-	ctx := context.Background()
-	s := newTestStore(t)
-	if err := s.Save(ctx, sampleCredentials()); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(s.keyPath); err != nil {
-		t.Fatal(err)
-	}
-
-	reopened, err := newEnvStore(s.path, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = reopened.Load(ctx)
-	if err == nil {
-		t.Fatal("a missing key file was not noticed")
-	}
-	msg := err.Error()
-	for _, want := range []string{KeyFileName, ExampleFileName} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("the message does not mention %s: %s", want, msg)
+	raw, _ := os.ReadFile(s.path)
+	for _, secret := range []string{"correct horse", "access-token-value", "refresh-token-value", "derek@example.com"} {
+		if strings.Contains(string(raw), secret) {
+			t.Errorf("%q is readable in the file", secret)
 		}
 	}
-	if err := reopened.Available(ctx); err == nil {
-		t.Error("Available said the store was usable")
+	if !strings.HasPrefix(string(raw), "# opendrive-bridge credentials") {
+		t.Errorf("the file does not say what it is:\n%s", raw)
+	}
+	fi, _ := os.Stat(s.path)
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, want 0600", fi.Mode().Perm())
 	}
 }
 
-func TestTheWrongKeyIsReportedNotGuessedAt(t *testing.T) {
-	ctx := context.Background()
-	s := newTestStore(t)
-	if err := s.Save(ctx, sampleCredentials()); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(s.keyPath, []byte("a completely different key\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	reopened, err := newEnvStore(s.path, nil)
+// The recovery procedure written at the top of the file is run as written, with
+// the real openssl, so the promise that the user is not locked in to this
+// program stays true.
+func TestTheRecoveryCommandInTheFileWorks(t *testing.T) {
+	openssl, err := exec.LookPath("openssl")
 	if err != nil {
+		t.Skip("openssl is not installed")
+	}
+	// The documented command uses the shipped iteration count.
+	s, _ := newEnvStore(filepath.Join(t.TempDir(), CredentialsFileName))
+	if err := s.Save(context.Background(), sampleCredentials()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reopened.Load(ctx); err == nil {
-		t.Fatal("the wrong key produced credentials")
-	} else if !strings.Contains(err.Error(), KeyFileName) {
-		t.Errorf("the message does not name the key file: %v", err)
+	dir := filepath.Dir(s.path)
+	keyFile := filepath.Join(t.TempDir(), "k")
+	script := "grep -v '^#' credentials.key | head -1 > " + keyFile + " && " +
+		"grep -v '^#' credentials.key | tail -n +2 | " +
+		openssl + " enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -pass file:" + keyFile
+	cmd := exec.Command("sh", "-c", script) // #nosec G204 -- a fixed script over test files
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the documented recovery failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "ODB_PASSWORD=") || !strings.Contains(string(out), "correct horse") {
+		t.Fatalf("recovered text does not hold the password:\n%s", out)
+	}
+	// And the header in the file is the command this test ran.
+	raw, _ := os.ReadFile(s.path)
+	if !strings.Contains(string(raw), "-iter 600000 -a -pass file:/tmp/k") {
+		t.Errorf("the header no longer documents the command that works:\n%s", raw)
 	}
 }
 
-// Altering the sealed file must not go unnoticed. CBC is malleable, so this is
-// the second half of the argument in envelope.go: the plaintext carries a
-// checksum, and an edited file fails to load rather than loading something
-// subtly different.
+// ---------------------------------------------------------------- when it goes wrong
+
+// A damaged file is reported, and signing in again replaces it: that is the
+// whole of the recovery a user needs.
+func TestADamagedFileIsReportedAndReplacedBySigningIn(t *testing.T) {
+	s := newTestStore(t)
+	if err := os.WriteFile(s.path, []byte("this is not ours\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Available(context.Background()); err == nil || !strings.Contains(err.Error(), "sign in again") {
+		t.Fatalf("Available = %v, want a refusal that says to sign in again", err)
+	}
+	if err := s.Save(context.Background(), sampleCredentials()); err != nil {
+		t.Fatalf("signing in over a damaged file: %v", err)
+	}
+	if _, err := s.Load(context.Background()); err != nil {
+		t.Fatalf("Load after signing in again: %v", err)
+	}
+}
+
 func TestAnAlteredFileIsRefused(t *testing.T) {
-	ctx := context.Background()
 	s := newTestStore(t)
-	if err := s.Save(ctx, sampleCredentials()); err != nil {
+	if err := s.Save(context.Background(), sampleCredentials()); err != nil {
 		t.Fatal(err)
 	}
-	key, err := s.loadKey()
-	if err != nil {
-		t.Fatal(err)
+	raw, _ := os.ReadFile(s.path)
+	lines := strings.Split(string(raw), "\n")
+	// Flip a character in the middle of the ciphertext.
+	for i := len(lines) - 1; i >= 0; i-- {
+		if len(lines[i]) > 20 && !strings.HasPrefix(lines[i], "#") {
+			b := []byte(lines[i])
+			if b[10] == 'A' {
+				b[10] = 'B'
+			} else {
+				b[10] = 'A'
+			}
+			lines[i] = string(b)
+			break
+		}
 	}
-
-	tampered := map[string]string{
-		envUsername: "someone-else",
-		envPassword: "not the real one",
-		envChecksum: strings.Repeat("0", 64),
-	}
-	sealed, err := seal(renderEnv(tampered), key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(s.path, sealed, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	reopened, err := newEnvStore(s.path, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := reopened.Load(ctx); err == nil {
+	_ = os.WriteFile(s.path, []byte(strings.Join(lines, "\n")), 0o600)
+	fresh, _ := newEnvStore(s.path)
+	if _, err := fresh.Load(context.Background()); err == nil {
 		t.Fatal("an altered file was accepted")
-	} else if !strings.Contains(err.Error(), "altered") {
-		t.Errorf("the message does not say the file was altered: %v", err)
 	}
 }
 
-// A key supplied through the environment is used as it is and no key file is
-// written. That is how a container gets one (§8.3) without a writable directory.
-func TestAKeyFromTheEnvironmentNeedsNoKeyFile(t *testing.T) {
-	ctx := context.Background()
-	cheapKDF(t)
-	dir := t.TempDir()
-	t.Setenv(DefaultKeyEnv, "a configured passphrase")
-
-	s, err := Open(Config{Backend: BackendFile, Path: filepath.Join(dir, EnvFileName)})
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if err := s.Save(ctx, sampleCredentials()); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, KeyFileName)); !errors.Is(err, os.ErrNotExist) {
-		t.Error("a key file was written even though the key came from the environment")
-	}
-	if _, err := s.Load(ctx); err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-}
-
-func TestOpenEphemeralRequiresOptIn(t *testing.T) {
-	if _, err := Open(Config{Backend: BackendEphemeral}); !errors.Is(err, ErrEphemeralNotAllowed) {
-		t.Fatalf("err = %v, want ErrEphemeralNotAllowed", err)
-	}
-	s, err := Open(Config{Backend: BackendEphemeral, AllowEphemeral: true})
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	if s.Backend() != BackendEphemeral {
-		t.Errorf("backend = %q", s.Backend())
-	}
-	if err := s.Available(context.Background()); err != nil {
-		t.Errorf("Available: %v", err)
-	}
-}
-
-func TestOpenRejectsAnUnknownBackendAndNamesTheChoices(t *testing.T) {
-	_, err := Open(Config{Backend: "file"})
-	if !errors.Is(err, ErrUnsupportedBackend) {
-		t.Fatalf("err = %v, want ErrUnsupportedBackend", err)
-	}
-	// "file" is what a person reaches for; "encrypted_file" is what it is
-	// called, so the message has to say so.
-	if !strings.Contains(err.Error(), string(BackendFile)) {
-		t.Errorf("the message does not name the alternatives: %v", err)
-	}
-}
-
-func TestAutoAndFileAreTheSameStore(t *testing.T) {
-	cheapKDF(t)
-	dir := t.TempDir()
-	for _, backend := range []Backend{BackendAuto, BackendFile, ""} {
-		s, err := Open(Config{Backend: backend, Path: filepath.Join(dir, EnvFileName)})
-		if err != nil {
-			t.Fatalf("Open(%q): %v", backend, err)
-		}
-		if s.Backend() != BackendFile {
-			t.Errorf("Open(%q) gave backend %q", backend, s.Backend())
-		}
-	}
-}
-
-// Nothing there yet is not an error; it is a bridge waiting to be set up.
-func TestAnAbsentFileReadsAsNoCredentials(t *testing.T) {
-	ctx := context.Background()
+// Signing out removes the file; the next start asks to be signed in again.
+func TestSigningOutRemovesTheFile(t *testing.T) {
 	s := newTestStore(t)
-	if _, err := s.Load(ctx); !errors.Is(err, opendrive.ErrNoCredentials) {
-		t.Fatalf("Load = %v, want ErrNoCredentials", err)
+	if err := s.Save(context.Background(), sampleCredentials()); err != nil {
+		t.Fatal(err)
 	}
-	if err := s.Available(ctx); err != nil {
-		t.Errorf("Available = %v, want nil for a store that is merely empty", err)
+	if err := s.Delete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(s.path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the file survived signing out: %v", err)
+	}
+	if err := s.Delete(context.Background()); err != nil {
+		t.Fatalf("signing out twice: %v", err)
 	}
 }
 
 func TestValuesSurviveTheirAwkwardCharacters(t *testing.T) {
-	ctx := context.Background()
 	s := newTestStore(t)
 	cred := sampleCredentials()
-	cred.Password = `a "quoted" pass#word with spaces = and equals`
-	if err := s.Save(ctx, cred); err != nil {
+	cred.Password = `p"a s#s='w\ord` + "\t"
+	if err := s.Save(context.Background(), cred); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.Load(ctx)
+	got, err := s.Load(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Password != cred.Password {
-		t.Errorf("password came back as %q, want %q", got.Password, cred.Password)
+		t.Fatalf("password = %q, want %q", got.Password, cred.Password)
 	}
 }
 
-// Anything in the file that is not ours must survive a write, or the first token
-// refresh would silently delete the user's own lines.
-func TestUnknownLinesSurviveAWrite(t *testing.T) {
-	ctx := context.Background()
+// A directory that cannot be written is reported naming the file and the
+// directory, never the temporary file the atomic write uses.
+func TestAnUnwritableDirectoryNamesTheCredentialFileNotATempFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the mode bits this test depends on")
+	}
 	cheapKDF(t)
 	dir := t.TempDir()
-	path := filepath.Join(dir, EnvFileName)
-	if err := os.WriteFile(path, []byte("ODB_USERNAME=derek\nSOMETHING_ELSE=keep me\n"), 0o600); err != nil {
+	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	s, err := newEnvStore(path, nil)
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	s, _ := newEnvStore(filepath.Join(dir, CredentialsFileName))
+	err := s.Save(context.Background(), sampleCredentials())
+	if err == nil {
+		t.Fatal("a read-only directory accepted a credential write")
+	}
+	for _, want := range []string{CredentialsFileName, dir} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the message does not mention %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), ".tmp") {
+		t.Errorf("the message names a temporary file: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------- from 1.1 and 1.2
+
+func writeLegacy(t *testing.T, dir string, encrypted bool) {
+	t.Helper()
+	plain := "ODB_USERNAME=derek@example.com\nODB_PASSWORD=\"correct horse\"\nODB_API_KEY=abc\n"
+	if !encrypted {
+		if err := os.WriteFile(filepath.Join(dir, LegacyEnvFileName), []byte(plain), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	key := []byte("bGVnYWN5LWtleS1mb3ItdGhlLXRlc3Q=")
+	sealed, err := seal([]byte(plain), key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Save(ctx, sampleCredentials()); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, LegacyEnvFileName), sealed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	fields, err := s.read(ctx)
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(dir, LegacyKeyFileName), append(key, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if fields["SOMETHING_ELSE"] != "keep me" {
-		t.Errorf("an unrelated value was lost: %q", fields["SOMETHING_ELSE"])
+}
+
+func TestImportReadsWhat12Wrote(t *testing.T) {
+	for _, encrypted := range []bool{true, false} {
+		cheapKDF(t)
+		dir := t.TempDir()
+		writeLegacy(t, dir, encrypted)
+		s, _ := newEnvStore(filepath.Join(dir, CredentialsFileName))
+		from, err := Import(context.Background(), s)
+		if err != nil {
+			t.Fatalf("encrypted=%v: Import: %v", encrypted, err)
+		}
+		if from != filepath.Join(dir, LegacyEnvFileName) {
+			t.Errorf("encrypted=%v: from = %q", encrypted, from)
+		}
+		got, err := s.Load(context.Background())
+		if err != nil || got.Username != "derek@example.com" || got.Password != "correct horse" {
+			t.Fatalf("encrypted=%v: after import Load = %+v, %v", encrypted, got, err)
+		}
+		// The old files are the user's; they stay.
+		if _, err := os.Stat(filepath.Join(dir, LegacyEnvFileName)); err != nil {
+			t.Errorf("encrypted=%v: the old .env was removed", encrypted)
+		}
+		// Once is enough: a second call does nothing.
+		if from, err := Import(context.Background(), s); from != "" || err != nil {
+			t.Errorf("encrypted=%v: second import = %q, %v", encrypted, from, err)
+		}
+	}
+}
+
+// .env.example copied and never filled in is not an account.
+func TestImportIgnoresTheUntouchedTemplate(t *testing.T) {
+	cheapKDF(t)
+	dir := t.TempDir()
+	tmpl := "ODB_USERNAME=you@example.com\nODB_PASSWORD=your-opendrive-password\n"
+	_ = os.WriteFile(filepath.Join(dir, LegacyEnvFileName), []byte(tmpl), 0o600)
+	s, _ := newEnvStore(filepath.Join(dir, CredentialsFileName))
+	if from, err := Import(context.Background(), s); from != "" || err != nil {
+		t.Fatalf("Import = %q, %v; the template is not credentials", from, err)
+	}
+	if _, err := os.Stat(s.path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a credentials file was written from the template")
+	}
+}
+
+func TestImportWithoutTheOldKeySaysSo(t *testing.T) {
+	cheapKDF(t)
+	dir := t.TempDir()
+	writeLegacy(t, dir, true)
+	_ = os.Remove(filepath.Join(dir, LegacyKeyFileName))
+	s, _ := newEnvStore(filepath.Join(dir, CredentialsFileName))
+	_, err := Import(context.Background(), s)
+	if err == nil || !strings.Contains(err.Error(), "sign in again") {
+		t.Fatalf("Import = %v, want a refusal that says to sign in again", err)
+	}
+}
+
+func TestImportLeavesAnExistingCredentialsFileAlone(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Save(context.Background(), &opendrive.StoredCredentials{Username: "new@example.com", Password: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	writeLegacy(t, filepath.Dir(s.path), false)
+	if from, err := Import(context.Background(), s); from != "" || err != nil {
+		t.Fatalf("Import = %q, %v", from, err)
+	}
+	got, _ := s.Load(context.Background())
+	if got.Username != "new@example.com" {
+		t.Fatalf("an old .env overwrote newer credentials: %+v", got)
+	}
+}
+
+// ---------------------------------------------------------------- Open
+
+func TestOpenEphemeralRequiresOptIn(t *testing.T) {
+	if _, err := Open(Config{Backend: BackendEphemeral}); !errors.Is(err, ErrEphemeralNotAllowed) {
+		t.Fatalf("Open = %v, want ErrEphemeralNotAllowed", err)
+	}
+	if st, err := Open(Config{Backend: BackendEphemeral, AllowEphemeral: true}); err != nil || st.Backend() != BackendEphemeral {
+		t.Fatalf("Open = %v, %v", st, err)
+	}
+}
+
+func TestOpenRejectsAnUnknownBackendAndNamesTheChoices(t *testing.T) {
+	_, err := Open(Config{Backend: "keyring"})
+	if !errors.Is(err, ErrUnsupportedBackend) {
+		t.Fatalf("Open = %v", err)
+	}
+	for _, want := range []string{string(BackendAuto), string(BackendFile), string(BackendEphemeral)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
+	}
+}
+
+func TestAutoAndFileAreTheSameStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), CredentialsFileName)
+	for _, b := range []Backend{BackendAuto, BackendFile} {
+		st, err := Open(Config{Backend: b, Path: path})
+		if err != nil || st.Backend() != BackendFile {
+			t.Fatalf("%s: %v, %v", b, st, err)
+		}
 	}
 }
 
 func TestConfigDefaults(t *testing.T) {
-	got := Config{}.withDefaults()
-	if got.Backend != BackendAuto || got.KeyEnv != DefaultKeyEnv {
+	if got := (Config{}).withDefaults(); got.Backend != BackendAuto {
 		t.Errorf("defaults = %+v", got)
 	}
 }
 
-// The default location is beside the program, because v1.1 runs in place: a user
-// who unpacks the archive finds their credentials in the same folder (§8.2).
+// Beside the program, because the bridge runs in place: everything a user backs
+// up or deletes is in the folder they unpacked (§8.2).
 func TestTheDefaultPathIsBesideTheProgram(t *testing.T) {
 	got := filePath(Config{}.withDefaults())
-	if filepath.Base(got) != EnvFileName {
+	if filepath.Base(got) != CredentialsFileName {
 		t.Errorf("default path = %q", got)
 	}
 	exe, err := os.Executable()
@@ -448,46 +398,5 @@ func TestTheDefaultPathIsBesideTheProgram(t *testing.T) {
 	}
 	if filepath.Dir(got) != filepath.Dir(exe) {
 		t.Errorf("default path %q is not beside the program at %q", got, exe)
-	}
-}
-
-// A directory the bridge cannot write to is the v1.1 shape of "no persistence =
-// configuration error" (§9.2.4), and it has a specific way of going wrong: the
-// failure surfaces from the atomic-write temp file, so the message used to read
-// "cannot create a temporary file in /data" and name .odb-419478592.tmp. That
-// tells the person nothing. A container with /data mounted read-only — an easy
-// mistake, and the one you would make on purpose after reading that .env holds
-// secrets — is exactly who receives it.
-func TestAnUnwritableDirectoryNamesTheCredentialFileNotATempFile(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores the mode bits this test depends on")
-	}
-	cheapKDF(t)
-
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-
-	s, err := newEnvStore(filepath.Join(dir, EnvFileName), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = s.Save(context.Background(), sampleCredentials())
-	if err == nil {
-		t.Fatal("a read-only directory accepted a credential write")
-	}
-	msg := err.Error()
-	// The file the user is looking for, the directory to fix, and the key file
-	// they will need to know about — all three, because the point of the message
-	// is that somebody can act on it without reading the source.
-	for _, want := range []string{EnvFileName, dir, KeyFileName} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("the message does not mention %q: %s", want, msg)
-		}
-	}
-	if strings.Contains(msg, ".tmp") {
-		t.Errorf("the message names a temporary file the user will never see: %s", msg)
 	}
 }

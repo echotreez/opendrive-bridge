@@ -400,7 +400,7 @@ func TestStatusExplainsEveryState(t *testing.T) {
 		"not_configured":       "odctl login",
 		"reauth_required":      "current password",
 		"captcha_required":     "opendrive.com",
-		"keystore_unavailable": "keychain",
+		"keystore_unavailable": "credentials.key",
 	}
 	for state, want := range states {
 		t.Run(state, func(t *testing.T) {

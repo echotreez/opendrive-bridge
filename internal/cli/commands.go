@@ -20,9 +20,10 @@ func newLoginCommand(o *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login <username>",
 		Short: "Sign in and let the bridge remember it",
-		Long: "Signs in once and hands the credentials to your system keychain, after\n" +
-			"which the bridge keeps itself signed in. You will only be asked again if\n" +
-			"you change your OpenDrive password.",
+		Long: "Signs in once. The bridge encrypts the credentials into credentials.key\n" +
+			"beside itself and keeps itself signed in from then on. You will only be asked\n" +
+			"again if you change your OpenDrive password. The password is prompted for\n" +
+			"when --password is left out, which keeps it out of your shell history.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pw := password
@@ -118,7 +119,8 @@ func newStatusCommand(o *Options) *cobra.Command {
 			// said in a sentence rather than printed as an enum.
 			switch s.State {
 			case "not_configured":
-				_, _ = fmt.Fprintln(o.Out(), "Not signed in yet. Run 'odctl login <username>' to start.")
+				_, _ = fmt.Fprintln(o.Out(), "Not signed in yet. Run 'odctl login <username>', or sign in "+
+					"on the bridge's web page (http://127.0.0.1:9750/ui).")
 				return nil
 			case "authenticated":
 				_, _ = fmt.Fprintf(o.Out(), "Signed in as %s.\n", accountName(s))
@@ -126,13 +128,14 @@ func newStatusCommand(o *Options) *cobra.Command {
 				_, _ = fmt.Fprintf(o.Out(), "Signed in as %s; the bridge is renewing its session.\n", accountName(s))
 			case "reauth_required":
 				_, _ = fmt.Fprintf(o.Out(), "Your saved password is no longer accepted. "+
-					"Run 'odctl login %s' with your current password.\n", accountName(s))
+					"Run 'odctl login %s' with your current password, or sign in again on the web page.\n",
+					accountName(s))
 			case "captcha_required":
 				_, _ = fmt.Fprintln(o.Out(), "OpenDrive is asking for a captcha the bridge cannot answer. "+
 					"Sign in once at opendrive.com, then try again.")
 			case "keystore_unavailable":
-				_, _ = fmt.Fprintln(o.Out(), "The bridge cannot reach its credential store. "+
-					"Unlock your login keychain and it will recover on its own.")
+				_, _ = fmt.Fprintln(o.Out(), "The bridge cannot read its saved sign-in (credentials.key). "+
+					"Sign in again with 'odctl login <username>' to replace it.")
 			default:
 				_, _ = fmt.Fprintf(o.Out(), "State: %s\n", s.State)
 			}

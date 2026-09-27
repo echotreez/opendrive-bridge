@@ -222,7 +222,7 @@ func TestUninstallKeepsTheCredentialsAndSaysSo(t *testing.T) {
 	if !fake.uninstalled {
 		t.Error("the service was not uninstalled")
 	}
-	for _, want := range []string{".env", ".env.key"} {
+	for _, want := range []string{"credentials.key"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the output does not mention %s:\n%s", want, out)
 		}

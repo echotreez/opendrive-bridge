@@ -9,22 +9,20 @@ speaks to your OpenDrive account for you. `odctl` is a command that talks to it.
 Once you sign in the first time, the daemon keeps itself signed in, so scripts
 and other programs can use your files without ever handling your password.
 
-**Where your password goes.** Into a file called `.env`, in the same folder as
-the programs, encrypted with a key in `.env.key` beside it. You put it there in
-the clear once; the first run of the daemon encrypts the file and the plaintext
-is gone. The same two files are used on every platform and in containers — there
-is nothing to choose.
+**Where your password goes.** Nowhere you have to prepare. You sign in once — on
+the bridge's web page or with `odctl login` — and the daemon encrypts what you
+typed into one file, `credentials.key`, in the same folder as the programs (in
+`./data` for a container). Restarting asks for nothing. If OpenDrive stops
+accepting the password, because you changed it, the bridge asks you to sign in
+again; nothing needs restarting.
 
-**What that protects you from, and what it does not.** It protects you from
-committing your password to git, from syncing it to a cloud backup in the clear,
-from someone reading it over your shoulder, and from it appearing in a log or a
-process listing. It does **not** protect you from someone who can already read
-your files as you, because `.env.key` sits next to `.env` and they would get
-both. That is the price of a daemon that restarts on its own without anybody
-typing a passphrase. On a shared machine, use full-disk encryption and a separate
-account rather than relying on this.
-
-Back up `.env` and `.env.key` together, or neither is any use.
+**What that protects you from, and what it does not.** The encryption keeps your
+password out of git, out of a cloud backup's plain text, off your screen and out of
+logs and process listings. The key is in the same file, because a daemon that
+restarts on its own cannot ask anybody for a passphrase — so it does **not**
+protect you from someone who can already read your files as you. On a shared
+machine, use full-disk encryption and a separate account rather than relying on
+this.
 
 ---
 
@@ -50,7 +48,7 @@ tar xzf opendrive-bridge_*_linux_amd64.tar.gz
 cd opendrive-bridge
 ```
 
-Put that folder somewhere permanent: your credentials are about to live in it.
+Put that folder somewhere permanent: your sign-in will be kept in it.
 
 ### macOS will probably refuse the first time
 
@@ -70,29 +68,23 @@ none of this.
 
 ## 2. Sign in
 
-Copy the template and put your OpenDrive username and password in it:
-
-```bash
-cp .env.example .env
-$EDITOR .env
-```
-
-Now start the daemon once. This is the moment the plaintext goes away: it creates
-`.env.key`, generates the bridge's own API key, and rewrites `.env` encrypted.
+Start the daemon. There is nothing to set up first:
 
 ```bash
 ./opendrived
 ```
 
-In another terminal, in the same folder:
+Open `http://127.0.0.1:9750/ui` and sign in with your OpenDrive account — or, in
+another terminal in the same folder:
 
 ```bash
+./odctl login you@example.com     # prompts for the password, so it stays out of your history
 ./odctl status
 ```
 
-It should say `Signed in as you@example.com.` From here on the daemon keeps
-itself signed in; you will only be asked again if you change your OpenDrive
-password somewhere else.
+It should say `Signed in as you@example.com.` The daemon has written
+`credentials.key` beside itself and keeps itself signed in from here on; you will
+only be asked again if you change your OpenDrive password somewhere else.
 
 Try a couple of things:
 
@@ -126,8 +118,8 @@ folder**, with the absolute path written into the service definition, because no
 service manager reads your shell configuration.
 
 `odctl daemon stop` and `odctl daemon uninstall` undo it. Uninstalling leaves
-`.env` and `.env.key` alone: removing a service is not the same as throwing away
-your sign-in, and reinstalling a newer version should not ask you to do it again.
+`credentials.key` alone: removing a service is not the same as throwing away your
+sign-in, and reinstalling a newer version should not ask you to do it again.
 
 `install` also prints the one line that puts this folder on your `PATH`. It does
 not write it unless you pass `--modify-shell-profile`, in which case it backs the
@@ -153,12 +145,13 @@ journalctl --user -u opendrived -f      # the log
 ```
 
 Two paths are substituted there and both matter: `ExecStart`, and the
-`ReadWritePaths` that lets the daemon write `.env` when a token rotates.
+`ReadWritePaths` that lets the daemon write `credentials.key` when you sign in and
+when a token rotates.
 
 It used to be a system unit with `DynamicUser=yes`, which is a good shape for a
 service with no user data and the wrong one here — a throwaway account cannot
-read a `.env` in your home directory. `ProtectHome=yes` was in that file too, and
-would have hidden the credentials from the daemon just as effectively.
+write to the folder in your home directory. `ProtectHome=yes` was in that file too,
+and would have hidden the folder from the daemon just as effectively.
 
 **If you want it running when you are not logged in**, ask systemd to keep your
 user manager alive:
@@ -177,76 +170,68 @@ launchctl load ~/Library/LaunchAgents/com.opendrive.bridge.plist
 ```
 
 Edit the plist first: it needs the full path to `opendrived` in the folder you
-unpacked. A LaunchAgent runs as you, which is what lets it read `.env`. A
-LaunchDaemon would start earlier, run as root, and be looking for a file it has
-no business reading. Nothing prompts you for anything — macOS is not holding the
-credentials.
+unpacked. A LaunchAgent runs as you, which is what lets it keep `credentials.key`
+in your folder. A LaunchDaemon would start earlier, run as root, and keep your
+sign-in in a file you would need `sudo` to back up. Nothing prompts you for
+anything — macOS is not holding the credentials.
 
 ---
 
 ## 4. Containers
 
-The image is on `ghcr.io/echotreez/opendrive-bridge`. It is built for both Intel
-and ARM, runs as a non-root user, and contains nothing but the two programs and a
-set of CA certificates.
-
-**The container keeps everything in one folder, like a host install.** There is
-no container-specific credential backend: you prepare `.env` exactly as you would
-on a laptop, put it in a folder, and mount **the folder** at `/data`.
+The image is on `ghcr.io/echotreez/opendrive-bridge`, built for x86-64 and ARM64. It
+contains the two programs and a set of CA certificates, and nothing else — no
+shell, no package manager.
 
 ```bash
-mkdir -p opendrive-bridge/data/cache && cd opendrive-bridge
-$EDITOR data/.env         # two lines: ODB_USERNAME=… and ODB_PASSWORD=…
-sudo chown -R 65532:65532 data            # the image runs as uid 65532
-
-export ODB_API_KEY="$(openssl rand -hex 32)"   # keep it: odctl needs it too
-docker run -d --name opendrive-bridge \
-  -p 127.0.0.1:9750:9750 \
-  -e ODB_API_KEY \
-  -e ODB_CACHE_DIR=/data/cache \
-  -v "$PWD/data:/data" \
-  ghcr.io/echotreez/opendrive-bridge:1.2
+docker compose up -d        # with deploy/docker/docker-compose.yaml, in a folder of its own
 ```
 
-The first start rewrites `data/.env` encrypted and creates `data/.env.key` beside
-it, on your host. Transfer state goes in `data/jobs`, the cache in `data/cache`.
-Leave out `ODB_CACHE_DIR` and the cache stays off.
+Then open `http://127.0.0.1:9750/ui` and sign in, or:
 
-`deploy/docker/docker-compose.yaml` is the same thing written down, with a
-healthcheck.
+```bash
+docker compose exec opendrive-bridge odctl login you@example.com
+```
 
-Things worth getting right:
+That is the whole setup. Docker creates `./data` beside the compose file on the
+first start, and the bridge keeps everything there: `credentials.key` once you sign
+in, transfer state in `jobs/`, and the cache in `cache/`. It survives `docker
+compose down`, an image upgrade and a new container; a password change is handled
+by signing in again, with no restart.
 
-- **Mount the folder, not the files.** `-v "$PWD/.env:/data/.env"` does not work,
-  and until 1.2 this page said to do exactly that. The bridge replaces `.env`
-  atomically — a new file renamed over the old one — and a file that is itself a
-  mount point cannot be renamed over, so the first run could not encrypt it: the
-  password stayed on disk in the clear. Mounting `.env.key` on its own is worse
-  before the first run, because Docker creates a *directory* of that name when the
-  file does not exist yet. The daemon now refuses to start in both cases and says
-  which one, rather than running with the password unencrypted.
-- **The folder has to belong to uid 65532.** Skip the `chown` and the daemon
-  refuses to start, naming the folder. After the first run `.env` and `.env.key`
-  are mode 0600 and owned by that uid, so reading them for a backup needs `sudo`.
-- **Back up `.env` and `.env.key` together.** Either alone is useless.
-- **`ODB_API_KEY` is required here.** The image binds `0.0.0.0`, because inside a
-  container loopback means "nothing outside can reach it" — and since that is not
-  loopback, the daemon insists on a key. On a host install it generates one into
-  `.env` itself and you never see it. Publish the port to `127.0.0.1` as above so
-  only your machine can reach it.
-- **Docker Desktop for Mac or Windows** is unmeasured for bind mounts: whether
-  fsync crosses its file-sharing layer has not been checked. Put the cache on a
-  named volume there (`-v odb-cache:/data/cache` after the folder mount), and check
-  whether your setup needs the `chown`.
-- **Apple's `container` on macOS** was measured with 1.2.0. The folder mount works
-  without the `chown` (files appear on the Mac as yours), and an upload
-  acknowledged with 202 survived `container kill --signal KILL` and was delivered
-  intact after a restart. What survives a power cut on the Mac itself is not
-  measured. Two limits: `odctl up`/`down` cannot move files through a containerised
-  bridge (they send a path the container cannot see — use the `/v1/upload/stream`
-  and `/v1/download/stream` endpoints), and the cache directory lock does **not**
-  hold between two containers, because each is its own virtual machine: a second
-  container on the same folder starts normally. Run one per folder.
+Without compose:
+
+```bash
+docker run -d --name opendrive-bridge -p 127.0.0.1:9750:9750 \
+  -e ODB_CACHE_DIR=/data/cache -v "$PWD/data:/data" \
+  ghcr.io/echotreez/opendrive-bridge:latest
+```
+
+Things worth knowing:
+
+- **It runs as root**, as containers ordinarily do. Until 1.3 it ran as uid 65532,
+  which meant every folder mounted into it had to be `chown`ed first. On Linux the
+  files in `./data` belong to root as a result; reading them for a backup takes
+  `sudo`. The root filesystem is read-only and `no-new-privileges` is set.
+- **No API key by default.** The container listens on all interfaces, because
+  loopback inside a container is unreachable, and the compose file publishes the
+  port to `127.0.0.1` so only this machine can reach it. If you publish it more
+  widely, set `ODB_API_KEY`; every caller then has to send it. The daemon logs a
+  warning when it listens beyond loopback without one.
+- **Mount a folder at `/data`, not a file.** Everything is written there by the
+  bridge; a single file mounted on its own cannot be replaced atomically, and the
+  bridge will say so rather than lose a sign-in.
+- **`odctl up` and `odctl down` cannot move files through a containerised bridge**:
+  they send the bridge a path on your machine, which the container cannot see. Use
+  the `PUT /v1/upload/stream` and `GET /v1/download/stream` endpoints.
+- **Docker Desktop for Mac or Windows** is unmeasured for bind mounts: whether fsync
+  crosses its file-sharing layer has not been checked. Keep the cache on a named
+  volume there (the compose file has the line, commented).
+- **Apple's `container` on macOS** was measured with 1.2.0: an upload acknowledged
+  with 202 survived `container kill --signal KILL` and was delivered intact after a
+  restart. What survives a power cut on the Mac itself is not measured. The cache
+  directory lock does **not** hold between two containers there, because each is
+  its own virtual machine: run one per folder.
 
 ---
 
@@ -322,7 +307,7 @@ unit is set high enough to let that happen.
 
 ### The cache directory is not encrypted
 
-`.env` is encrypted. **The cache is not.** It holds your files as they are,
+`credentials.key` is encrypted. **The cache is not.** It holds your files as they are,
 protected by the directory's permissions — the bridge sets 0700, so only the
 account running the bridge can read it — and by whatever encryption the disk
 itself provides. If that is not enough for the files you work with, either leave
@@ -330,51 +315,31 @@ the cache off or put it on an encrypted volume.
 
 ### In a container
 
-Put the cache outside the container. A container's own filesystem is disposable and
+Keep the cache outside the container. A container's own filesystem is disposable and
 recreating a container is routine, so a cache inside it would take unsent files with
-it. §8.3.1 of the whitepaper has the full argument.
+it. The compose file puts it in `./data/cache`, on the host, and that is the most
+robust option: Docker's clean-up commands (`docker compose down -v`, `docker volume
+prune`) leave host directories alone; the journal and the unsent files are somewhere
+you can see and back up; and after a crash, starting the container again replays the
+journal and sends what had not gone up. An interrupted file is sent again from the
+start rather than resumed mid-way — if it had actually arrived, OpenDrive recognises
+it by hash and the resend is nearly free.
 
-**On a Linux host, use a directory on the host**, mounted in — this is what
-`deploy/docker/docker-compose.yaml` does by default:
-
-```bash
-mkdir -p cache && sudo chown 65532:65532 cache
-# ... -v "$PWD/cache:/data/cache" -e ODB_CACHE_DIR=/data/cache
-```
-
-It is the most robust option. Docker's clean-up commands (`docker compose down -v`,
-`docker volume prune`) delete named volumes and leave host directories alone; the
-journal and the unsent files are somewhere you can see and back up; and after a
-crash, starting the container again replays the journal and sends what had not gone
-up. An interrupted file is sent again from the start rather than resumed mid-way — if
-it had actually arrived, OpenDrive recognises it by hash and the resend is nearly
-free.
-
-The `chown` is needed because the image runs as uid 65532 and the bridge must own its
-cache directory. Without it the bridge refuses to start and says which directory and
-what to run.
-
-**On Docker Desktop for Mac or Windows, use a named volume** (`-v
-odb-cache:/data/cache`) until somebody measures the alternative. A host directory
+**On Docker Desktop for Mac or Windows, use a named volume** for the cache (`-v
+odb-cache:/data/cache`) until somebody measures the alternative: a host directory
 there goes through the VM's file-sharing layer, and whether an fsync inside the
-container reaches the Mac's disk through it has not been checked. Everything the
-cache promises rests on fsync, so this guide does not recommend it on a guess. A
-named volume lives on the VM's own disk and needs no `chown` — the image creates
-`/data/cache` owned by the right user, and a new volume inherits that.
+container reaches the host's disk through it has not been checked.
 
 **One bridge per cache directory.** The daemon takes a lock on the directory at
 startup, so a second bridge pointed at the same folder — another container, or
 `opendrived` on the host — refuses to start instead of two of them writing one
-journal. It is a kernel lock, released when the holder exits however it exits, so a
-crash never leaves the directory stuck and there is nothing to clean up by hand. It
-holds between processes on the same Linux kernel, which covers containers and the
-host on a Linux machine; it is not guaranteed across Docker Desktop's VM boundary,
-or on a network filesystem.
+journal. It is a kernel lock, released when the holder exits however it exits. It
+holds between processes on the same Linux kernel; it does **not** hold across
+virtual machines (Apple's `container`, measured) or on a network filesystem.
 
 The daemon also checks at startup and reports `durable: false` on
 `/v1/cache/status` if the cache directory is not a mount at all, which `odctl cache
-status` prints as a warning — but a default that is right beats a warning that is
-read.
+status` prints as a warning.
 
 ### Turning it off again
 
@@ -407,12 +372,14 @@ requests because you opened a page, and a machine with no internet should not ha
 broken interface. A `Content-Security-Policy` makes the browser enforce that rather
 than leaving it to good intentions.
 
-**On loopback there is nothing to configure.** The daemon generates an API key for
-clients that need one and does not require it on `127.0.0.1`, so opening the page
-works. If the bridge listens on any other address it will not answer without the key
-you configured, and the page asks for it — kept for that browser tab only, sent as a
-header, and never put in a web address, because a URL reaches the browser history and
-every log in between.
+**There is nothing to configure.** With no API key set — the default — the page
+just works. If you set `ODB_API_KEY`, the bridge will not answer without it, and the
+page asks for it — kept for that browser tab only, sent as a header, and never put in
+a web address, because a URL reaches the browser history and every log in between.
+
+**It is where you sign in.** When the bridge has no account yet, or OpenDrive stops
+accepting the saved password, the page says so and puts the cursor in the sign-in
+form.
 
 **It is a client, not a back door.** The page has no other route to OpenDrive: every
 number on it arrives over the same HTTP API `odctl` uses, and every error it shows is
@@ -425,36 +392,34 @@ are already running.
 
 ---
 
-## 7. The credential files
+## 7. The credential file
 
-Two files, in the folder you unpacked, on every platform:
+One file, `credentials.key`, in the folder you unpacked (or `./data` in a
+container), 0600. You never create or edit it: the bridge writes it when you sign
+in and when a token rotates, and removes it when you sign out.
 
-| file | what it is | permissions |
-|---|---|---|
-| `.env.example` | the template that ships in the archive | 0644 |
-| `.env` | your credentials and the bridge's API key, encrypted | 0600 |
-| `.env.key` | the 32 random bytes that decrypt it, made on first run | 0600 |
-
-You are not locked in to this program. `.env` is written in OpenSSL's own
-format, so you can always read your credentials back yourself:
+Inside, after a comment, is one line holding a random key and then your credentials
+encrypted with it in OpenSSL's own format, so you are not locked in to this program.
+The comment at the top of the file carries the command, and it is:
 
 ```bash
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -pass file:.env.key -in .env
+grep -v '^#' credentials.key | head -1 > /tmp/k
+grep -v '^#' credentials.key | tail -n +2 | \
+  openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -pass file:/tmp/k
 ```
 
-That command is checked against the real `openssl` in this project's test suite,
-in both directions, because a claim like that is only worth making if something
-proves it.
+That is run, exactly as written, against the real `openssl` in this project's test
+suite.
 
-**The one thing that can go permanently wrong** is losing `.env.key`. It is not a
-password you can reset — without it the credentials in `.env` cannot be read, and
-you would have to start again from `.env.example`. No data in OpenDrive is at
-risk either way; it is your sign-in that goes.
+**If it is lost or damaged**, sign in again; the bridge writes a new one. Nothing in
+your OpenDrive account is affected.
 
-`--ephemeral` keeps everything in memory and forgets it on exit. It exists for
-tests and one-off runs, and the bridge will never choose it for you: a daemon
-that looks configured and forgets on reboot is worse than one that refuses to
-start.
+**Coming from 1.1 or 1.2**, which used `.env` and `.env.key`: the first start of 1.3
+reads them into `credentials.key` and says so in its log. It leaves the old files
+where they are; delete them when you are satisfied.
+
+`--ephemeral` keeps the sign-in in memory and forgets it on exit. It exists for
+tests and one-off runs; the bridge never chooses it for you.
 
 ---
 
@@ -468,11 +433,11 @@ even when OpenDrive is unreachable, and it will say which of these you are in:
 
 | what it says | what to do |
 |---|---|
-| Not signed in yet | `odctl login you@example.com` |
+| Not signed in yet | sign in on the web page, or `odctl login you@example.com` |
 | Signed in as … | nothing; it is working |
-| Your saved password is no longer accepted | you changed it on the website; `odctl login` again |
+| Your saved password is no longer accepted | you changed it on the website; sign in again (page or `odctl login`) |
 | OpenDrive is asking for a captcha | sign in once at opendrive.com, then retry |
-| The bridge cannot reach its credential store | `.env.key` is missing, or `.env` cannot be decrypted with it — see §5 |
+| The bridge cannot read its saved sign-in | `credentials.key` is damaged or unreadable; sign in again to replace it |
 
 **Exit codes**, for scripts:
 
@@ -524,7 +489,7 @@ Switch on `code` — it is a fixed list, documented in the specification. Show
 `message` to people. There is also an `upstream` field holding what OpenDrive
 itself said; it is there for bug reports, and it is deliberately *not* what you
 should display, because OpenDrive's own wording is often misleading. (If you are
-curious about how often: `docs/discrepancies.md` lists 45 measured cases.)
+curious about how often: `docs/discrepancies.md` lists 53 measured cases.)
 
 One paging quirk you will meet if you list a large folder: `/v1/ls` returns
 `dir_update_time`, and to fetch the next page you must send it back along with
@@ -553,7 +518,7 @@ fails on anything medium or higher, so these pass and a new one does not.
 
 | finding | why it is there |
 |---|---|
-| `G101` × several — "hardcoded credentials" in `internal/keystore/env.go` | they are the *names* of the fields in `.env` (`ODB_PASSWORD`, `ODB_ACCESS_TOKEN`), not values. A constant naming a field looks exactly like a constant holding one. |
+| `G101` × several — "hardcoded credentials" in `internal/keystore/env.go` | they are the *names* of the fields in `credentials.key` (`ODB_PASSWORD`, `ODB_ACCESS_TOKEN`), not values. A constant naming a field looks exactly like a constant holding one. |
 | `G117` — a struct field called `Password` is serialised | that is the point: the credential store persists your password so the bridge can stay signed in without you. Whitepaper §9.2 records this as a deliberate deviation from "never store a password", and `persist_password: false` is the way out. |
 | `G115` — an int converted to a byte in the PKCS#7 padding | the value is bounded to 1–255 by a check three lines above; the analyser cannot follow it. |
 

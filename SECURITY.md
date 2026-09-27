@@ -22,32 +22,41 @@ history.
 The bridge holds a password that unlocks somebody's entire cloud storage, so it
 is worth being exact about the threat model rather than reassuring.
 
-**Where your credentials live.** In `.env`, in the folder you unpacked,
-encrypted with AES-256-CBC. The key is 32 random bytes in `.env.key`, generated
-on first run, sitting next to it. Both files are 0600.
+**Where your credentials live.** In `credentials.key`, in the folder you
+unpacked (or `./data` for the container), written by the bridge when you sign in,
+0600. It holds a random key and your credentials encrypted with it using
+AES-256-CBC. You never type your password into a file.
 
 **It protects you from:**
 
-- committing your password to git — `.env` and `.env.key` are in `.gitignore`,
-  and the release archives and container images are checked in CI for both;
+- committing your password to git — `credentials.key` (and 1.2's `.env` and
+  `.env.key`) are in `.gitignore`, and the release archives and container images
+  are checked in CI for them;
 - a cloud backup or file sync carrying your password away in the clear;
 - someone reading it over your shoulder, or finding it in a screen recording;
 - your password appearing in a log file, a crash report or a process listing.
   Redaction of `access_token`, `session_id` and `passwd` is not optional and
   cannot be switched off;
-- a `cat .env` typed by habit.
+- a `cat credentials.key` typed by habit.
 
 **It does not protect you from:**
 
-- **anyone who can already read your files as you.** `.env.key` is next to
-  `.env`, so they get both. This is the important one, and it is deliberate: any
+- **anyone who can already read your files as you.** The key is in the same
+  file as the ciphertext. This is the important one, and it is deliberate: any
   scheme that asks for a passphrase at startup cannot restart the daemon after a
   reboot or a crash, and unattended operation is the product requirement the
   whole design rests on. It is a conscious trade, not an oversight.
-- **another program running as you.** The bridge listens on `127.0.0.1` and, on
-  loopback, treats the operating system's decision about who may connect as the
-  authority. If that is not good enough for your machine, configure an API key
-  explicitly with `--api-key` and it will be required for every request.
+- **another program on the same machine.** No API key is required by default:
+  on a host the bridge listens on `127.0.0.1`, and the container's port is
+  published to `127.0.0.1`, so the operating system's decision about who may
+  connect is the authority. If that is not good enough for your machine, or you
+  publish the port more widely, set an API key (`--api-key` or `ODB_API_KEY`) and
+  it is required for every request. The daemon logs a warning when it listens
+  beyond loopback without one.
+- **root inside the container.** Since 1.3 the image runs as root, so that no
+  folder mounted into it needs a `chown`. It has no shell and no package manager,
+  its root filesystem is read-only in the compose file, and `no-new-privileges`
+  is set.
 - **someone with root or Administrator.** They can read anything.
 
 If you are on a shared machine, or the account matters more than a personal one,
@@ -70,11 +79,15 @@ are mutually exclusive — `openssl enc` refuses AEAD ciphers. Keeping the
 your own credentials without this program:
 
 ```bash
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -pass file:.env.key -in .env
+grep -v '^#' credentials.key | head -1 > /tmp/k
+grep -v '^#' credentials.key | tail -n +2 | \
+  openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -pass file:/tmp/k
 ```
 
-That command is tested against the real `openssl`, in both directions, on every
-change. Integrity is not dropped: the plaintext carries a checksum, so an altered
+The same command is written at the top of the file itself.
+
+That command is run as written against the real `openssl` on every change, and
+the format is tested against it in both directions. Integrity is not dropped: the plaintext carries a checksum, so an altered
 file fails to load rather than loading something subtly different.
 
 ## What is checked, and when

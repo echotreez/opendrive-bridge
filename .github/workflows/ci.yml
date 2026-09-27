@@ -189,7 +189,7 @@ jobs:
   # This job exists because the unit had been wrong for a release and nothing
   # noticed: DynamicUser=yes and ProtectHome=yes both survived the move of
   # credentials into the user's own folder, and either one stops the daemon
-  # reading its .env. A unit file is not documentation, it is the thing that
+  # writing its credentials.key. A unit file is not documentation, it is the thing that
   # runs, and the only way to know it works is to start it.
   systemd-user-unit:
     timeout-minutes: 15
@@ -202,13 +202,9 @@ jobs:
       - name: Build and lay out a release directory
         run: |
           set -euo pipefail
+          # Nothing but the programs: since 1.3 there is no file to prepare.
           mkdir -p "$HOME/opendrive-bridge"
           go build -o "$HOME/opendrive-bridge/" ./cmd/opendrived ./cmd/odctl ./tools/mockupstream
-          cp .env.example "$HOME/opendrive-bridge/.env"
-          # A username is enough to exercise the credential path; the mock
-          # upstream does not check it.
-          printf 'ODB_USERNAME=ci@example.com\nODB_PASSWORD=not-a-real-password\n' \
-            > "$HOME/opendrive-bridge/.env"
 
       - name: Install the unit exactly as the file says to
         run: |
@@ -220,7 +216,7 @@ jobs:
           systemd-analyze verify ~/.config/systemd/user/opendrived.service
           systemctl --user daemon-reload
 
-      - name: Start it, and prove it can read its own .env
+      - name: Start with nothing, sign in, restart, still signed in
         run: |
           set -euo pipefail
           dir="$HOME/opendrive-bridge"
@@ -228,21 +224,23 @@ jobs:
           for _ in $(seq 1 50); do [ -s "$dir/upstream.addr" ] && break; sleep 0.2; done
           systemctl --user set-environment ODB_BASE_URL="http://$(cat "$dir/upstream.addr")/api/v1"
           systemctl --user start opendrived
-          for _ in $(seq 1 50); do
-            "$dir/odctl" status >/dev/null 2>&1 && break
-            sleep 0.2
-          done
+          for _ in $(seq 1 50); do "$dir/odctl" status >/dev/null 2>&1 && break; sleep 0.2; done
           systemctl --user is-active opendrived
-          "$dir/odctl" status
+          "$dir/odctl" status | tee /tmp/st0.txt
+          grep -qi "not signed in" /tmp/st0.txt || { echo "a fresh bridge is not asking to be signed in"; exit 1; }
 
-          # The credential file must have been sealed by that first start, and
-          # the key created beside it. This is the assertion the whole job is
-          # for: ProtectHome or DynamicUser coming back would fail here.
-          test -f "$dir/.env.key" || { echo ".env.key was not created"; exit 1; }
-          grep -q "Salted__" <(base64 -d < "$dir/.env" 2>/dev/null | head -c 8) \
-            || { echo ".env was not encrypted by the first run"; exit 1; }
-          ! grep -q "not-a-real-password" "$dir/.env" \
-            || { echo "the plaintext password is still in .env"; exit 1; }
+          # Signing in is the one step, and the bridge writes the file itself —
+          # beside the programs, which is what ProtectHome or DynamicUser coming
+          # back to the unit would break.
+          "$dir/odctl" login ci@example.com --password not-a-real-password
+          test -f "$dir/credentials.key" || { echo "signing in wrote no credentials.key"; exit 1; }
+          ! grep -q "not-a-real-password" "$dir/credentials.key" \
+            || { echo "the password is readable in credentials.key"; exit 1; }
+
+          systemctl --user restart opendrived
+          for _ in $(seq 1 50); do "$dir/odctl" status >/tmp/st1.txt 2>&1 && grep -qi "signed in as" /tmp/st1.txt && break; sleep 0.2; done
+          cat /tmp/st1.txt
+          grep -qi "signed in as ci@example.com" /tmp/st1.txt || { echo "a restart forgot the sign-in"; exit 1; }
 
       - name: Stop and remove it
         if: always()
@@ -320,12 +318,11 @@ jobs:
           for a in dist/*.tar.gz; do
             listing="$(mktemp)"
             tar tzf "$a" > "$listing"
-            # A release must carry the template and must never carry a real
-            # credential file. The second half matters more than it looks: .env
-            # and .env.key live in the working directory a release is built
-            # from, so a stray one would be picked up by the archive glob and
-            # published to everyone.
-            for unwanted in .env .env.key; do
+            # A release must never carry a real credential file. It matters more
+            # than it looks: credentials.key (and 1.2's .env and .env.key) live in
+            # the working directory a release is built from, so a stray one would
+            # be picked up by the archive glob and published to everyone.
+            for unwanted in .env .env.key credentials.key opendrive-bridge/credentials.key; do
               if grep -qx "$unwanted" "$listing"; then
                 echo "$a contains $unwanted, which must never be published"; exit 1
               fi
@@ -334,7 +331,6 @@ jobs:
               echo "$a has files outside opendrive-bridge/:"; cat "$listing"; exit 1
             fi
             for want in opendrive-bridge/opendrived opendrive-bridge/odctl \
-                        opendrive-bridge/.env.example \
                         opendrive-bridge/docs/first-run.md opendrive-bridge/docs/deployment.md; do
               grep -q "^$want" "$listing" \
                 || { echo "$a is missing $want; it contains:"; cat "$listing"; exit 1; }
@@ -352,10 +348,9 @@ jobs:
 
   # The container image, built for both architectures and then actually run.
   #
-  # The interesting assertions are the container-specific ones: a container has
-  # no keychain, so the "no persistence = configuration error" gate is the first
-  # thing a user meets, and what it says has to be a sentence naming the variable
-  # to set — not a stack trace (§9.2, §8.3).
+  # The interesting assertion is the one a user meets first: the shipped compose
+  # file, `docker compose up -d` with nothing prepared, signing in once, and the
+  # sign-in surviving a restart and a new container (§8.3, 1.3).
   docker:
     timeout-minutes: 30
     runs-on: ubuntu-latest
@@ -412,10 +407,10 @@ jobs:
           [ "$found" = "ok" ] || { echo "the image does not run"; exit 1; }
           # distroless has no shell, so the filesystem is inspected from outside.
           id=$(docker create opendrive-bridge:ci)
-          docker export "$id" | tar t 2>/dev/null | grep -E '(^|/)\.env(\.key)?$' && {
+          docker export "$id" | tar t 2>/dev/null | grep -E '(^|/)(\.env(\.key)?|credentials\.key)$' && {
             docker rm "$id" >/dev/null; echo "the image contains a credential file"; exit 1; }
           docker rm "$id" >/dev/null
-          echo "no .env or .env.key in the image"
+          echo "no credential file in the image"
 
       - name: The image is small enough to be worth shipping
         run: |
@@ -426,274 +421,113 @@ jobs:
           # §8.3 asks for under 25MB. Two static Go binaries and a CA bundle.
           [ "$mb" -lt 25 ] || { echo "over the 25MB budget in §8.3"; exit 1; }
 
-      - name: It runs as a non-root user
+      # 1.3: root, as an ordinary container runs, so that no bind-mounted folder
+      # needs a chown first. The Dockerfile has the reasoning.
+      - name: It runs as root, so no folder needs a chown
         run: |
           set -euo pipefail
           user=$(docker image inspect opendrive-bridge:ci --format '{{.Config.User}}')
-          echo "runs as: $user"
-          case "$user" in root|"") echo "the image runs as root"; exit 1 ;; esac
+          echo "runs as: '${user:-root}'"
+          case "$user" in root|""|0|0:0) ;; *) echo "the image runs as $user; bind mounts would need a chown again"; exit 1 ;; esac
 
-      # Every `docker run` that is not -d gets a `timeout`, without exception.
-      #
-      # This is not belt-and-braces. The step below used to assert that a
-      # container with no ODB_STATE_KEY refused to start, which was true until
-      # v1.1 moved credentials to an encrypted .env the daemon creates itself.
-      # After that the container started normally — and a foreground `docker run`
-      # of a daemon that starts does not fail, it blocks. The job ran for six
-      # hours and was killed by the platform, twice, and the only symptom was a
-      # red tick with no message in it. An assertion whose premise has been
-      # deleted should fail in seconds; `timeout` is what makes the difference
-      # between a wrong answer and no answer at all.
-      - name: A credential directory it cannot write to is a sentence, not a hang
+      # Every `docker run` that is not -d gets a `timeout`, without exception: a
+      # daemon that starts when a test expected it to refuse does not fail, it
+      # blocks, and a job once ran six hours that way.
+      - name: A /data it cannot write to is a sentence, not a hang
         run: |
           set -euo pipefail
-          # This is the v1.1 shape of "no persistence = configuration error"
-          # (§9.2.4). There is no state key to forget any more: the daemon makes
-          # .env.key itself on first run. What it cannot do is make it in a
-          # read-only mount, and mounting /data read-only is an easy thing to do
-          # by accident — it is what you would try if you had read that .env
-          # holds secrets.
           mkdir -p /tmp/ro && chmod 0777 /tmp/ro
           set +e
           out=$(timeout 60 docker run --rm -v /tmp/ro:/data:ro opendrive-bridge:ci 2>&1)
           code=$?
           set -e
           echo "exit=$code"; echo "$out"
-
           [ "$code" -ne 124 ] || { echo "it hung instead of answering"; exit 1; }
-          [ "$code" -ne 0 ] || { echo "it started with nowhere to keep credentials"; exit 1; }
-          # The message has to name the files the user is dealing with, and the
-          # directory to fix. It used to name the atomic-write temp file instead.
-          echo "$out" | grep -q "\.env\.key" || { echo "the message does not name .env.key"; exit 1; }
+          [ "$code" -ne 0 ] || { echo "it started with nowhere to keep its state"; exit 1; }
           echo "$out" | grep -q "/data" || { echo "the message does not name the directory"; exit 1; }
           echo "$out" | grep -q "\.tmp" && { echo "the message names a temp file"; exit 1; }
-          # ...and must not be a crash.
           echo "$out" | grep -qiE "panic|goroutine [0-9]+|\.go:[0-9]+" \
             && { echo "a stack trace reached the user"; exit 1; }
-          echo "refused correctly, with something a person can act on"
+          echo "refused, with something a person can act on"
 
-      # The documented Docker setup, run as written, and the two it replaced.
-      #
-      # docs/first-run.md and docker-compose.yaml used to mount .env (and .env.key)
-      # as single files. Run in this job on 2026-09-27, that failed silently: the
-      # atomic rewrite that encrypts .env hit EBUSY on the file mount, Docker made
-      # a root-owned *directory* for the missing .env.key, and in both cases the
-      # container reported itself running with the password still in the clear on
-      # the host. Nothing here had ever started the image with a credential file.
-      - name: The documented credential setup works, and the old one is refused in words
+      - uses: actions/setup-go@v5
+        with: { go-version: 'stable' }
+
+      # `docker compose up -d` and nothing else (1.3). The compose file is the one
+      # we ship, unchanged; an override only points it at the image under test and
+      # at a mock OpenDrive. No .env, no data folder, no chown, no API key.
+      - name: "docker compose up -d with nothing prepared, sign in, restart, recreate"
         run: |
           set -euo pipefail
-          seed() { printf 'ODB_USERNAME=ci@example.com\nODB_PASSWORD=not-a-real-password\n' > "$1"; }
-          fail() { echo "FAIL: $1"; exit 1; }
-          key() { openssl rand -hex 32; }
+          d="$RUNNER_TEMP/compose"; mkdir -p "$d"
+          fail() { echo "FAIL: $1"; (cd "$d" && docker compose logs --no-color | tail -40) || true; exit 1; }
+          go build -o "$RUNNER_TEMP/mockupstream" ./tools/mockupstream
+          "$RUNNER_TEMP/mockupstream" --addr 0.0.0.0:9788 --port-file "$RUNNER_TEMP/up.addr" &
+          for _ in $(seq 1 50); do [ -s "$RUNNER_TEMP/up.addr" ] && break; sleep 0.2; done
 
-          echo "--- 1. the folder, chowned, as docs/first-run.md says"
-          root="$RUNNER_TEMP/documented"
-          mkdir -p "$root/data/cache"; seed "$root/data/.env"
-          sudo chown -R 65532:65532 "$root/data"
-          docker run -d --name odb-doc1 -e ODB_API_KEY="$(key)" -e ODB_CACHE_DIR=/data/cache \
-            -v "$root/data:/data" opendrive-bridge:ci
-          sleep 6
-          docker logs odb-doc1 2>&1 | tail -5
-          [ "$(docker inspect -f '{{.State.Running}}' odb-doc1)" = true ] || fail "it did not stay up"
-          sudo test -f "$root/data/.env.key" || fail ".env.key was not created on the host"
-          sudo head -c 10 "$root/data/.env" | grep -q '^U2FsdGVkX1' || fail ".env on the host is not encrypted"
-          ! sudo grep -q not-a-real-password "$root/data/.env" || fail "the plaintext password is still on the host"
-          ! docker logs odb-doc1 2>&1 | grep -q keystore_unavailable || fail "the credential store is unavailable"
-          docker rm -f odb-doc1 >/dev/null
+          cp deploy/docker/docker-compose.yaml "$d/"
+          cd "$d"
+          printf '%s\n' \
+            'services:' \
+            '  opendrive-bridge:' \
+            '    image: opendrive-bridge:ci' \
+            '    environment:' \
+            '      ODB_BASE_URL: http://host.docker.internal:9788/api/v1' \
+            '    extra_hosts:' \
+            '      - "host.docker.internal:host-gateway"' > docker-compose.override.yaml
 
-          echo "--- 1b. a new container on the same folder decrypts it"
-          docker run -d --name odb-doc2 -e ODB_API_KEY="$(key)" -v "$root/data:/data" opendrive-bridge:ci
-          sleep 6
-          docker logs odb-doc2 2>&1 | tail -5
-          [ "$(docker inspect -f '{{.State.Running}}' odb-doc2)" = true ] || fail "the second container did not stay up"
-          ! docker logs odb-doc2 2>&1 | grep -qE "keystore_unavailable|could not be decrypted" \
-            || fail "the second container could not read what the first one wrote"
-          docker rm -f odb-doc2 >/dev/null
-          sudo rm -rf "$root"
+          [ ! -e data ] || fail "data existed before up"
+          docker compose up -d
+          status() { curl -fsS http://127.0.0.1:9750/v1/auth/status > /tmp/s.json 2>/dev/null; }
+          waitfor() { for _ in $(seq 1 60); do status && grep -q "\"state\":\"$1\"" /tmp/s.json && return 0; sleep 0.5; done; return 1; }
 
-          refused() {  # name, then the docker run arguments
-            local name="$1"; shift
-            set +e
-            out=$(timeout 60 docker run --rm -e ODB_API_KEY="$(key)" "$@" opendrive-bridge:ci 2>&1)
-            code=$?
-            set -e
-            echo "$name: exit=$code"; echo "$out" | tail -3
-            [ "$code" -ne 124 ] || fail "$name: it hung instead of answering"
-            [ "$code" -ne 0 ] || fail "$name: it ran"
-            echo "$out" | grep -qiE "panic|goroutine [0-9]+|\.go:[0-9]+" && fail "$name: a stack trace reached the user"
-            echo "$out" | grep -q "unencrypted" || fail "$name: it does not say the password is still in the clear"
-            true
-          }
+          waitfor not_configured || fail "a fresh bridge is not asking to be signed in: $(cat /tmp/s.json 2>/dev/null)"
+          [ -d data ] || fail "compose did not create ./data"
+          sudo test ! -e data/credentials.key || fail "credentials.key exists before anyone signed in"
+          docker compose logs --no-color | grep -q "without an API key" \
+            || fail "no warning about listening beyond loopback without a key"
 
-          echo "--- 2. .env mounted on its own (the old first-run.md)"
-          d="$RUNNER_TEMP/single"; mkdir -p "$d"; seed "$d/.env"; chmod 0666 "$d/.env"
-          refused single -v "$d/.env:/data/.env"
-          echo "$out" | grep -q "mounted on its own" || fail "single: it does not say what is wrong"
-          echo "$out" | grep -q "Mount the" || fail "single: it does not say what to do"
-          grep -q not-a-real-password "$d/.env" || fail "single: .env changed although nothing could be sealed"
+          # Sign in, exactly as the web page does.
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"username":"ci@example.com","password":"not-a-real-password"}' \
+            http://127.0.0.1:9750/v1/auth/login > /tmp/login.json || fail "sign-in failed"
+          sudo test -f data/credentials.key || fail "signing in wrote no credentials.key"
+          ! sudo grep -q "not-a-real-password" data/credentials.key || fail "the password is readable"
+          sudo head -1 data/credentials.key | grep -q "^# opendrive-bridge credentials" \
+            || fail "credentials.key does not say what it is"
 
-          echo "--- 3. .env and a not-yet-existing .env.key, one by one (the old compose file)"
-          d="$RUNNER_TEMP/twofile"; mkdir -p "$d"; seed "$d/.env"; chmod 0666 "$d/.env"
-          refused twofile -v "$d/.env:/data/.env" -v "$d/.env.key:/data/.env.key:ro"
-          echo "$out" | grep -q "is a directory" || fail "twofile: it does not say .env.key is a directory"
-          sudo rm -rf "$d"
+          docker compose restart
+          waitfor authenticated || fail "a restart forgot the sign-in: $(cat /tmp/s.json)"
 
-          echo "--- 4. the folder without the chown"
-          d="$RUNNER_TEMP/unchowned"; mkdir -p "$d/data"; seed "$d/data/.env"
-          refused unchowned -v "$d/data:/data"
-          echo "$out" | grep -q "has to be writable" || fail "unchowned: it does not say the folder must be writable"
-          echo "the documented setup works; the three ways to get it wrong are each refused in a sentence"
+          # A new container, as an image upgrade makes one.
+          docker compose down
+          docker compose up -d
+          waitfor authenticated || fail "a new container forgot the sign-in: $(cat /tmp/s.json)"
 
-      - name: A public address with no API key of the user's own is refused
-        run: |
-          set -euo pipefail
-          # The image binds 0.0.0.0 because loopback inside a container means
-          # unreachable, so this is every container user's situation. The daemon
-          # generates an API key into .env on first run, and that key must not be
-          # what opens the port: nothing prints it, §9.4 forbids logging it, and
-          # a service answering only to a secret its owner has never seen is not
-          # a service they can use. Exposing the bridge has to be deliberate.
-          set +e
-          out=$(timeout 60 docker run --rm opendrive-bridge:ci 2>&1)
-          code=$?
-          set -e
-          echo "exit=$code"; echo "$out"
-          [ "$code" -ne 124 ] || { echo "it hung instead of refusing"; exit 1; }
-          [ "$code" -ne 0 ] || { echo "it exposed the account on 0.0.0.0 with no API key"; exit 1; }
-          echo "$out" | grep -qi "api key" || { echo "the refusal does not mention an API key"; exit 1; }
-          echo "$out" | grep -q "ODB_API_KEY" || { echo "the refusal does not say how to set one"; exit 1; }
+          curl -fsS http://127.0.0.1:9750/v1/cache/status > /tmp/c.json || fail "cache status"
+          grep -q '"enabled":true' /tmp/c.json || fail "the cache did not come up: $(cat /tmp/c.json)"
+          grep -q '"durable":true' /tmp/c.json || fail "the cache on ./data was reported not durable"
 
-      - name: Configured properly, it starts and answers
-        run: |
-          set -euo pipefail
-          # The credential path is the host's, exactly as §8.3 and the compose
-          # file describe it: a writable /data for .env, and the key supplied by
-          # the environment. ODB_STATE_KEY stands in for .env.key and is the one
-          # container-specific convenience there is.
-          docker run -d --name odb-ci \
-            -p 127.0.0.1:9750:9750 \
-            -e ODB_STATE_KEY="$(openssl rand -base64 32)" \
-            -e ODB_API_KEY=ci-key \
-            opendrive-bridge:ci
-          for _ in $(seq 1 40); do
-            curl -fsS -H 'Authorization: Bearer ci-key' \
-              http://127.0.0.1:9750/v1/auth/status >/tmp/status.json && break
-            sleep 0.5
-          done
-          cat /tmp/status.json
-          # Not signed in is the right answer for a fresh container, and it must
-          # come with the credential store it actually chose.
-          grep -q '"state":"not_configured"' /tmp/status.json
-          grep -q '"backend":"encrypted_file"' /tmp/status.json
-          echo "the container answers, using the encrypted-file store"
-
-      - name: The healthcheck reports healthy
-        run: |
-          set -euo pipefail
+          h=""
           for _ in $(seq 1 30); do
-            health=$(docker inspect odb-ci --format '{{.State.Health.Status}}')
-            echo "health: $health"
-            [ "$health" = "healthy" ] && exit 0
-            [ "$health" = "unhealthy" ] && { docker logs odb-ci; exit 1; }
+            h=$(docker inspect opendrive-bridge --format '{{.State.Health.Status}}')
+            [ "$h" = healthy ] && break
+            [ "$h" = unhealthy ] && fail "the healthcheck reports unhealthy"
             sleep 2
           done
-          docker logs odb-ci
-          echo "the healthcheck never settled"
-          exit 1
+          [ "$h" = healthy ] || fail "the healthcheck never settled ($h)"
 
-      # The caching gateway in a container (§8.3.1). Four measurements, each of a
-      # claim the documentation makes and nothing had checked:
-      #   1. a named volume works (the image's ownership of /data/cache is what a
-      #      fresh volume inherits, and it used to be root's);
-      #   2. a host directory bind-mounted in works, once chowned to 65532;
-      #   3. without the chown it refuses with a sentence, not a crash;
-      #   4. two containers sharing one cache directory cannot both run.
-      # All four report durable:true or false through the API, because that is the
-      # figure the daemon uses to warn about a cache that will not survive.
-
-      - name: "Cache on a named volume: starts, and survives the container"
-        run: |
-          set -euo pipefail
-          start() {
-            docker run -d --name "$1" -p 127.0.0.1:9760:9750 \
-              -e ODB_API_KEY=ci-key -e ODB_CACHE_DIR=/data/cache \
-              -v odb-ci-cache:/data/cache -v odb-ci-jobs:/data/jobs \
-              opendrive-bridge:ci
-          }
-          status() {
-            for _ in $(seq 1 40); do
-              curl -fsS -H 'Authorization: Bearer ci-key' \
-                http://127.0.0.1:9760/v1/cache/status > /tmp/nv.json 2>/dev/null && return 0
-              sleep 0.5
-            done
-            docker logs "$1"; return 1
-          }
-          start odb-nv; status odb-nv; cat /tmp/nv.json; echo
-          grep -q '"enabled":true' /tmp/nv.json || { echo "the cache did not come up"; exit 1; }
-          grep -q '"durable":true' /tmp/nv.json || { echo "a named volume was reported as not durable"; exit 1; }
-
-          # Replace the container, as an upgrade would. The volume and its
-          # journal stay; the lock does not, because it died with the process.
-          docker rm -f odb-nv >/dev/null
-          start odb-nv2; status odb-nv2
-          grep -q '"enabled":true' /tmp/nv.json || { echo "a replacement container could not reopen the cache"; exit 1; }
-          docker rm -f odb-nv2 >/dev/null
-          echo "named volume: starts, reports durable, and a replacement container reopens it"
-
-      - name: "Cache on a host directory: works when chowned, refuses in words when not"
-        run: |
-          set -euo pipefail
-          # Chowned to the user the image runs as: the recommended setup.
-          mkdir -p "$RUNNER_TEMP/hostcache"
-          sudo chown 65532:65532 "$RUNNER_TEMP/hostcache"
-          docker run -d --name odb-bind -p 127.0.0.1:9761:9750 \
-            -e ODB_API_KEY=ci-key -e ODB_CACHE_DIR=/data/cache \
-            -v "$RUNNER_TEMP/hostcache:/data/cache" opendrive-bridge:ci
-          for _ in $(seq 1 40); do
-            curl -fsS -H 'Authorization: Bearer ci-key' \
-              http://127.0.0.1:9761/v1/cache/status > /tmp/bind.json 2>/dev/null && break
-            sleep 0.5
-          done
-          cat /tmp/bind.json; echo
-          grep -q '"enabled":true' /tmp/bind.json || { docker logs odb-bind; echo "the bind-mounted cache did not come up"; exit 1; }
-          grep -q '"durable":true' /tmp/bind.json || { echo "a bind mount was reported as not durable"; exit 1; }
-          # The journal and lock are on the host, where a person can see them.
-          sudo test -f "$RUNNER_TEMP/hostcache/lock" || { echo "no lock file on the host"; exit 1; }
-
-          # Two containers, one cache directory: the second must refuse. Same kernel,
-          # so flock applies across them — this is the claim being measured.
+          # One bridge per folder: a second container on ./data is refused, in words.
           set +e
-          out=$(timeout 60 docker run --rm \
-            -e ODB_API_KEY=ci-key -e ODB_CACHE_DIR=/data/cache \
-            -v "$RUNNER_TEMP/hostcache:/data/cache" opendrive-bridge:ci 2>&1)
+          out=$(timeout 60 docker run --rm -e ODB_CACHE_DIR=/data/cache -v "$d/data:/data" opendrive-bridge:ci 2>&1)
           code=$?
           set -e
-          echo "second container: exit=$code"; echo "$out"
-          [ "$code" -ne 124 ] || { echo "the second container hung instead of refusing"; exit 1; }
-          [ "$code" -ne 0 ] || { echo "two containers ran on one cache directory"; exit 1; }
-          echo "$out" | grep -q "already in use by another bridge" \
-            || { echo "the refusal does not say why"; exit 1; }
-          docker rm -f odb-bind >/dev/null
-
-          # Not chowned: the mistake the documentation warns about. It must be a
-          # sentence naming the directory, not a crash and not a hang.
-          mkdir -p "$RUNNER_TEMP/rootcache"
-          sudo chown 0:0 "$RUNNER_TEMP/rootcache"
-          sudo chmod 0755 "$RUNNER_TEMP/rootcache"
-          set +e
-          out=$(timeout 60 docker run --rm \
-            -e ODB_API_KEY=ci-key -e ODB_CACHE_DIR=/data/cache \
-            -v "$RUNNER_TEMP/rootcache:/data/cache" opendrive-bridge:ci 2>&1)
-          code=$?
-          set -e
-          echo "unchowned: exit=$code"; echo "$out"
-          [ "$code" -ne 124 ] || { echo "it hung"; exit 1; }
-          [ "$code" -ne 0 ] || { echo "it started on a directory it cannot write"; exit 1; }
-          echo "$out" | grep -q "/data/cache" || { echo "the refusal does not name the directory"; exit 1; }
-          echo "$out" | grep -qiE "panic|goroutine [0-9]+" && { echo "a stack trace reached the user"; exit 1; }
-          echo "host directory: works chowned, one container at a time, refuses in words when not"
+          echo "second container: exit=$code"; echo "$out" | tail -3
+          [ "$code" -ne 124 ] || fail "the second container hung instead of refusing"
+          [ "$code" -ne 0 ] || fail "two bridges ran on one folder"
+          echo "$out" | grep -q "already in use by another bridge" || fail "the refusal does not say why"
+          echo "compose: up with nothing prepared, signed in once, kept across restart and recreate"
 
       - name: Logs, for the record
         if: always()
-        run: docker logs odb-ci 2>&1 | tail -20 || true
+        run: docker logs opendrive-bridge 2>&1 | tail -20 || true

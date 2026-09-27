@@ -1,9 +1,9 @@
 // opendrived is the OpenDrive Bridge daemon: a local REST API in front of
 // OpenDrive.com (whitepaper §4).
 //
-// It binds loopback by default and refuses to listen anywhere else without an
-// API key, because it holds a password that unlocks somebody's entire cloud
-// storage.
+// It binds loopback by default. An API key is optional; listening anywhere else
+// without one is allowed and logged as a warning, because the bridge holds a
+// password that unlocks somebody's entire cloud storage.
 package main
 
 import (
@@ -69,9 +69,9 @@ func run() error {
 	// ODB_LISTEN is what §8.3 uses to configure a container, where passing a
 	// flag means rewriting the image's command line.
 	fs.StringVar(&o.addr, "addr", envOr("ODB_LISTEN", server.DefaultAddr),
-		"listen address, or set ODB_LISTEN; anything other than loopback requires an API key")
+		"listen address, or set ODB_LISTEN; beyond loopback, set an API key too")
 	fs.StringVar(&o.apiKey, "api-key", os.Getenv("ODB_API_KEY"),
-		"API key callers must present; generated into .env on first run if unset")
+		"API key callers must present; unset means none is required")
 	fs.StringVar(&o.backend, "keystore", envOr("ODB_KEYSTORE", string(keystore.BackendAuto)),
 		"credential store: auto, encrypted_file or ephemeral (or set ODB_KEYSTORE)")
 	fs.StringVar(&o.statePath, "keystore-file", os.Getenv("ODB_KEYSTORE_FILE"),
@@ -117,36 +117,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// A plaintext .env is sealed now, and a seal that fails stops the daemon:
-	// running with the password still readable on disk is the one outcome the
-	// credential design exists to prevent (keystore.Seal says how it happened).
-	if err := keystore.Seal(context.Background(), store); err != nil {
-		return err
+	// 1.1 and 1.2 kept credentials in .env (+ .env.key), prepared by the user.
+	// If that is what is here, it is read once into credentials.key. A failure
+	// is not a reason to stop: the user can sign in again.
+	if from, err := keystore.Import(context.Background(), store); err != nil {
+		log.Warn("could not import the credentials of an earlier version; sign in again",
+			slog.String("error", opendrive.RedactString(err.Error())))
+	} else if from != "" {
+		log.Info("imported the credentials of an earlier version; that file is no longer used "+
+			"and can be deleted", slog.String("from", from))
 	}
 	log.Info("credential store ready", slog.String("backend", string(store.Backend())))
 
-	// The Bridge's own API key comes from the credential store, which generates
-	// one on first run and keeps it (§9.2.2). The user never types or manages
-	// it. A key given on the command line or in the environment still wins, for
-	// the case where somebody is driving the bridge from a configuration
-	// management system that owns its own secrets.
-	// Whether the key was the user's choice is remembered, because two rules
-	// hang off it: a key the user gave us is enforced everywhere, while one we
-	// generated must not shut the local CLI out (§9.1) and is not enough on its
-	// own to justify listening on a public address (server.New says why).
+	// The Bridge's own API key is optional (1.3). Set one with --api-key or
+	// ODB_API_KEY and every caller must present it; leave it unset and the API is
+	// open to whatever can reach the port — which, with the default loopback
+	// address or a port published to 127.0.0.1, is this machine only.
 	apiKeyConfigured := o.apiKey != ""
-	if o.apiKey == "" {
-		type apiKeyer interface {
-			APIKey(context.Context) (string, error)
-		}
-		if k, ok := store.(apiKeyer); ok {
-			key, keyErr := k.APIKey(context.Background())
-			if keyErr != nil {
-				return keyErr
-			}
-			o.apiKey = key
-		}
-	}
 
 	// One cache, shared: the client resolves paths through it and the server
 	// drops what a write invalidated (§10.3).
@@ -176,8 +163,19 @@ func run() error {
 	// daemon has to be reachable precisely when something is wrong with its
 	// credentials — that is when somebody runs `odctl status`.
 	if err := auth.EnsureFresh(context.Background()); err != nil {
-		log.Warn("could not resume the stored session; /v1/auth/status has the detail",
-			slog.String("error", opendrive.RedactString(err.Error())))
+		switch {
+		case errors.Is(err, opendrive.ErrNoCredentials) || auth.AuthState() == opendrive.StateNotConfigured:
+			// Nobody has signed in yet. That is the normal first start (1.3), not a
+			// fault, and the log is where a container user looks first — so it says
+			// what to do rather than sounding like something broke.
+			log.Info("not signed in yet: open the web page at /ui and sign in, or run `odctl login <username>`")
+		case auth.AuthState() == opendrive.StateReauthRequired:
+			log.Warn("OpenDrive no longer accepts the saved password: sign in again on the web page at /ui, " +
+				"or run `odctl login <username>`")
+		default:
+			log.Warn("could not resume the stored session; /v1/auth/status has the detail",
+				slog.String("error", opendrive.RedactString(err.Error())))
+		}
 	}
 
 	// The caching gateway (§3.5), when a directory was given. It is opened before
@@ -317,7 +315,7 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
-// defaultStateDir is jobs/ beside the binary, for the same reason .env is there
+// defaultStateDir is jobs/ beside the binary, for the same reason credentials.key is there
 // (§8.2): everything a user backs up or deletes is in the folder they unpacked.
 //
 // Until 1.2 this was the per-user configuration directory, left behind when v1.1

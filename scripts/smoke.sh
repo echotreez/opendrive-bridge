@@ -78,17 +78,21 @@ INSTALL="$WORK/unpacked"
 mkdir -p "$INSTALL" "$WORK/home"
 cp "$OPENDRIVED" "$INSTALL/opendrived"
 OPENDRIVED="$INSTALL/opendrived"
-# An ephemeral credential store, chosen explicitly: this is a throwaway run and
-# the daemon refuses to guess that for itself (§9.2).
+# The real credential store, as a user gets it: nothing prepared, and the first
+# sign-in writes credentials.key beside the binary. Since 1.3 there is no setup
+# step for this run to skip, so it no longer needs an in-memory stand-in.
 # The caching gateway is on for this run. "It compiles" is not evidence that it
 # works on a platform (§8.1's standing rule), and the gateway is the first part of
 # this program that holds the user's data — so it is exercised here, on the real
 # daemon, on every platform that has a runner, rather than only in unit tests on
 # whatever machine happened to run them.
-HOME="$WORK/home" XDG_CONFIG_HOME="" ODB_BASE_URL="http://$UPSTREAM/api/v1" \
-  "$OPENDRIVED" --addr "127.0.0.1:$PORT" --keystore ephemeral --ephemeral \
-  --cache-dir "$WORK/cache" --log-level error &
-DPID=$!
+start_daemon() {
+  HOME="$WORK/home" XDG_CONFIG_HOME="" ODB_BASE_URL="http://$UPSTREAM/api/v1" \
+    "$OPENDRIVED" --addr "127.0.0.1:$PORT" \
+    --cache-dir "$WORK/cache" --log-level error &
+  DPID=$!
+}
+start_daemon
 
 for _ in $(seq 1 50); do
   "$ODCTL" --addr "127.0.0.1:$PORT" status >/dev/null 2>&1 && break
@@ -255,6 +259,17 @@ say "a failure reports itself properly"
 code=$?
 [ "$code" = "5" ]; check $? "a missing path exits 5 (got $code)"
 sed 's/^/      /' "$WORK/err.txt"
+
+say "the sign-in was kept, and survives a restart"
+[ -f "$INSTALL/credentials.key" ]; check $? "signing in wrote credentials.key beside the binary"
+! grep -q "whatever" "$INSTALL/credentials.key"; check $? "the password is not readable in it"
+kill "$DPID" 2>/dev/null; wait "$DPID" 2>/dev/null
+start_daemon
+for _ in $(seq 1 50); do
+  "$ODCTL" --addr "127.0.0.1:$PORT" status > "$WORK/status2.txt" 2>&1 && grep -qi "signed in as" "$WORK/status2.txt" && break
+  sleep 0.2
+done
+grep -qi "signed in as smoke@example.com" "$WORK/status2.txt"; check $? "after a restart it is still signed in, and asked for nothing"
 
 say "everything it keeps is in its own folder"
 [ -d "$INSTALL/jobs" ]; check $? "transfer state is in jobs/ beside the binary"

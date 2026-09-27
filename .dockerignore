@@ -12,6 +12,7 @@
 # Credentials — never, under any circumstances.
 .env
 .env.key
+credentials.key
 *.pem
 *.key
 

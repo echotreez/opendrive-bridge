@@ -22,44 +22,46 @@ import (
 	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
-// The credential file, and the one path credentials take (§9.2.2).
+// The credential file (§9.2.2, as revised for 1.3).
 //
-// Two files sit next to the programs, in the directory the user unpacked:
+// One file, credentials.key, beside the programs (or in /data in the container).
+// The user never creates, edits or prepares it. The daemon writes it when someone
+// signs in — on the web page or with `odctl login` — and again when a token is
+// refreshed; it is read on every start. With no file, or with credentials
+// OpenDrive no longer accepts, the daemon still starts and asks to be signed in.
 //
-//	.env       the credentials and the Bridge API key, encrypted, 0600
-//	.env.key   32 random bytes that decrypt it, generated on first run, 0600
+// Inside, after a comment saying how to read it by hand, one line holds a random
+// key and the rest is the credentials encrypted with it, in OpenSSL's own `enc`
+// format (envelope.go). Key and ciphertext side by side is the same protection
+// as the two files 1.1 and 1.2 used, and it was always this much: it keeps the
+// password out of casual view, out of git and out of a cloud backup's plain
+// text, and does not protect it from someone who can already read your files.
+// §9.2.3 says so, and so does docs/first-run.md.
 //
-// A user deploys by copying .env.example to .env and typing their OpenDrive
-// username and password into it in the clear. The first run of the daemon reads
-// that, generates .env.key and a random Bridge API key, writes everything back
-// encrypted, and the plaintext password is gone from disk. From then on nothing
-// reads a credential except through this store.
-//
-// Keeping the key beside the ciphertext is a deliberate consequence of the
-// product requirement that the daemon start unattended (§2.2): any scheme that
-// asks for a passphrase at boot cannot restart itself after a crash or a reboot.
-// §9.2.3 states plainly what that does and does not protect against, and
-// docs/first-run.md repeats it to users rather than burying it.
+// 1.1 and 1.2 asked the user to copy .env.example to .env, type the password
+// in, and let the first start encrypt it into .env plus .env.key. Import reads
+// either shape once and writes credentials.key from it.
 const (
-	// EnvFileName is the encrypted credential file.
-	EnvFileName = ".env"
-	// KeyFileName holds the key that decrypts it.
-	KeyFileName = ".env.key"
-	// ExampleFileName is the template shipped in the release archive.
-	ExampleFileName = ".env.example"
+	// CredentialsFileName is the one credential file.
+	CredentialsFileName = "credentials.key"
+	// LegacyEnvFileName and LegacyKeyFileName are what 1.1 and 1.2 wrote.
+	LegacyEnvFileName = ".env"
+	LegacyKeyFileName = ".env.key"
+
+	// The placeholders 1.1 and 1.2 shipped in .env.example. A copy nobody
+	// filled in is not an account, and importing it would sign in as nobody.
+	templateUsername = "you@example.com"
+	templatePassword = "your-opendrive-password" // #nosec G101 -- a placeholder, not a credential
 )
 
-// Keys used inside the file. They are the same names the daemon accepts as
-// environment variables, so that a reader of .env can guess right.
+// Keys used inside the encrypted document.
 //
 // #nosec G101 -- reviewed: these are the *names* of fields, not values. gosec
 // flags an identifier containing "password" or "token" that is assigned a
-// string, which is exactly what a constant naming a field looks like. Renaming
-// them to appease it would make the file harder to read for no gain.
+// string, which is exactly what a constant naming a field looks like.
 const (
 	envUsername     = "ODB_USERNAME"
 	envPassword     = "ODB_PASSWORD"
-	envAPIKey       = "ODB_API_KEY"
 	envAuthMode     = "ODB_AUTH_MODE"
 	envAccessToken  = "ODB_ACCESS_TOKEN"
 	envRefreshToken = "ODB_REFRESH_TOKEN"
@@ -69,44 +71,44 @@ const (
 	envAccType      = "ODB_ACC_TYPE"
 	envUpdatedAt    = "ODB_UPDATED_AT"
 	// envChecksum makes tampering with the ciphertext visible. CBC is
-	// malleable, so the integrity check lives in the plaintext: alter the
-	// ciphertext and this stops matching, or the file stops parsing.
+	// malleable, so the integrity check lives in the plaintext.
 	envChecksum = "ODB_CHECKSUM"
 )
 
-// envStore is the only credential backend. It replaced three OS keyring
-// implementations in v1.1; the reasoning is in whitepaper §9.2.1, and the short
-// version is that two of the three were never available where the bridge most
-// often runs, so the file path had to exist anyway and was being maintained as
-// the second-class one.
+// fileHeader is written above the key. It is for the person who opens the file
+// wondering what it is, and it is the recovery procedure §9.2.2 promises.
+const fileHeader = `# opendrive-bridge credentials. Written by the bridge when you sign in; do not edit.
+# The next line is the key, the rest is your credentials encrypted with it. To read
+# them without the bridge:
+#   grep -v '^#' credentials.key | head -1 > /tmp/k
+#   grep -v '^#' credentials.key | tail -n +2 | \
+#     openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a -pass file:/tmp/k
+# Anyone who can read this file can do the same. Keep it private; back it up.
+`
+
+// envStore is the only credential backend: one encrypted file.
 type envStore struct {
-	path    string // .env
-	keyPath string // .env.key
+	path string // credentials.key
 
 	mu  sync.Mutex
-	key []byte
+	key []byte // cached after the first read or write
 }
 
-func newEnvStore(path string, key []byte) (*envStore, error) {
+func newEnvStore(path string) (*envStore, error) {
 	if path == "" {
 		return nil, errors.New("keystore: the credential file needs a path")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("keystore: cannot create the state directory: %w", err)
-	}
-	return &envStore{
-		path:    path,
-		keyPath: filepath.Join(filepath.Dir(path), KeyFileName),
-		key:     key,
-	}, nil
+	return &envStore{path: path}, nil
 }
 
 // Backend implements Store.
 func (s *envStore) Backend() Backend { return BackendFile }
 
-// Available implements Store: it is the "no persistence = configuration error"
-// gate (§9.2.4). It answers without touching the network, and every failure it
-// reports names the file that is missing or unreadable and what to do about it.
+// Path is where the credentials live, for messages that tell a user where to look.
+func (s *envStore) Path() string { return s.path }
+
+// Available implements Store. A file that is absent is not a fault — nobody has
+// signed in yet — but one that is present and unreadable is, and says why.
 func (s *envStore) Available(ctx context.Context) error {
 	if _, err := s.Load(ctx); err != nil && !errors.Is(err, opendrive.ErrNoCredentials) {
 		return err
@@ -119,7 +121,7 @@ func (s *envStore) Load(ctx context.Context) (*opendrive.StoredCredentials, erro
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	fields, err := s.read(ctx)
+	fields, err := s.read()
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +131,9 @@ func (s *envStore) Load(ctx context.Context) (*opendrive.StoredCredentials, erro
 	return credentialsFromFields(fields)
 }
 
-// Save implements opendrive.CredentialStore.
+// Save implements opendrive.CredentialStore. It is called when someone signs in
+// and when a token is refreshed, and it creates the file and its directory the
+// first time.
 func (s *envStore) Save(ctx context.Context, cred *opendrive.StoredCredentials) error {
 	if cred == nil {
 		return errors.New("keystore: refusing to store nil credentials")
@@ -137,11 +141,11 @@ func (s *envStore) Save(ctx context.Context, cred *opendrive.StoredCredentials) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Read first so that anything the user put in the file which is not ours —
-	// a comment, a setting we do not know about — survives a write.
-	fields, err := s.read(ctx)
+	fields, err := s.read()
 	if err != nil && !errors.Is(err, opendrive.ErrNoCredentials) {
-		return err
+		// An unreadable file is replaced: the user has just typed credentials
+		// that work, which is better than whatever was there.
+		fields = nil
 	}
 	if fields == nil {
 		fields = map[string]string{}
@@ -150,109 +154,21 @@ func (s *envStore) Save(ctx context.Context, cred *opendrive.StoredCredentials) 
 	return s.write(fields)
 }
 
-// Delete implements opendrive.CredentialStore.
-//
-// The file itself stays, with the API key in it: removing it would take the
-// Bridge's own key with it, and a user who runs `odctl logout` has not asked to
-// re-key their API clients. Only the account credentials go.
+// Delete implements opendrive.CredentialStore: signing out removes the file.
 func (s *envStore) Delete(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	fields, err := s.read(ctx)
-	if err != nil {
-		if errors.Is(err, opendrive.ErrNoCredentials) {
-			return nil
-		}
-		return err
+	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("keystore: cannot remove %s: %w", s.path, err)
 	}
-	for _, k := range []string{
-		envUsername, envPassword, envAuthMode, envAccessToken,
-		envRefreshToken, envTokenExpiry, envSessionID, envUserID, envAccType,
-	} {
-		delete(fields, k)
-	}
-	return s.write(fields)
-}
-
-// APIKey returns the Bridge's own API key, generating and storing one on first
-// use. §9.2.2: the user never types or manages this.
-func (s *envStore) APIKey(ctx context.Context) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	fields, err := s.read(ctx)
-	if err != nil && !errors.Is(err, opendrive.ErrNoCredentials) {
-		return "", err
-	}
-	if fields == nil {
-		fields = map[string]string{}
-	}
-	if key := fields[envAPIKey]; key != "" {
-		return key, nil
-	}
-	key, err := randomHex(32)
-	if err != nil {
-		return "", err
-	}
-	fields[envAPIKey] = key
-	if err := s.write(fields); err != nil {
-		return "", err
-	}
-	return key, nil
+	s.key = nil
+	return nil
 }
 
 // ---------------------------------------------------------------- file access
 
-// Seal encrypts a plaintext .env now, and reports any reason it cannot.
-//
-// read() also seals on a first run, but read() is reached through Load, which
-// the daemon calls "best effort" so that it stays up to answer `odctl status`.
-// That was right for a credential that cannot be *used*, and wrong for one that
-// cannot be *sealed*: a failed seal leaves the password on disk in the clear
-// while the daemon runs and looks configured. It was found by running the
-// documented Docker command, which mounted .env as a single file — upstream of
-// every test, the rename that seals it failed with EBUSY, and the container
-// reported itself healthy with the plaintext password still on the host.
-//
-// So the daemon calls this before anything else, and a failure is a refusal to
-// start. A file that is already encrypted, or absent, or empty is not this
-// function's business: those are reported by /v1/auth/status as before.
-func Seal(ctx context.Context, st Store) error {
-	s, ok := st.(*envStore)
-	if !ok {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	raw, err := os.ReadFile(s.path) // #nosec G304 -- the configured credential file
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("keystore: cannot read %s: %w", s.path, err)
-	}
-	if isEncrypted(raw) {
-		return nil
-	}
-	fields := parseEnv(raw)
-	if len(fields) == 0 {
-		return nil
-	}
-	if err := s.writeLocked(ctx, fields); err != nil {
-		return fmt.Errorf("%w. Your password is still in %s unencrypted; the bridge will "+
-			"not run with it like that", err, s.path)
-	}
-	return nil
-}
-
-// read returns the file's fields, decrypting it and, on a first run, sealing it.
-//
-// The first run is the only moment a plaintext credential exists on disk, and it
-// exists because the user put it there. Reading it also removes it: the file is
-// written back encrypted before this function returns, so a daemon that starts
-// once has no plaintext password on disk afterwards even if it never signs in.
-func (s *envStore) read(ctx context.Context) (map[string]string, error) {
+// read returns the decrypted fields, or ErrNoCredentials when there is no file.
+func (s *envStore) read() (map[string]string, error) {
 	raw, err := os.ReadFile(s.path) // #nosec G304 -- the configured credential file
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, opendrive.ErrNoCredentials
@@ -260,109 +176,125 @@ func (s *envStore) read(ctx context.Context) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("keystore: cannot read %s: %w", s.path, err)
 	}
-
-	if !isEncrypted(raw) {
-		fields := parseEnv(raw)
-		if len(fields) == 0 {
-			return nil, opendrive.ErrNoCredentials
-		}
-		// First run: seal it, which also creates .env.key if there is none.
-		if err := s.writeLocked(ctx, fields); err != nil {
-			return nil, err
-		}
-		return fields, nil
+	key, sealed := splitCredentialFile(raw)
+	if len(key) == 0 || !isEncrypted(sealed) {
+		return nil, fmt.Errorf("keystore: %s is not a credentials file this bridge wrote. "+
+			"Remove it and sign in again", s.path)
 	}
-
-	key, err := s.loadKey()
+	plain, err := open(sealed, key)
 	if err != nil {
-		return nil, err
-	}
-	plain, err := open(raw, key)
-	if err != nil {
-		return nil, fmt.Errorf("keystore: %s could not be decrypted with %s. "+
-			"If you replaced the key file, restore it from your backup; if you no longer "+
-			"have it, delete both files, copy %s to %s again and sign in once more: %w",
-			EnvFileName, KeyFileName, ExampleFileName, EnvFileName, err)
+		return nil, fmt.Errorf("keystore: %s could not be decrypted: it has been damaged "+
+			"or edited. Remove it and sign in again: %w", s.path, err)
 	}
 	fields := parseEnv(plain)
 	if want, ok := fields[envChecksum]; ok && want != checksumOf(fields) {
 		return nil, fmt.Errorf("keystore: %s decrypted but its contents do not match their "+
-			"checksum, so the file has been altered since the bridge wrote it. Restore it "+
-			"from a backup, or delete both files and sign in again", EnvFileName)
+			"checksum, so it has been altered since the bridge wrote it. Remove it and "+
+			"sign in again", s.path)
 	}
+	s.key = key
 	return fields, nil
 }
 
 func (s *envStore) write(fields map[string]string) error {
-	return s.writeLocked(context.Background(), fields)
-}
-
-func (s *envStore) writeLocked(_ context.Context, fields map[string]string) error {
-	key, err := s.ensureKey()
-	if err != nil {
-		return err
+	key := s.key
+	if len(key) == 0 {
+		material := make([]byte, 32)
+		if _, err := io.ReadFull(rand.Reader, material); err != nil {
+			return fmt.Errorf("keystore: cannot generate a key: %w", err)
+		}
+		// Base64, so that it is one printable line openssl can read as a
+		// passphrase file.
+		key = []byte(base64.StdEncoding.EncodeToString(material))
 	}
 	fields[envChecksum] = checksumOf(fields)
 	sealed, err := seal(renderEnv(fields), key)
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(s.path, sealed)
-}
-
-// loadKey reads .env.key, or the environment variable that stands in for it in
-// a container.
-func (s *envStore) loadKey() ([]byte, error) {
-	if len(s.key) > 0 {
-		return s.key, nil
+	var doc strings.Builder
+	doc.WriteString(fileHeader)
+	doc.Write(key)
+	doc.WriteString("\n")
+	doc.Write(sealed)
+	if !strings.HasSuffix(string(sealed), "\n") {
+		doc.WriteString("\n")
 	}
-	raw, err := os.ReadFile(s.keyPath) // #nosec G304 -- the configured key file
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("keystore: %s is encrypted but %s is missing. "+
-			"That file is the only thing that can decrypt it — restore it from your "+
-			"backup, or delete both and start again with %s",
-			EnvFileName, s.keyPath, ExampleFileName)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("keystore: cannot read %s: %w", s.keyPath, err)
-	}
-	key := trimKey(raw)
-	if len(key) == 0 {
-		return nil, fmt.Errorf("keystore: %s is empty", s.keyPath)
+	if err := writeFileAtomic(s.path, []byte(doc.String())); err != nil {
+		return err
 	}
 	s.key = key
-	return key, nil
+	return nil
 }
 
-// ensureKey returns the key, creating .env.key when this is the first run.
-func (s *envStore) ensureKey() ([]byte, error) {
-	if key, err := s.loadKey(); err == nil {
-		return key, nil
+// splitCredentialFile separates the key line from the ciphertext, skipping the
+// comment header.
+func splitCredentialFile(raw []byte) (key, sealed []byte) {
+	var lines []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		t := strings.TrimSpace(l)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		lines = append(lines, t)
 	}
-	// Docker, asked to bind-mount a file that does not exist yet, creates a
-	// directory of that name on the host instead — which is exactly what
-	// mounting .env.key on its own does before the first run has made it.
-	if fi, err := os.Stat(s.keyPath); err == nil && fi.IsDir() {
-		return nil, fmt.Errorf("keystore: %s is a directory, not a key file. Docker makes "+
-			"one when it is asked to mount a file that does not exist yet. Remove it, and "+
-			"mount the folder that holds %s instead of the files one by one",
-			s.keyPath, EnvFileName)
+	if len(lines) < 2 {
+		return nil, nil
 	}
-	if len(s.key) > 0 {
-		return s.key, nil
+	return []byte(lines[0]), []byte(strings.Join(lines[1:], "\n") + "\n")
+}
+
+// ---------------------------------------------------------------- 1.1/1.2 import
+
+// Import brings credentials from the .env (and .env.key) that 1.1 and 1.2 used
+// into credentials.key, once. It does nothing when credentials.key exists, when
+// there is nothing to import, or for a store that is not the file store. The old
+// files are left where they are — they are the user's — and the returned path
+// names the one that was read, so the daemon can say it may be deleted.
+func Import(ctx context.Context, st Store) (from string, err error) {
+	s, ok := st.(*envStore)
+	if !ok {
+		return "", nil
 	}
-	material := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, material); err != nil {
-		return nil, fmt.Errorf("keystore: cannot generate a key: %w", err)
+	if _, err := os.Stat(s.path); err == nil {
+		return "", nil
 	}
-	// Base64 so that `openssl enc -pass file:.env.key` reads it as one line,
-	// which is what makes the documented recovery command work.
-	encoded := []byte(base64.StdEncoding.EncodeToString(material) + "\n")
-	if err := writeFileAtomic(s.keyPath, encoded); err != nil {
-		return nil, err
+	dir := filepath.Dir(s.path)
+	legacy := filepath.Join(dir, LegacyEnvFileName)
+	raw, err := os.ReadFile(legacy) // #nosec G304 -- a fixed name beside the credential file
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
 	}
-	s.key = trimKey(encoded)
-	return s.key, nil
+	if err != nil {
+		return "", fmt.Errorf("keystore: cannot read %s to import it: %w", legacy, err)
+	}
+
+	plain := raw
+	if isEncrypted(raw) {
+		keyRaw, err := os.ReadFile(filepath.Join(dir, LegacyKeyFileName)) // #nosec G304 -- fixed name
+		if err != nil {
+			return "", fmt.Errorf("keystore: %s is encrypted and %s cannot be read, so it "+
+				"cannot be imported; sign in again instead: %w", legacy, LegacyKeyFileName, err)
+		}
+		plain, err = open(raw, trimKey(keyRaw))
+		if err != nil {
+			return "", fmt.Errorf("keystore: %s could not be decrypted with %s, so it cannot "+
+				"be imported; sign in again instead: %w", legacy, LegacyKeyFileName, err)
+		}
+	}
+	fields := parseEnv(plain)
+	if fields[envUsername] == "" || fields[envPassword] == "" ||
+		fields[envUsername] == templateUsername || fields[envPassword] == templatePassword {
+		return "", nil // .env.example copied and never filled in
+	}
+	cred, err := credentialsFromFields(fields)
+	if err != nil {
+		return "", err
+	}
+	if err := s.Save(ctx, cred); err != nil {
+		return "", err
+	}
+	return legacy, nil
 }
 
 func trimKey(raw []byte) []byte {
@@ -373,7 +305,7 @@ func trimKey(raw []byte) []byte {
 	return []byte(strings.TrimSpace(s))
 }
 
-// ---------------------------------------------------------------- .env format
+// ---------------------------------------------------------------- field format
 
 // parseEnv reads KEY=VALUE lines, ignoring blanks and comments. Values may be
 // quoted, because a password can contain anything.
@@ -549,14 +481,6 @@ func applyCredentials(f map[string]string, cred *opendrive.StoredCredentials) {
 	}
 }
 
-func randomHex(n int) (string, error) {
-	buf := make([]byte, n)
-	if _, err := io.ReadFull(rand.Reader, buf); err != nil {
-		return "", fmt.Errorf("keystore: cannot generate a key: %w", err)
-	}
-	return hex.EncodeToString(buf), nil
-}
-
 // writeFileAtomic writes data through a temporary file in the same directory, so
 // the replacement is atomic and the old content survives a crash.
 //
@@ -587,8 +511,8 @@ func writeFileAtomic(path string, data []byte) error {
 			cause = pathErr.Err
 		}
 		return fmt.Errorf("keystore: cannot write %s: %s has to be writable, because the "+
-			"bridge keeps your credentials there and creates %s in it on first run: %w",
-			filepath.Base(path), dir, KeyFileName, cause)
+			"bridge keeps your credentials there: %w",
+			filepath.Base(path), dir, cause)
 	}
 	tmpName := tmp.Name()
 	defer func() {
@@ -611,12 +535,12 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		// A file that is itself a mount point cannot be replaced, only written
 		// into, and the atomic replacement above is not negotiable (§9.2.4). The
-		// usual way to get here is `docker run -v ./.env:/data/.env`.
+		// usual way to get here is mounting the credential file on its own.
 		if errors.Is(err, syscall.EBUSY) {
 			return fmt.Errorf("keystore: cannot replace %s: it is mounted on its own, as a "+
 				"single file, and a mounted file cannot be swapped for a new one. Mount the "+
 				"folder that holds it instead (for Docker: -v \"$PWD:/data\", not "+
-				"-v \"$PWD/.env:/data/.env\")", filepath.Base(path))
+				"-v \"$PWD/data:/data\", not the file itself)", filepath.Base(path))
 		}
 		return fmt.Errorf("keystore: cannot replace %s: %w", path, err)
 	}

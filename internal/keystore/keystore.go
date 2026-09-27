@@ -2,17 +2,14 @@
 // after its initial setup: username, password, OAuth tokens and session id
 // (whitepaper §9.2, the four credential kinds of the CredentialStore).
 //
-// There is one real backend: an encrypted .env file beside the programs, with
-// its key in .env.key next to it (§9.2.2). Until v1.1 there were four — the
-// three OS vaults and this — and the three were removed because two of them were
-// unavailable on the machines where the bridge most often runs, so this path had
-// to exist anyway and was being maintained as the second-class one. §9.2.1 has
-// the full reasoning, and §9.2.3 is honest about what the change costs.
+// There is one real backend: credentials.key beside the programs, written by the
+// daemon when somebody signs in (§9.2.2 as revised for 1.3). Until v1.1 there were
+// four — the three OS vaults and an encrypted .env — and 1.1 and 1.2 had the user
+// prepare that .env by hand. §9.2.1 has the reasoning for one file, and §9.2.3 is
+// honest about what it protects.
 //
-// Open refuses to hand back a store that forgets everything on restart unless
-// the caller asks for that in so many words: a bridge that looks configured and
-// then loses its credentials on reboot is worse than one that never started
-// (§9.2, "no persistence = configuration error").
+// Open never hands back a store that forgets everything on restart unless the
+// caller asks for that in so many words (--ephemeral).
 package keystore
 
 import (
@@ -26,15 +23,8 @@ import (
 	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
 
-// Defaults for the keyring item and the encrypted file.
-const (
-	// DefaultKeyEnv names an environment variable that stands in for .env.key.
-	// It exists for containers and for tests: a key given this way is used as
-	// it is and no key file is written.
-	DefaultKeyEnv = "ODB_STATE_KEY"
-	// DefaultFileName is the credential file's name.
-	DefaultFileName = EnvFileName
-)
+// DefaultFileName is the credential file's name.
+const DefaultFileName = CredentialsFileName
 
 // Backend selects where credentials live (config keystore, §3.4).
 type Backend string
@@ -52,22 +42,16 @@ const (
 	BackendEphemeral Backend = "ephemeral"
 )
 
-// Errors returned by Open. They are deliberately actionable: whichever one the
-// operator sees, it tells them what to configure.
+// Errors returned by Open. They are deliberately actionable.
 var (
 	// ErrNoBackend means nothing can persist credentials on this machine, and
 	// the caller did not opt into an ephemeral run.
 	ErrNoBackend = errors.New("keystore: no credential store is available; " +
-		"copy " + ExampleFileName + " to " + EnvFileName + " and fill in your OpenDrive " +
-		"username and password, or start with --ephemeral to accept losing credentials on restart")
+		"start with --ephemeral to accept signing in again after every restart")
 	// ErrEphemeralNotAllowed means an in-memory store was requested without the
 	// explicit opt-in.
 	ErrEphemeralNotAllowed = errors.New("keystore: the ephemeral backend keeps credentials in memory only " +
 		"and must be enabled explicitly (--ephemeral)")
-	// ErrNoKey means a key was asked for and none could be read or created.
-	ErrNoKey = errors.New("keystore: no key is available to encrypt " + EnvFileName +
-		"; the bridge creates " + KeyFileName + " itself on first run, so this means the " +
-		"directory could not be written to")
 	// ErrUnsupportedBackend is returned for an unknown backend name.
 	ErrUnsupportedBackend = errors.New("keystore: unknown backend")
 )
@@ -76,14 +60,8 @@ var (
 type Config struct {
 	// Backend selects the store. The zero value means BackendAuto.
 	Backend Backend
-	// Path is the credential file; empty means .env beside the program.
+	// Path is the credential file; empty means credentials.key beside the program.
 	Path string
-	// Key overrides .env.key. When empty the value of KeyEnv is used, and
-	// failing that the key file is read or created.
-	Key []byte
-	// KeyEnv names the environment variable holding the key; empty means
-	// DefaultKeyEnv.
-	KeyEnv string
 	// AllowEphemeral must be true for BackendEphemeral to be honoured. It maps
 	// to the daemon's --ephemeral flag.
 	AllowEphemeral bool
@@ -92,9 +70,6 @@ type Config struct {
 func (c Config) withDefaults() Config {
 	if c.Backend == "" {
 		c.Backend = BackendAuto
-	}
-	if c.KeyEnv == "" {
-		c.KeyEnv = DefaultKeyEnv
 	}
 	return c
 }
@@ -107,16 +82,15 @@ type Store interface {
 	// Backend reports which implementation is in use, for /v1/auth/status.
 	Backend() Backend
 	// Available reports whether the store can be read at this moment. A missing
-	// key file or an undecryptable .env returns an error here, which the daemon
-	// surfaces as keystore_unavailable without touching the network (§4.5).
+	// file is not an error (nobody has signed in yet); a damaged one is, and the
+	// daemon surfaces it as keystore_unavailable without touching the network.
 	Available(ctx context.Context) error
 }
 
 // Open selects and prepares a credential store.
 //
-// It is the "no persistence = configuration error" gate of §9.2: with the
-// default configuration it returns ErrNoBackend rather than quietly handing
-// back a store that evaporates on restart.
+// With the default configuration it is the encrypted file, which need not exist
+// yet: the daemon writes it when somebody signs in.
 func Open(cfg Config) (Store, error) {
 	cfg = cfg.withDefaults()
 
@@ -128,16 +102,7 @@ func Open(cfg Config) (Store, error) {
 		return newEphemeral(), nil
 
 	case BackendFile, BackendAuto:
-		// A key given explicitly, or through the environment, is used as it is
-		// and no key file is written. That is how a container supplies one
-		// (§8.3) and how tests avoid touching the filesystem twice.
-		key := cfg.Key
-		if len(key) == 0 {
-			if v := os.Getenv(cfg.KeyEnv); v != "" {
-				key = []byte(v)
-			}
-		}
-		return newEnvStore(filePath(cfg), key)
+		return newEnvStore(filePath(cfg))
 
 	default:
 		// Naming the alternatives is the difference between a message that ends
@@ -148,8 +113,8 @@ func Open(cfg Config) (Store, error) {
 	}
 }
 
-// filePath returns the configured credential file, or .env in the directory the
-// program was unpacked into.
+// filePath returns the configured credential file, or credentials.key in the
+// directory the program was unpacked into.
 //
 // v1.1 runs in place (§8.2), so the default is beside the binary rather than in
 // a per-OS configuration directory: everything a user needs to back up or delete
@@ -163,7 +128,7 @@ func filePath(cfg Config) string {
 		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 			exe = resolved
 		}
-		return filepath.Join(filepath.Dir(exe), EnvFileName)
+		return filepath.Join(filepath.Dir(exe), CredentialsFileName)
 	}
 	return filepath.Join(defaultStateDir(), DefaultFileName)
 }

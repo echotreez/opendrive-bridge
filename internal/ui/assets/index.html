@@ -71,7 +71,7 @@
     </form>
     <p class="quiet">
       Your password goes to this bridge and to OpenDrive, and nowhere else. It is
-      stored encrypted in <code>.env</code> beside the program so the bridge can keep
+      stored encrypted in <code>credentials.key</code> beside the program so the bridge can keep
       itself signed in — <a href="https://github.com/echotreez/opendrive-bridge/blob/main/SECURITY.md#what-this-protects-you-from-and-what-it-does-not">what
       that does and does not protect you from</a>.
     </p>
@@ -131,7 +131,7 @@
     </div>
     <p class="quiet">
       The cache directory holds your files <strong>as they are</strong>. Unlike
-      <code>.env</code>, nothing in it is encrypted; its protection is the directory's
+      <code>credentials.key</code>, nothing in it is encrypted; its protection is the directory's
       permissions and whatever the disk underneath provides.
     </p>
     <table id="cache-objects">

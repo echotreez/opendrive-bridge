@@ -51,7 +51,7 @@ func daemonService(execPath string, args []string) (service.Service, error) {
 	// that it cannot reach one.
 	//
 	// Linux joins it since v1.1, for a reason that is the same shape: the
-	// credentials are an encrypted .env in the directory the user unpacked, and
+	// credentials are an encrypted file in the directory the user unpacked, and
 	// a system unit with DynamicUser=yes runs as a user that cannot read the
 	// user's home. §8.2 settles it — a user service, started with
 	// `systemctl --user`, running as whoever installed it.
@@ -67,7 +67,7 @@ func daemonService(execPath string, args []string) (service.Service, error) {
 	// daemon_template.go for what that would cost.
 	cfg.Option["SystemdScript"] = systemdUserUnit
 	cfg.Option["LaunchdConfig"] = launchdAgent
-	// The working directory is where .env lives, and it is set explicitly
+	// The working directory is where credentials.key lives, and it is set explicitly
 	// because no service manager inherits the shell's. Without it the daemon
 	// would start in / and look for credentials that are not there.
 	cfg.WorkingDirectory = filepath.Dir(execPath)
@@ -89,8 +89,8 @@ func newDaemonCommand(o *Options) *cobra.Command {
 		Use:   "install",
 		Short: "Register the bridge to start automatically",
 		Long: "Registers the bridge with this machine's service manager, running it from\n" +
-			"the folder you unpacked. Nothing is copied anywhere: the programs, your .env\n" +
-			"and your .env.key stay together, and uninstalling is deleting the folder.",
+			"the folder you unpacked. Nothing is copied anywhere: the programs and your\n" +
+			"credentials.key stay together, and uninstalling is deleting the folder.",
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			path, err := resolveDaemonPath(execPath)
@@ -112,7 +112,7 @@ func newDaemonCommand(o *Options) *cobra.Command {
 				return serviceError(err)
 			}
 			_, _ = fmt.Fprintf(o.Out(), "The bridge is installed and will start when you log in.\n"+
-				"It runs from %s, where your .env lives.\n"+
+				"It runs from %s, where your credentials.key lives.\n"+
 				"Start it now with: odctl daemon start\n", dir)
 
 			// The PATH suggestion. Printed by default; written only when asked.
@@ -278,7 +278,7 @@ func daemonBinaryName() string { return "opendrived" }
 // uninstallCommand removes the service and the PATH block, and deliberately
 // leaves the credentials alone.
 //
-// §8.2: deleting .env and .env.key must be something the user asks for, not a
+// §8.2: deleting credentials.key must be something the user asks for, not a
 // side effect of removing a service. Somebody uninstalling to reinstall a newer
 // version would otherwise have to sign in again for no reason.
 func uninstallCommand(o *Options) *cobra.Command {
@@ -303,8 +303,8 @@ func uninstallCommand(o *Options) *cobra.Command {
 			}
 
 			_, _ = fmt.Fprintln(o.Out(),
-				"Your .env and .env.key are untouched, so reinstalling will not ask you to\n"+
-					"sign in again. Delete the folder if you want them gone.")
+				"Your credentials.key is untouched, so reinstalling will not ask you to\n"+
+					"sign in again. Delete the folder if you want it gone.")
 			return nil
 		},
 	}

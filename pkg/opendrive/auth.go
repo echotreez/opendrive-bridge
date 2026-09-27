@@ -398,7 +398,7 @@ func asError(e *APIError) error {
 func keystoreError(err error) *APIError {
 	return &APIError{
 		Kind:        KindKeystoreUnavailable,
-		UpstreamMsg: "the credential store is unavailable; check .env and .env.key",
+		UpstreamMsg: "the credential store is unavailable; sign in again to replace credentials.key",
 		Err:         err,
 	}
 }

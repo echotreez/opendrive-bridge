@@ -33,22 +33,18 @@ type Config struct {
 	// Addr is the listen address. The default binds loopback only, which is
 	// what makes an absent API key safe (§9.1).
 	Addr string
-	// APIKeyConfigured says the key in APIKey was chosen by the user — a flag,
-	// an environment variable, a secret from a configuration manager — as
-	// opposed to the one the daemon generates into .env for clients that need
-	// it (§9.2.2). Two things follow from the distinction, and both matter:
+	// APIKeyConfigured says an API key was set (--api-key or ODB_API_KEY).
 	//
-	//   - A configured key is enforced everywhere, loopback included.
-	//   - Only a configured key permits a non-loopback listener.
-	//
-	// The second is the one that was lost for a while. The daemon now always has
-	// a key, because it makes one if the user did not, so a check for "is there
-	// a key" stopped meaning anything and the refusal below quietly never
-	// fired. Whitepaper §12.1.1 is explicit about which key counts: 非 loopback
-	// 监听时必须**配置** API key.
+	// Since 1.3 the key is optional everywhere: set, it is required of every
+	// caller, loopback included; unset, the API is open to whatever can reach
+	// the listen address. 1.1 and 1.2 generated a key into .env and refused a
+	// non-loopback listener without one the user chose, which made the container
+	// need an `openssl rand` step before it would start. The container publishes
+	// its port to 127.0.0.1, so an unset key there reaches no further than the
+	// loopback default does on a host; a listener that really is exposed without
+	// a key is logged as a warning at start, in words.
 	APIKeyConfigured bool
-	// APIKey authenticates callers. It is optional on loopback when the daemon
-	// generated it, and required everywhere else.
+	// APIKey authenticates callers when it is set.
 	APIKey string
 	// Logger receives structured logs.
 	Logger *slog.Logger
@@ -138,18 +134,9 @@ func WithDataCache(dc *datacache.DataCache) Option {
 
 // New builds the daemon.
 //
-// It refuses to start a non-loopback listener unless the user configured an API
-// key. That refusal is the point: a bridge holds a password that unlocks
-// somebody's entire cloud storage, and a daemon that binds 0.0.0.0 hands the
-// address to the network. Failing to start is recoverable in a way that a silent
-// exposure is not.
-//
-// A key the daemon generated does not satisfy it. It would be no weaker
-// cryptographically, and it would be worse for the person: the key lives
-// encrypted inside .env, nothing prints it (§9.4 forbids logging it), and the
-// result is a service reachable from the network that answers only to a secret
-// its owner has to go and decrypt. Exposing the bridge should be a thing
-// somebody did on purpose, with a key they chose.
+// A non-loopback listener without an API key starts, with a warning in the log
+// that says what is exposed and how to close it (1.3; see Config.APIKeyConfigured
+// for why the refusal it replaced was dropped).
 func New(cfg Config, auth Auth, opts ...Option) (*Server, error) {
 	if auth == nil {
 		return nil, errors.New("the bridge needs an authenticator")
@@ -164,18 +151,19 @@ func New(cfg Config, auth Auth, opts ...Option) (*Server, error) {
 		cfg.ReadHeaderTimeout = 15 * time.Second
 	}
 
-	loopback := isLoopback(cfg.Addr)
-	if !loopback && !cfg.APIKeyConfigured {
-		return nil, fmt.Errorf("refusing to listen on %s without an API key you chose: "+
-			"anything that can reach that address could use your OpenDrive account. "+
-			"Set one with --api-key or ODB_API_KEY, or bind %s instead", cfg.Addr, DefaultAddr)
+	cfg.APIKeyConfigured = cfg.APIKey != ""
+	if !isLoopback(cfg.Addr) && !cfg.APIKeyConfigured {
+		cfg.Logger.Warn("listening on "+cfg.Addr+" without an API key: anything that can reach "+
+			"this port can use your OpenDrive account. That is fine behind a port published to "+
+			"127.0.0.1 (the container default); otherwise set ODB_API_KEY",
+			slog.String("addr", cfg.Addr))
 	}
 
 	srv := &Server{cfg: cfg, log: cfg.Logger, auth: auth}
 	for _, o := range opts {
 		o(srv)
 	}
-	srv.router = srv.routes(!loopback || cfg.APIKeyConfigured)
+	srv.router = srv.routes(cfg.APIKeyConfigured)
 	srv.http = &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv.router,
