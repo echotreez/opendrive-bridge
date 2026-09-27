@@ -317,14 +317,31 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
+// defaultStateDir is jobs/ beside the binary, for the same reason .env is there
+// (§8.2): everything a user backs up or deletes is in the folder they unpacked.
+//
+// Until 1.2 this was the per-user configuration directory, left behind when v1.1
+// moved the credentials into the folder. Walking first-run.md on a fresh unpack
+// found it: the new install's web page listed transfers from every install that
+// had ever run on the machine, and deleting the folder did not uninstall it.
+func defaultStateDir() string {
+	if exe, err := os.Executable(); err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = resolved
+		}
+		return filepath.Join(filepath.Dir(exe), "jobs")
+	}
+	base, err := os.UserConfigDir()
+	if err != nil {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "opendrive-bridge", "jobs")
+}
+
 func newEngine(c *opendrive.Client, o options, log *slog.Logger, cache *datacache.JobCache) (*jobs.Engine, error) {
 	dir := o.stateDir
 	if dir == "" {
-		base, err := os.UserConfigDir()
-		if err != nil {
-			base = os.TempDir()
-		}
-		dir = filepath.Join(base, "opendrive-bridge", "jobs")
+		dir = defaultStateDir()
 	}
 	store, err := jobs.NewFileStore(dir)
 	if err != nil {

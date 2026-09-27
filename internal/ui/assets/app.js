@@ -134,15 +134,18 @@ function clearErrors() {
   el('errors').textContent = '';
 }
 
-// bytes formats a byte count the way a person reads one. Deliberately the same
-// thresholds odctl uses, so the two do not disagree about what a megabyte is.
+// bytes formats a byte count the way a person reads one, with the same 1024
+// steps odctl uses, so the two do not disagree about what a gigabyte is. The
+// comment here used to say that while the code divided by 1000, and a first run
+// showed the same 5 GB plan as "5.0 GB" in the terminal and "5.4 GB" here.
+// 1024 is also how OpenDrive itself states the plan.
 function bytes(n) {
   if (n === null || n === undefined) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let v = Number(n);
   let i = 0;
-  while (v >= 1000 && i < units.length - 1) {
-    v /= 1000;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
     i++;
   }
   return (i === 0 ? v.toFixed(0) : v.toFixed(1)) + ' ' + units[i];
@@ -300,12 +303,15 @@ async function refreshJobs() {
 
     const tr = document.createElement('tr');
     tr.appendChild(cell(j.remote_path || j.local_path || j.id));
-    tr.appendChild(cell(j.kind));
-    tr.appendChild(cell(j.state, 'state-' + j.state));
+    tr.appendChild(cell(j.kind, 'nowrap'));
+    tr.appendChild(cell(j.state, 'nowrap state-' + j.state));
 
     // The leg, in words. "caching" is the one worth spelling out: it is why a large
     // upload can finish its first leg in a moment and then sit in the second.
-    let leg = j.phase || '';
+    // A finished transfer is not on any leg: the phase is only where it was last,
+    // and "sending to OpenDrive" beside "succeeded" read as if it still were. A
+    // failed one keeps it, because where it stopped is part of why.
+    let leg = j.state === 'running' || j.state === 'queued' || j.state === 'failed' ? j.phase || '' : '';
     if (leg === 'caching') leg = 'copying to the bridge';
     else if (leg === 'uploading') leg = 'sending to OpenDrive';
     else if (leg === 'downloading') leg = 'fetching';

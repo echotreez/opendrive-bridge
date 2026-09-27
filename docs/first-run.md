@@ -198,7 +198,14 @@ again after a restart. It does **not** yet help if OpenDrive is already unreacha
 when you start the upload: the bridge checks the destination folder with OpenDrive
 before it accepts a byte, so that upload fails as it would without the cache. And
 it means "the upload finished" and "OpenDrive has it" stop being the same sentence,
-so the bridge gives you a way to ask:
+so the bridge gives you a way to ask.
+
+`odctl up` does not leave you guessing: even with the cache on, it waits until the
+file is on OpenDrive and then says so, so a large upload takes as long as it did
+before. What gets faster is everything that does not wait — another program using
+the bridge's API gets its answer as soon as the file is on the bridge's disk — and
+reading: a file you fetched once comes back from your own disk. For everything the
+bridge is still holding:
 
 ```bash
 ./odctl cache status

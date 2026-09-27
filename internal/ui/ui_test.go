@@ -346,3 +346,24 @@ func TestErrorsAreShownVerbatimAndAsText(t *testing.T) {
 		}
 	}
 }
+
+// The page and odctl must agree about what a gigabyte is. The page divided by
+// 1000 while its own comment said it matched odctl, which divides by 1024, and
+// the same 5 GB plan read "5.0 GB" in the terminal and "5.4 GB" here.
+func TestThePageCountsBytesTheWayOdctlDoes(t *testing.T) {
+	js, err := assets.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(js)
+	i := strings.Index(src, "function bytes(")
+	if i < 0 {
+		t.Fatal("no bytes() formatter in app.js")
+	}
+	body := src[i:]
+	body = body[:strings.Index(body, "\n}\n")]
+	if !strings.Contains(body, "1024") || strings.Contains(body, "1000") {
+		t.Errorf("bytes() does not step by 1024:\n%s", body)
+	}
+}
+
