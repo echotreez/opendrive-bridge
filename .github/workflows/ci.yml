@@ -391,31 +391,31 @@ jobs:
 
           echo "===== A. first-run.md: -v \$PWD/.env:/data/.env (single file, no .env.key mount)"
           d=$(mktemp -d); cd "$d"; seed .env; chmod 0666 .env
-          docker run -d --name a -e ODB_API_KEY=$(openssl rand -hex 32) -v "$d/.env:/data/.env" opendrive-bridge:ci
-          sleep 8; docker logs a 2>&1 | tail -15; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' a)"
+          docker run -d --name exp-a -e ODB_API_KEY=$(openssl rand -hex 32) -v "$d/.env:/data/.env" opendrive-bridge:ci
+          sleep 8; docker logs exp-a 2>&1 | tail -15; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' exp-a)"
           show "$d"; head -c 60 "$d/.env"; echo
-          docker rm -f a >/dev/null
+          docker rm -f exp-a >/dev/null
 
           echo "===== B. docker-compose.yaml: .env and .env.key as two single-file mounts, .env.key absent on first run"
           d=$(mktemp -d); cd "$d"; seed .env; chmod 0666 .env
-          docker run -d --name b -e ODB_API_KEY=$(openssl rand -hex 32) \
+          docker run -d --name exp-b -e ODB_API_KEY=$(openssl rand -hex 32) \
             -v "$d/.env:/data/.env" -v "$d/.env.key:/data/.env.key:ro" opendrive-bridge:ci
-          sleep 8; docker logs b 2>&1 | tail -15; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' b)"
+          sleep 8; docker logs exp-b 2>&1 | tail -15; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' exp-b)"
           show "$d"
-          docker rm -f b >/dev/null
+          docker rm -f exp-b >/dev/null
 
           echo "===== C. a directory mount, owned by the image user"
           d=$(mktemp -d); mkdir "$d/creds"; seed "$d/creds/.env"; sudo chown -R 65532:65532 "$d/creds"
-          docker run -d --name c -e ODB_API_KEY=$(openssl rand -hex 32) \
+          docker run -d --name exp-c -e ODB_API_KEY=$(openssl rand -hex 32) \
             -v "$d/creds:/data/creds" opendrive-bridge:ci --keystore-file /data/creds/.env
-          sleep 8; docker logs c 2>&1 | tail -15; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' c)"
+          sleep 8; docker logs exp-c 2>&1 | tail -15; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' exp-c)"
           sudo ls -la "$d/creds"; sudo head -c 60 "$d/creds/.env"; echo
-          docker rm -f c >/dev/null
+          docker rm -f exp-c >/dev/null
           echo "--- C again, a fresh container on the same directory: does it decrypt?"
-          docker run -d --name c2 -e ODB_API_KEY=$(openssl rand -hex 32) \
+          docker run -d --name exp-c2 -e ODB_API_KEY=$(openssl rand -hex 32) \
             -v "$d/creds:/data/creds" opendrive-bridge:ci --keystore-file /data/creds/.env
-          sleep 8; docker logs c2 2>&1 | tail -8; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' c2)"
-          docker rm -f c2 >/dev/null
+          sleep 8; docker logs exp-c2 2>&1 | tail -8; echo "running: $(docker inspect -f '{{.State.Running}} exit={{.State.ExitCode}}' exp-c2)"
+          docker rm -f exp-c2 >/dev/null
 
       # Scanned here as well as before publication, for the reason this project
       # has now met four times: a gate that only runs at release time turns every
