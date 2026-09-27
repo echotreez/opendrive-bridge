@@ -49,7 +49,7 @@
 //
 // A single-user local accelerator. Not a distributed cache, no multi-instance
 // coherence (§3.5.4). The directory holds the user's data **in the clear** —
-// unlike `.env`, which is encrypted — and its protection is the 0700 mode and
+// unlike credentials.key, which is encrypted — and its protection is the 0700 mode and
 // whatever the disk underneath provides. Every user-facing document has to say
 // so, because "the bridge encrypts things" is an easy and wrong inference.
 package datacache
@@ -123,7 +123,7 @@ type Uploader interface {
 // Config describes the gateway. The field names are the `datacache` keys of
 // §3.4, not the metadata cache's.
 type Config struct {
-	// Dir is the cache directory. It sits beside .env in the unpacked folder by
+	// Dir is the cache directory. It sits beside credentials.key in the unpacked folder by
 	// default (§3.4), and is created 0700.
 	Dir string
 	// MaxBytes is the total allowance. Zero means DefaultMaxBytes.

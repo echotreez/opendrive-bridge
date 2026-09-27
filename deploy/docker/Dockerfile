@@ -68,38 +68,28 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
       -o /out/odctl ./cmd/odctl \
  && mkdir -p /out/data/cache /out/data/jobs
 
-# distroless/static:nonroot carries CA certificates, /etc/passwd and nothing else.
-FROM gcr.io/distroless/static:nonroot
+# distroless/static carries CA certificates, /etc/passwd and nothing else, and runs
+# as root — the ordinary container arrangement, and since 1.3 on purpose. Until
+# 1.2 the image ran as uid 65532, which meant every bind-mounted folder had to be
+# chowned to that uid first; a step a user had to know about before
+# `docker compose up -d` would work. Root in a container with no shell and no
+# package manager, a read-only root filesystem and no-new-privileges (both in the
+# compose file) is the trade chosen for a setup with no preparation.
+FROM gcr.io/distroless/static
 
 COPY --from=builder /out/opendrived /usr/local/bin/opendrived
 COPY --from=builder /out/odctl /usr/local/bin/odctl
 
-# /data, /data/cache and /data/jobs exist in the image, owned by the user the daemon
-# runs as. That is not tidiness; it decides whether a named volume works at all.
-#
-# Docker initialises a new named volume from whatever the image has at the mount
-# point — contents, ownership and mode. If /data/cache does not exist in the image,
-# the volume's root comes up owned by root, the daemon (running as nonroot, 65532)
-# cannot write to it, and the cache refuses to start. The compose file has mounted
-# a volume there since the gateway was added, and nothing tested it with the image
-# until the directory lock prompted a look at who owns what.
-#
-# distroless has no shell to mkdir or chown in, so the directories are made in the
-# builder and copied with their owner set.
-#
-# A bind mount does not get this treatment — the host directory's own ownership is
-# what the container sees — which is why the documentation for that setup says to
-# chown the host directory to 65532 first.
-COPY --from=builder --chown=65532:65532 /out/data /data
-
-# /data holds the encrypted credentials and the transfer state. Mount a volume
-# over it, or every restart is a fresh install.
+# /data holds everything the bridge keeps: credentials.key (written when you sign
+# in), transfer state in jobs/, and the cache if it is switched on. Mount a folder
+# or a volume over it, or every restart is a fresh install.
+COPY --from=builder /out/data /data
 WORKDIR /data
-USER nonroot:nonroot
 
-# Loopback is the safe default everywhere else, but inside a container it means
-# "unreachable", so the image binds all interfaces — which is exactly why the
-# daemon then insists on an API key. Publish the port to 127.0.0.1 on the host.
+# Loopback would be unreachable from outside the container, so the image binds all
+# interfaces. No API key is required (1.3); the compose file publishes the port to
+# 127.0.0.1 only, and the daemon logs a warning when it listens beyond loopback
+# without one. Set ODB_API_KEY to require one.
 ENV ODB_LISTEN=0.0.0.0:9750
 
 EXPOSE 9750
@@ -108,18 +98,9 @@ EXPOSE 9750
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD ["/usr/local/bin/odctl", "--addr", "127.0.0.1:9750", "status"]
 
-# The binaries stay in /usr/local/bin: §8.2's "run in place" is about host
-# installs, and an image is already an immutable deployment unit — there is no
-# sudo to avoid and nothing to uninstall. Only .env and .env.key are user data,
-# and they arrive as mounts.
-# No --cache-dir here, and that is the safe default rather than an omission.
-#
-# §8.3.1: with write-back on, the caching gateway holds bytes OpenDrive does not
-# have yet. A cache directory inside the container's own writable layer would lose
-# them the moment the container was replaced, which is a routine operation. So the
-# image ships with the gateway off, and it is switched on by a deployment that has
-# somewhere durable to put it — which is what docker-compose.yaml does, with a
-# named volume and ODB_CACHE_DIR=/data/cache.
+# No --cache-dir here: the gateway holds bytes OpenDrive does not have yet in
+# write-back mode, so it is switched on by a deployment that has mounted /data
+# somewhere durable — which the compose file does (ODB_CACHE_DIR=/data/cache).
 ENTRYPOINT ["/usr/local/bin/opendrived", \
-            "--keystore-file", "/data/.env", \
+            "--keystore-file", "/data/credentials.key", \
             "--state-dir", "/data/jobs"]

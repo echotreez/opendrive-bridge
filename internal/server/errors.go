@@ -96,8 +96,8 @@ func statusFor(kind opendrive.Kind) int {
 // OpenDrive's API, an endpoint, or a status code, because a user cannot act on
 // any of those.
 var messages = map[opendrive.Kind]string{
-	opendrive.KindKeystoreUnavailable: "The bridge cannot reach its credential store, so it will not try to " +
-		"sign in. Unlock your login keychain and the bridge will recover on its own.",
+	opendrive.KindKeystoreUnavailable: "The bridge cannot read or save its sign-in (credentials.key). " +
+		"Sign in again to replace it; if that fails too, the folder it lives in cannot be written to.",
 	opendrive.KindReauthRequired: "Your saved password is no longer accepted. Sign in again with your " +
 		"current password to let the bridge resume.",
 	opendrive.KindCaptchaRequired: "OpenDrive is asking for a captcha, which the bridge cannot answer. " +

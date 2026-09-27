@@ -23,7 +23,7 @@ type Kind string
 //
 //	KindKeystoreUnavailable — the credential store cannot be read. No upstream
 //	    request may be made at all: retrying with no credentials would walk the
-//	    account into a captcha lock. Recovery is local (.env and .env.key).
+//	    account into a captcha lock. Recovery is local (sign in again).
 //	KindReauthRequired      — upstream rejected the stored credentials, so the
 //	    password has changed (or the bridge was never configured). All automatic
 //	    attempts stop until the user supplies a new password.

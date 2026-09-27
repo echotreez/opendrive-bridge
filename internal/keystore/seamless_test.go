@@ -88,9 +88,8 @@ func TestSeamlessAcrossRestarts(t *testing.T) {
 	// the file a dozen times; the format is not what it is checking.
 	cheapKDF(t)
 
-	// The credential store is a real encrypted file, as it would be in Docker.
-	t.Setenv(DefaultKeyEnv, "a configured passphrase")
-	path := filepath.Join(t.TempDir(), "credentials.enc")
+	// The credential store is the real encrypted file.
+	path := filepath.Join(t.TempDir(), CredentialsFileName)
 	store, err := Open(Config{Backend: BackendFile, Path: path})
 	if err != nil {
 		t.Fatalf("Open: %v", err)

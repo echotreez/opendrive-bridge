@@ -17,6 +17,7 @@ coverage.html
 # the release archive or the container image — .env.example is what ships.
 .env
 .env.key
+credentials.key
 *.token
 config.local.yaml
 state/

@@ -82,15 +82,13 @@ archives:
     # Found by unpacking a real release rather than by reading the config.
     #
     # It also matters more now than it would have before: the programs run from
-    # the directory they were unpacked into, and .env lives beside them (§8.2),
-    # so "the folder" is a real thing a user keeps and backs up.
+    # the directory they were unpacked into, and credentials.key is written beside
+    # them (§8.2), so "the folder" is a real thing a user keeps and backs up.
     wrap_in_directory: opendrive-bridge
     formats: [tar.gz]
     files:
       - README.md
       - LICENSE
-      # The template, never a real .env: deployment starts with copying this.
-      - .env.example
       # The first thing someone unpacking this needs is not the deployment
       # guide, it is the five minutes that ends with a file in their account.
       - src: docs/first-run.md
@@ -147,62 +145,53 @@ release:
 
     A local REST API, command line and web page for OpenDrive.com.
 
-    Unpack it, start the daemon, then:
+    Unpack it and start it — there is nothing to set up first:
 
     ```
-    cp .env.example .env      # then fill in your OpenDrive username and password
-    ./opendrived              # once: this encrypts .env and creates .env.key
+    ./opendrived
+    ```
+
+    Then open `http://127.0.0.1:9750/ui` and sign in with your OpenDrive account,
+    or in another terminal:
+
+    ```
+    ./odctl login you@example.com
     ./odctl ls /
     ./odctl up ./report.pdf /Documents/report.pdf
     ```
-
-    Then open `http://127.0.0.1:9750/ui` for the same things in a browser. It is
-    part of the daemon and fetches nothing from the internet.
 
     **On macOS, clear the quarantine flag first** — see below, it is the first
     thing that stops people.
 
     `docs/first-run.md` inside the archive is the five-minute version, with a
     section for each platform, one for Docker and one for the cache.
-    `docs/deployment.md` covers running it as a background service.
 
-    ### Fixed in 1.2.1 — upgrade if you use 1.2.0 or 1.0
+    ### New in 1.3 — no setup step
 
-    - **An upload that had finished could be deleted from OpenDrive.** If the
-      bridge stopped — a crash, `kill -9`, a container removed — in the moment
-      after an upload completed, the next start could mistake the finished file
-      for an abandoned one and delete it, without the trash step. The same could
-      happen when a transfer was cancelled, or failed while waiting for OpenDrive
-      to show the new file. It now asks OpenDrive first and deletes only records
-      that are provably empty; a finished file is kept and its transfer is
-      reported as succeeded.
-    - **Apple's `container` on macOS** is now measured and documented: it needs no
-      `chown`, but the one-bridge-per-folder lock does not hold between
-      containers, so run one per folder.
-    - **Intel Macs are no longer supported**, not even from source.
+    - **Sign in instead of preparing a file.** 1.1 and 1.2 asked you to copy
+      `.env.example` to `.env`, type your password into it and let the first start
+      encrypt it. Now the bridge starts with nothing and asks: sign in on the web
+      page or with `odctl login`, and it encrypts and keeps what you typed in one
+      file, `credentials.key`, beside the programs. If your OpenDrive password
+      changes, the page asks you to sign in again — no restart.
+    - **Upgrading from 1.2** needs nothing: an existing `.env` (and `.env.key`) is
+      read once into `credentials.key`. The old files are left alone; delete them
+      when you are satisfied.
+    - **Docker is `docker compose up -d`.** No `.env`, no data folder to create, no
+      `chown`, no API key to generate. The image runs as root, as containers
+      ordinarily do; everything it keeps is in `./data`.
+    - **The API key is optional.** Set `ODB_API_KEY` and every caller must send it;
+      leave it unset and the API answers anything that can reach the port —
+      loopback by default, and `127.0.0.1` in the compose file.
 
-    ### New in 1.2
+    ### Still true
 
-    - **A local cache, off unless you turn it on.** With it on, the bridge keeps
-      recently used files on your disk and can accept an upload before it has
-      reached OpenDrive, sending it on in the background. Read the cache section
-      of `docs/first-run.md` before switching it on: it changes what a finished
-      upload means, and `odctl cache status` is how you tell whether everything
-      has actually reached OpenDrive. It does not yet accept writes while
-      OpenDrive itself is unreachable.
-    - **A web page** at `/ui`, showing the account, transfers in progress and the
-      cache.
-    - **Everything in one folder.** Your username and password live in an
-      encrypted `.env` beside the programs, with its key in `.env.key` — back them
-      up together — and transfer state is in `jobs/` beside them too. Deleting the
-      folder uninstalls it. (1.0 kept transfer state in your user configuration
-      folder; a transfer 1.0 left unfinished is not resumed by 1.2.)
+    - `credentials.key` is encrypted with a key kept in the same file. That keeps
+      your password out of casual view, out of git and out of a backup's plain
+      text; it does not protect it from someone who can already read your files.
+    - macOS on Apple silicon and Linux (x86-64, ARM64) only. On Windows, run the
+      container.
 
-    ### No longer supported
-
-    - **Windows and Intel Macs.** 1.2 ships for macOS on Apple silicon and for
-      Linux (x86-64 and ARM64), and those are the platforms it supports. On
-      Windows, run the container.
   footer: |
     ### Checking what you downloaded
 
@@ -222,8 +211,6 @@ release:
     docker pull ghcr.io/echotreez/opendrive-bridge:{{ .Tag }}
     ```
 
-    Put `.env` in a folder, `chown -R 65532:65532` it, and mount **the folder** at
-    `/data` — not `.env` on its own, which cannot be encrypted in place and which
-    the daemon now refuses. `.env.key`, transfer state and the cache (if you turn
-    it on) all end up in that folder. Nothing is in the image.
-    `docs/first-run.md` has the commands.
+    `docker compose up -d` with `deploy/docker/docker-compose.yaml`, then sign in at
+    `http://127.0.0.1:9750/ui`. Everything the bridge keeps is in `./data`;
+    nothing is in the image.

@@ -67,18 +67,26 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The credential store is checked first. Signing in against a store that
-	// cannot hold the result would look like success and then forget everything
-	// on restart, and retrying blindly is how an account meets a captcha lock
-	// (§4.5, keystore_unavailable makes no upstream request).
-	if err := s.keystoreAvailable(r.Context()); err != nil {
-		WriteError(w, r, err)
-		return
-	}
-
+	// No check of the store first: since 1.3 signing in is how a damaged or
+	// absent credentials.key gets (re)written, so refusing because the store is
+	// unreadable would leave the user no way out.
 	if err := s.auth.Login(r.Context(), req.Username, req.Password); err != nil {
 		WriteError(w, r, err)
 		return
+	}
+	// But a sign-in that could not be saved must not read as one that was: it
+	// would look fine now and be gone after the next restart. The SDK keeps the
+	// session in memory and logs the failure; this is where the user hears it.
+	if s.store != nil {
+		if _, err := s.store.Load(r.Context()); err != nil {
+			WriteError(w, r, &opendrive.APIError{
+				Kind: opendrive.KindKeystoreUnavailable,
+				UpstreamMsg: "signed in, but the sign-in could not be saved, so it will be " +
+					"forgotten when the bridge restarts",
+				Err: err,
+			})
+			return
+		}
 	}
 	s.writeStatus(w, r, http.StatusOK)
 }
@@ -210,20 +218,4 @@ func (s *Server) accountInfo(ctx context.Context, state opendrive.AuthState) *op
 		return nil
 	}
 	return info
-}
-
-// keystoreAvailable turns an unreadable credential store into the one error
-// that must never be confused with a wrong password.
-func (s *Server) keystoreAvailable(ctx context.Context) error {
-	if s.store == nil {
-		return nil
-	}
-	if err := s.store.Available(ctx); err != nil {
-		return &opendrive.APIError{
-			Kind:        opendrive.KindKeystoreUnavailable,
-			UpstreamMsg: "the credential store cannot be read, so no sign-in was attempted",
-			Err:         err,
-		}
-	}
-	return nil
 }

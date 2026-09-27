@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,7 +49,15 @@ type fakeStore struct {
 	keystore.Store
 	backend   keystore.Backend
 	available error
+	loadErr   error // what Load answers after a sign-in: nil means it was saved
 	probes    int
+}
+
+func (f *fakeStore) Load(context.Context) (*opendrive.StoredCredentials, error) {
+	if f.loadErr != nil {
+		return nil, f.loadErr
+	}
+	return &opendrive.StoredCredentials{Username: "derek@example.com"}, nil
 }
 
 func (f *fakeStore) Backend() keystore.Backend { return f.backend }
@@ -88,85 +97,51 @@ func do(t *testing.T, srv *Server, method, path, body string) (*httptest.Respons
 
 // ---------------------------------------------------------------- binding
 
-// A daemon that listens beyond loopback without a key would hand an OpenDrive
-// account to the network. Refusing to start is the only safe answer, and the
-// refusal has to say what to do about it.
-func TestNonLoopbackWithoutAKeyRefusesToStart(t *testing.T) {
-	_, err := New(Config{Addr: "0.0.0.0:7777"}, &fakeAuth{})
-	if err == nil {
-		t.Fatal("a public listener with no API key was accepted")
+// Since 1.3 a listener beyond loopback without a key starts — the container
+// publishes its port to 127.0.0.1, and demanding an `openssl rand` step before it
+// would run was the setup Derek asked to remove. It must not start silently,
+// though: the warning says what is exposed and how to close it.
+func TestNonLoopbackWithoutAKeyStartsAndSaysWhatIsExposed(t *testing.T) {
+	var logs strings.Builder
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	if _, err := New(Config{Addr: "0.0.0.0:7777", Logger: log}, &fakeAuth{}); err != nil {
+		t.Fatalf("a keyless public listener was refused: %v", err)
 	}
-	for _, want := range []string{"API key", DefaultAddr} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal does not mention %q: %v", want, err)
+	for _, want := range []string{"without an API key", "ODB_API_KEY", "127.0.0.1"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("the warning does not mention %q:\n%s", want, logs.String())
 		}
 	}
 
-	if _, err := New(Config{
-		Addr: "0.0.0.0:7777", APIKey: "k", APIKeyConfigured: true,
-	}, &fakeAuth{}); err != nil {
-		t.Errorf("a public listener with a key the user chose was refused: %v", err)
-	}
-}
-
-// The key the daemon generates for itself does not open a public listener.
-//
-// This is the test the old one should have been. It asserted that any non-empty
-// APIKey was enough — which was true when the only way to have a key was to
-// configure one. Since v1.1 the daemon always has a key, because it makes one on
-// first run, so the refusal above silently stopped firing for every deployment
-// that had not set ODB_API_KEY. The container job in CI would have caught it,
-// except that a daemon which starts instead of exiting does not fail a test that
-// runs it in the foreground: it hangs, and six hours later the runner is killed.
-func TestAGeneratedKeyDoesNotOpenAPublicListener(t *testing.T) {
-	_, err := New(Config{Addr: "0.0.0.0:7777", APIKey: "generated-into-dot-env"}, &fakeAuth{})
-	if err == nil {
-		t.Fatal("a public listener was opened on the strength of a key the daemon " +
-			"generated; nothing prints that key, so the address would be reachable " +
-			"by a secret its owner has never seen")
-	}
-	// And it must point at the thing the user has to do, naming the ways in.
-	for _, want := range []string{"--api-key", "ODB_API_KEY"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the refusal does not mention %q: %v", want, err)
-		}
-	}
-}
-
-// A key the *daemon* generated for itself must not shut the local CLI out.
-// Since v1.1 the first run puts an API key in .env so that clients which need
-// one have it (§9.2.2); odctl, in the same folder, does not know it. Enforcing
-// that key on loopback meant every local command came back 401 — found by the
-// systemd job, which drives the daemon the way a user would.
-//
-// A wrong key is still a wrong key: presenting one that does not match is
-// refused rather than waved through.
-func TestAGeneratedKeyDoesNotLockOutLoopback(t *testing.T) {
-	srv, err := New(Config{Addr: "127.0.0.1:0", APIKey: "generated-for-clients"}, &fakeAuth{})
-	if err != nil {
+	// On loopback there is nothing to warn about.
+	logs.Reset()
+	if _, err := New(Config{Addr: "127.0.0.1:7777", Logger: log}, &fakeAuth{}); err != nil {
 		t.Fatal(err)
 	}
-
-	rec, _ := do(t, srv, http.MethodGet, "/v1/health", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: a key the daemon made for itself must not "+
-			"lock the user out of their own loopback socket", rec.Code)
+	if strings.Contains(logs.String(), "without an API key") {
+		t.Errorf("a loopback listener was warned about:\n%s", logs.String())
 	}
+}
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
-	req.Header.Set("Authorization", "Bearer the-wrong-key")
-	wrong := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(wrong, req)
-	if wrong.Code != http.StatusUnauthorized {
-		t.Errorf("a wrong key was accepted: status = %d", wrong.Code)
-	}
-
-	right := httptest.NewRecorder()
-	reqOK := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
-	reqOK.Header.Set("Authorization", "Bearer generated-for-clients")
-	srv.Handler().ServeHTTP(right, reqOK)
-	if right.Code != http.StatusOK {
-		t.Errorf("the right key was refused: status = %d", right.Code)
+// A key, once set, is required of every caller — loopback included — and a
+// wrong one is refused rather than waved through.
+func TestASetKeyIsRequiredEverywhere(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:0", "0.0.0.0:7777"} {
+		srv, err := New(Config{Addr: addr, APIKey: "chosen"}, &fakeAuth{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for key, want := range map[string]int{"": http.StatusUnauthorized, "wrong": http.StatusUnauthorized, "chosen": http.StatusOK} {
+			req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+			if key != "" {
+				req.Header.Set("Authorization", "Bearer "+key)
+			}
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+			if rec.Code != want {
+				t.Errorf("%s with key %q: status %d, want %d", addr, key, rec.Code, want)
+			}
+		}
 	}
 }
 
@@ -367,28 +342,48 @@ func TestLoginStoresAndReportsStatus(t *testing.T) {
 // The one that must never be confused with a wrong password: an unreadable
 // credential store stops the bridge *before* it asks upstream anything, because
 // retrying blindly is how an account meets a captcha lock.
-func TestLoginWithALockedKeystoreMakesNoUpstreamRequest(t *testing.T) {
+// Since 1.3 signing in is how an unreadable credentials.key is replaced, so an
+// unreadable store does not stop a sign-in. What must not happen is a sign-in
+// that could not be saved reading as one that was: it would be gone after the
+// next restart.
+func TestASignInThatCannotBeSavedSaysSo(t *testing.T) {
 	auth := &fakeAuth{state: opendrive.StateNotConfigured}
-	store := &fakeStore{backend: keystore.BackendFile, available: errors.New("the keyring is locked")}
+	store := &fakeStore{
+		backend:   keystore.BackendFile,
+		available: errors.New("credentials.key could not be decrypted"),
+		loadErr:   errors.New("cannot write credentials.key: permission denied"),
+	}
 	srv := newTestServer(t, auth, WithKeystore(store))
 
 	rec, body := do(t, srv, http.MethodPost, "/v1/auth/login",
 		`{"username":"derek@example.com","password":"hunter2"}`)
 
-	if auth.logins != 0 {
-		t.Fatal("a sign-in was attempted with an unreadable credential store")
+	if auth.logins != 1 {
+		t.Fatalf("logins = %d; an unreadable store must not prevent signing in", auth.logins)
 	}
 	e := body["error"].(map[string]any)
-	if e["code"] != "keystore_unavailable" {
-		t.Errorf("code = %v, want keystore_unavailable", e["code"])
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d", rec.Code)
+	if e["code"] != "keystore_unavailable" || rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("code = %v, status = %d; want keystore_unavailable, 503", e["code"], rec.Code)
 	}
 	msg := e["message"].(string)
 	assertUserReadable(t, msg)
-	if !strings.Contains(strings.ToLower(msg), "keychain") {
-		t.Errorf("the message does not tell the user what to unlock: %q", msg)
+	for _, want := range []string{"credentials.key", "Sign in again"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the message does not mention %q: %q", want, msg)
+		}
+	}
+}
+
+// And a store that is unreadable only until the sign-in replaces it is a plain
+// success.
+func TestASignInReplacesAnUnreadableStore(t *testing.T) {
+	auth := &fakeAuth{state: opendrive.StateNotConfigured}
+	store := &fakeStore{backend: keystore.BackendFile, available: errors.New("damaged")}
+	srv := newTestServer(t, auth, WithKeystore(store))
+	rec, _ := do(t, srv, http.MethodPost, "/v1/auth/login",
+		`{"username":"derek@example.com","password":"hunter2"}`)
+	if rec.Code != http.StatusOK || auth.logins != 1 {
+		t.Fatalf("status = %d, logins = %d", rec.Code, auth.logins)
 	}
 }
 

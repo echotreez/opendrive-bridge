@@ -31,6 +31,9 @@
 
 const KEY_NAME = 'odb-api-key';
 
+// signInFocused remembers that the sign-in form has been offered the cursor.
+let signInFocused = false;
+
 function apiKey() {
   try {
     return sessionStorage.getItem(KEY_NAME) || '';
@@ -210,6 +213,16 @@ async function refreshStatus() {
       break;
     default:
       explain.textContent = '';
+  }
+  // When the bridge needs an account — the first run, or a password that stopped
+  // working — the sign-in form is the one thing on the page to do, so it gets the
+  // cursor. Only once per need, so a refresh does not steal focus mid-typing.
+  const needsSignIn = s.state === 'not_configured' || s.state === 'reauth_required';
+  if (needsSignIn && !signInFocused && document.activeElement !== el('password')) {
+    el('username').focus();
+    signInFocused = true;
+  } else if (!needsSignIn) {
+    signInFocused = false;
   }
   return s;
 }
