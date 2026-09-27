@@ -130,6 +130,34 @@ jobs:
           rm -f /tmp/cert.p12
           echo "available=true" >> "$GITHUB_OUTPUT"
 
+      # Tell goreleaser which release this is instead of letting it guess.
+      #
+      # It guesses with `git describe`, which cannot choose between two tags on
+      # one commit — and cutting the final release on the commit its last release
+      # candidate was verified on is the whole point of a release candidate. The
+      # first v1.2.0 run built everything as 1.2.0-rc.2, tried to upload it to
+      # the rc.2 release, was refused (422, already_exists), and left v1.2.0 with
+      # an image and no binaries.
+      #
+      # The previous tag decides the changelog. A final release is compared with
+      # the last final release, not with its own candidate (which is the same
+      # commit, and would give an empty changelog); a candidate is compared with
+      # whatever was tagged before it. With no final release yet, the changelog
+      # starts at the beginning of the repository.
+      - name: Which release this is
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          case "$tag" in
+            *-*) prev=$(git tag -l 'v*' --merged "$tag^" --sort=-creatordate | head -1 || true) ;;
+            *)   prev=$(git tag -l 'v*' --merged "$tag^" --sort=-creatordate | grep -v -- '-' | head -1 || true) ;;
+          esac
+          [ -n "$prev" ] || prev=$(git rev-list --max-parents=0 HEAD)
+          echo "GORELEASER_CURRENT_TAG=$tag" >> "$GITHUB_ENV"
+          echo "GORELEASER_PREVIOUS_TAG=$prev" >> "$GITHUB_ENV"
+          echo "releasing $tag; changelog since $prev"
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: '~> v2'
