@@ -65,7 +65,7 @@ from the internet and refuses anything not signed with a paid Apple certificate.
 
 # 2. Check it is the file we published, before you trust it:
 shasum -a 256 -c opendrive-bridge_*_SHA256SUMS --ignore-missing
-# expect: opendrive-bridge_1.1.0_darwin_arm64.tar.gz: OK
+# expect: opendrive-bridge_<version>_darwin_arm64.tar.gz: OK
 
 # 3. Unpack. This creates a folder called opendrive-bridge/ — keep it
 #    somewhere permanent, because your credentials will live in it.
@@ -192,10 +192,13 @@ download.
 your file to its own disk first and sends it to OpenDrive afterwards. For a short
 while — usually seconds — **the bridge is the only place that file exists.**
 
-That is a genuinely useful trade: if your network drops or OpenDrive has a bad
-minute, the bridge keeps trying and picks up again after a restart, instead of the
-upload simply failing. But it means "the upload finished" and "OpenDrive has it" stop
-being the same sentence, so the bridge gives you a way to ask:
+That is a genuinely useful trade: once a file is in the cache, a network drop or a
+bad minute at OpenDrive no longer loses it — the bridge keeps trying, and picks up
+again after a restart. It does **not** yet help if OpenDrive is already unreachable
+when you start the upload: the bridge checks the destination folder with OpenDrive
+before it accepts a byte, so that upload fails as it would without the cache. And
+it means "the upload finished" and "OpenDrive has it" stop being the same sentence,
+so the bridge gives you a way to ask:
 
 ```bash
 ./odctl cache status
@@ -247,7 +250,8 @@ If you would rather keep the faster reads and none of the above,
 > take unsent files with them, after you had been told they were stored.
 >
 > So: **put the cache in a directory on the host**, mounted into the container,
-> as the command below and `deploy/docker/docker-compose.yaml` both do. If the
+> as the command below and `deploy/docker/docker-compose.yaml` both do — it is
+> `data/cache`, inside the one folder the container keeps everything in. If the
 > container dies part-way, starting it again replays the cache's journal from
 > that directory and sends whatever had not gone up. Docker's own clean-up
 > commands (`docker compose down -v`, `docker volume prune`) cannot touch it, and
@@ -261,58 +265,65 @@ If you would rather keep the faster reads and none of the above,
 > Uploads then wait for OpenDrive, as they always did, and nothing is ever held
 > here that OpenDrive does not have.
 
-The container takes **the same two files** as everywhere else. There is no
-container-specific setup any more — you prepare `.env` exactly as you would on a
-laptop and mount it in.
+The container keeps **everything in one folder**, the same as a host install:
+`.env`, the `.env.key` the first run makes, transfer state and the cache. You
+prepare `.env` exactly as you would on a laptop, put it in that folder, and mount
+**the folder** — never `.env` on its own.
 
 ```bash
-cp .env.example .env
-$EDITOR .env          # put your OpenDrive username and password in
+mkdir -p opendrive-bridge/data/cache && cd opendrive-bridge
+$EDITOR data/.env     # two lines: ODB_USERNAME=you@example.com and ODB_PASSWORD=…
 
-# The cache directory has to belong to the user the image runs as (uid 65532).
-mkdir -p cache && sudo chown 65532:65532 cache
+# The folder has to belong to the user the image runs as (uid 65532).
+sudo chown -R 65532:65532 data
+
+# The key odctl will need to talk to it. Keep this terminal, or keep the value.
+export ODB_API_KEY="$(openssl rand -hex 32)"
 
 docker run -d --name opendrive-bridge \
   -p 127.0.0.1:9750:9750 \
-  -e ODB_API_KEY="$(openssl rand -hex 32)" \
+  -e ODB_API_KEY \
   -e ODB_CACHE_DIR=/data/cache \
-  -v "$PWD/.env:/data/.env" \
-  -v odb-state:/data/jobs \
-  -v "$PWD/cache:/data/cache" \
-  ghcr.io/echotreez/opendrive-bridge:1.1.0
+  -v "$PWD/data:/data" \
+  ghcr.io/echotreez/opendrive-bridge:1.2
 ```
 
-Skip the `chown` and the bridge refuses to start, naming the directory and the
-command to run — it will not quietly run without its cache.
+The first start rewrites `data/.env` encrypted and creates `data/.env.key` beside
+it — on your machine, through the mount. Nothing is baked into the image. Leave
+out `ODB_CACHE_DIR` and the cache stays off.
 
-The first start rewrites `.env` encrypted and creates `.env.key` next to it — on
-your machine, through the mount. Nothing is baked into the image.
+On Docker Desktop, put the cache on a named volume instead by adding
+`-v odb-cache:/data/cache` after the folder mount (see the box above).
 
 `deploy/docker/docker-compose.yaml` is the same thing written down, with a
 healthcheck.
 
-Three things to get right:
+Things to get right:
 
-- **`.env` has to be writable.** The first run rewrites it, and so does every
-  token refresh. Mount it `:ro` and the bridge will work until the first refresh
-  and then fail in a way that looks like an OpenDrive outage. `.env.key` is only
-  ever read, so that one can be `:ro`.
+- **Mount the folder, not the file.** `-v "$PWD/.env:/data/.env"` looks like it
+  should work and does not: the bridge replaces `.env` with an encrypted copy,
+  and a file that is mounted on its own cannot be replaced. Earlier versions of
+  this page said to do it that way, and the result was a container that ran with
+  your password still unencrypted on disk. The bridge now refuses to start
+  instead, and says so.
+- **Skip the `chown` and the bridge refuses to start**, naming the folder. It
+  will not quietly run without somewhere to keep its credentials or its cache.
 - **`ODB_API_KEY` is required here** and only here. The image listens on
   `0.0.0.0`, because inside a container loopback means "nothing can reach it", and
   a non-loopback address makes the daemon insist on a key. On your own machine it
   generates one into `.env` and you never see it.
-- **Back up `.env` and `.env.key` together.** Either one alone is useless.
-- **One bridge per cache directory.** The bridge locks it, so a second container —
-  or a bridge on the host — pointed at the same folder refuses to start, rather
-  than two of them writing one journal and losing files between them. The lock is
-  released when the holder exits, however it exits, so a crash never leaves the
-  directory stuck.
-- **The cache directory is not encrypted.** `.env` is; the cache is not. It holds
-  your files exactly as they are, protected only by the directory's permissions
-  and by whatever the disk underneath gives you. The bridge sets the directory to
-  0700 — readable by nobody but the account it runs as — and that is the whole of
-  it. Before you check, no: nothing about "the bridge encrypts things" applies
-  here.
+- **Back up `data/.env` and `data/.env.key` together.** Either one alone is
+  useless. After the first run they belong to uid 65532, so copying them takes
+  `sudo`.
+- **One bridge per folder.** The bridge locks its cache directory, so a second
+  container — or a bridge on the host — pointed at the same folder refuses to
+  start, rather than two of them writing one journal and losing files between
+  them. The lock is released when the holder exits, however it exits, so a crash
+  never leaves the directory stuck.
+- **The cache is not encrypted.** `.env` is; `data/cache` is not. It holds your
+  files exactly as they are, protected only by the directory's permissions and by
+  whatever the disk underneath gives you. The bridge sets the directory to 0700 —
+  readable by nobody but the account it runs as — and that is the whole of it.
 
 ### Is it safe to stop the container?
 
@@ -334,8 +345,7 @@ Then, from your own machine:
 
 ```bash
 export ODB_ADDR=127.0.0.1:9750
-export ODB_API_KEY=<the value you generated above>
-odctl ls /
+odctl ls /            # ODB_API_KEY is already set in this terminal
 ```
 
 ---

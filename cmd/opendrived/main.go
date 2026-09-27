@@ -117,6 +117,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// A plaintext .env is sealed now, and a seal that fails stops the daemon:
+	// running with the password still readable on disk is the one outcome the
+	// credential design exists to prevent (keystore.Seal says how it happened).
+	if err := keystore.Seal(context.Background(), store); err != nil {
+		return err
+	}
 	log.Info("credential store ready", slog.String("backend", string(store.Backend())))
 
 	// The Bridge's own API key comes from the credential store, which generates
@@ -165,7 +171,7 @@ func run() error {
 	auth := opendrive.NewOAuth2(client, opendrive.WithCredentialStore(store))
 	client.SetAuthenticator(auth)
 
-	// Loading the stored credentials is best effort: a locked keyring is
+	// Loading the stored credentials is best effort: a credential that cannot be used is
 	// reported by /v1/auth/status rather than being a reason not to start. The
 	// daemon has to be reachable precisely when something is wrong with its
 	// credentials — that is when somebody runs `odctl status`.

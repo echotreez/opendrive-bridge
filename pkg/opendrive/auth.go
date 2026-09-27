@@ -398,7 +398,7 @@ func asError(e *APIError) error {
 func keystoreError(err error) *APIError {
 	return &APIError{
 		Kind:        KindKeystoreUnavailable,
-		UpstreamMsg: "the credential store is unavailable; unlock the keyring or check the configured key",
+		UpstreamMsg: "the credential store is unavailable; check .env and .env.key",
 		Err:         err,
 	}
 }

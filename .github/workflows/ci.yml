@@ -466,6 +466,79 @@ jobs:
             && { echo "a stack trace reached the user"; exit 1; }
           echo "refused correctly, with something a person can act on"
 
+      # The documented Docker setup, run as written, and the two it replaced.
+      #
+      # docs/first-run.md and docker-compose.yaml used to mount .env (and .env.key)
+      # as single files. Run in this job on 2026-09-27, that failed silently: the
+      # atomic rewrite that encrypts .env hit EBUSY on the file mount, Docker made
+      # a root-owned *directory* for the missing .env.key, and in both cases the
+      # container reported itself running with the password still in the clear on
+      # the host. Nothing here had ever started the image with a credential file.
+      - name: The documented credential setup works, and the old one is refused in words
+        run: |
+          set -euo pipefail
+          seed() { printf 'ODB_USERNAME=ci@example.com\nODB_PASSWORD=not-a-real-password\n' > "$1"; }
+          fail() { echo "FAIL: $1"; exit 1; }
+          key() { openssl rand -hex 32; }
+
+          echo "--- 1. the folder, chowned, as docs/first-run.md says"
+          root="$RUNNER_TEMP/documented"
+          mkdir -p "$root/data/cache"; seed "$root/data/.env"
+          sudo chown -R 65532:65532 "$root/data"
+          docker run -d --name odb-doc1 -e ODB_API_KEY="$(key)" -e ODB_CACHE_DIR=/data/cache \
+            -v "$root/data:/data" opendrive-bridge:ci
+          sleep 6
+          docker logs odb-doc1 2>&1 | tail -5
+          [ "$(docker inspect -f '{{.State.Running}}' odb-doc1)" = true ] || fail "it did not stay up"
+          sudo test -f "$root/data/.env.key" || fail ".env.key was not created on the host"
+          sudo head -c 10 "$root/data/.env" | grep -q '^U2FsdGVkX1' || fail ".env on the host is not encrypted"
+          ! sudo grep -q not-a-real-password "$root/data/.env" || fail "the plaintext password is still on the host"
+          ! docker logs odb-doc1 2>&1 | grep -q keystore_unavailable || fail "the credential store is unavailable"
+          docker rm -f odb-doc1 >/dev/null
+
+          echo "--- 1b. a new container on the same folder decrypts it"
+          docker run -d --name odb-doc2 -e ODB_API_KEY="$(key)" -v "$root/data:/data" opendrive-bridge:ci
+          sleep 6
+          docker logs odb-doc2 2>&1 | tail -5
+          [ "$(docker inspect -f '{{.State.Running}}' odb-doc2)" = true ] || fail "the second container did not stay up"
+          ! docker logs odb-doc2 2>&1 | grep -qE "keystore_unavailable|could not be decrypted" \
+            || fail "the second container could not read what the first one wrote"
+          docker rm -f odb-doc2 >/dev/null
+          sudo rm -rf "$root"
+
+          refused() {  # name, then the docker run arguments
+            local name="$1"; shift
+            set +e
+            out=$(timeout 60 docker run --rm -e ODB_API_KEY="$(key)" "$@" opendrive-bridge:ci 2>&1)
+            code=$?
+            set -e
+            echo "$name: exit=$code"; echo "$out" | tail -3
+            [ "$code" -ne 124 ] || fail "$name: it hung instead of answering"
+            [ "$code" -ne 0 ] || fail "$name: it ran"
+            echo "$out" | grep -qiE "panic|goroutine [0-9]+|\.go:[0-9]+" && fail "$name: a stack trace reached the user"
+            echo "$out" | grep -q "unencrypted" || fail "$name: it does not say the password is still in the clear"
+            true
+          }
+
+          echo "--- 2. .env mounted on its own (the old first-run.md)"
+          d="$RUNNER_TEMP/single"; mkdir -p "$d"; seed "$d/.env"; chmod 0666 "$d/.env"
+          refused single -v "$d/.env:/data/.env"
+          echo "$out" | grep -q "mounted on its own" || fail "single: it does not say what is wrong"
+          echo "$out" | grep -q "Mount the" || fail "single: it does not say what to do"
+          grep -q not-a-real-password "$d/.env" || fail "single: .env changed although nothing could be sealed"
+
+          echo "--- 3. .env and a not-yet-existing .env.key, one by one (the old compose file)"
+          d="$RUNNER_TEMP/twofile"; mkdir -p "$d"; seed "$d/.env"; chmod 0666 "$d/.env"
+          refused twofile -v "$d/.env:/data/.env" -v "$d/.env.key:/data/.env.key:ro"
+          echo "$out" | grep -q "is a directory" || fail "twofile: it does not say .env.key is a directory"
+          sudo rm -rf "$d"
+
+          echo "--- 4. the folder without the chown"
+          d="$RUNNER_TEMP/unchowned"; mkdir -p "$d/data"; seed "$d/data/.env"
+          refused unchowned -v "$d/data:/data"
+          echo "$out" | grep -q "has to be writable" || fail "unchowned: it does not say the folder must be writable"
+          echo "the documented setup works; the three ways to get it wrong are each refused in a sentence"
+
       - name: A public address with no API key of the user's own is refused
         run: |
           set -euo pipefail

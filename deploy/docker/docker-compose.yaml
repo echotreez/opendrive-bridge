@@ -1,17 +1,25 @@
 # A working starting point for running the bridge in a container (§8.3).
 #
-# The container takes the same two files as a host install. There is no
-# container-specific credential backend any more:
+# Everything the bridge keeps lives in one folder, ./data, mounted at /data —
+# the same "everything in one folder" as a host install:
 #
-#   cp ../../.env.example .env     # then fill in your OpenDrive credentials
-#   mkdir -p cache && sudo chown 65532:65532 cache   # see "the cache" below
+#   mkdir -p data/cache
+#   cp ../../.env.example data/.env     # then fill in your OpenDrive credentials
+#   sudo chown -R 65532:65532 data      # the image runs as uid 65532
+#   export ODB_API_KEY="$(openssl rand -hex 32)"   # keep it: odctl needs it too
 #   docker compose up -d
 #
-# The first start rewrites .env encrypted and creates .env.key beside it, then
-# prints nothing further about credentials — the same first run as on a laptop.
+# The first start rewrites data/.env encrypted and creates data/.env.key beside
+# it — the same first run as on a laptop. Two things to keep safe, and keep
+# together: .env and .env.key. Either one on its own is useless.
 #
-# Two things to keep safe, and keep together: .env and .env.key. Either one on
-# its own is useless.
+# Mount the FOLDER, never .env and .env.key one by one. This file used to do the
+# latter, and measured in CI it failed both ways at once: the daemon replaces
+# .env atomically (write a new file, rename it over the old one), which a file
+# that is itself a mount point refuses with EBUSY — so the password stayed on
+# disk in the clear — and Docker, asked to mount a .env.key that did not exist
+# yet, created a root-owned *directory* of that name. The daemon now refuses to
+# start in either case and says which, but the setup above never meets them.
 #
 # ---------------------------------------------------------------------------
 # READ THIS BEFORE CHANGING THE VOLUMES — the cache (§8.3.1)
@@ -23,7 +31,7 @@
 # orchestrator moving the container are routine, and a cache inside the
 # container's own writable layer would go with any of them.
 #
-# The default below is a directory on the host, bind-mounted in. It is the most
+# The default below is a directory on the host (data/cache), bind-mounted in. It is the most
 # robust of the options:
 #
 #   - Docker's own housekeeping cannot touch it. `docker compose down -v` and
@@ -39,7 +47,7 @@
 # Two things it needs:
 #
 #   1. **Ownership.** The image runs as uid 65532, and the directory has to belong
-#      to it — hence the `chown` in the setup lines at the top. Skip it and the
+#      to it — hence the `chown -R` in the setup lines at the top. Skip it and the
 #      daemon refuses to start, saying which directory and what to run.
 #   2. **One bridge per directory.** The daemon locks the cache directory, so a
 #      second container (or a host opendrived) pointed at the same folder refuses
@@ -94,25 +102,17 @@ services:
       ODB_CACHE_WRITE_BACK: "true"
 
     volumes:
-      # .env is mounted WRITABLE, and that is not an oversight. The first run
-      # rewrites it encrypted, and every token rotation writes it again. Mounted
-      # read-only the bridge would work until the first refresh and then start
-      # failing in a way that looks like an OpenDrive outage.
-      - ./.env:/data/.env
-      # .env.key is only ever read.
-      - ./.env.key:/data/.env.key:ro
-      # Transfer state: job progress, resume points.
-      - odb-state:/data/jobs
-      # The cache — see the note at the top of this file. In write-back mode this
-      # directory holds data OpenDrive does not have yet, so it must outlive the
-      # container.
+      # The whole folder: .env and .env.key (written by the first run), jobs/
+      # (transfer state, so an interrupted transfer resumes) and cache/.
       #
-      # It also holds the user's files in the clear. Unlike .env, nothing here is
-      # encrypted: the protection is the 0700 mode the daemon sets and whatever
-      # the underlying disk provides.
-      - ./cache:/data/cache
-      # Docker Desktop (Mac/Windows): use a named volume instead, and add
-      # `odb-cache:` under `volumes:` at the bottom.
+      # The cache holds data OpenDrive does not have yet in write-back mode, and
+      # it holds the user's files in the clear: unlike .env, nothing in cache/ is
+      # encrypted. The protection is the 0700 mode the daemon sets and whatever
+      # the disk underneath provides.
+      - ./data:/data
+      # Docker Desktop (Mac/Windows): keep the cache on a named volume instead,
+      # mounted over the cache folder, and add `odb-cache:` under `volumes:` at
+      # the bottom. See the note at the top of this file.
       # - odb-cache:/data/cache
 
     # The image has no shell, so this runs the binary. It reports healthy as soon
@@ -132,6 +132,5 @@ services:
     security_opt:
       - no-new-privileges:true
 
-volumes:
-  odb-state:
-  # odb-cache:   # only if you use the named-volume line above
+# volumes:
+#   odb-cache:   # only if you use the named-volume line above

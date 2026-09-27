@@ -35,7 +35,7 @@ Download the archive for your machine from the
 check it against the published checksums before you run anything:
 
 ```bash
-sha256sum --check --ignore-missing opendrive-bridge_1.1.0_SHA256SUMS
+sha256sum --check --ignore-missing opendrive-bridge_*_SHA256SUMS
 ```
 
 On macOS use `shasum -a 256 -c` instead. If the check does not say `OK`, stop and
@@ -46,7 +46,7 @@ programs run from there — nothing is copied into `/usr/local/bin`, so there is
 `sudo` anywhere in this guide and uninstalling is deleting the folder:
 
 ```bash
-tar xzf opendrive-bridge_1.1.0_linux_amd64.tar.gz
+tar xzf opendrive-bridge_*_linux_amd64.tar.gz
 cd opendrive-bridge
 ```
 
@@ -190,41 +190,54 @@ The image is on `ghcr.io/echotreez/opendrive-bridge`. It is built for both Intel
 and ARM, runs as a non-root user, and contains nothing but the two programs and a
 set of CA certificates.
 
-**The container takes the same two files as a host install.** There is no
-container-specific credential backend any more: you prepare `.env` exactly as you
-would on a laptop and mount it in.
+**The container keeps everything in one folder, like a host install.** There is
+no container-specific credential backend: you prepare `.env` exactly as you would
+on a laptop, put it in a folder, and mount **the folder** at `/data`.
 
 ```bash
-cp .env.example .env      # then fill in your OpenDrive username and password
+mkdir -p opendrive-bridge/data/cache && cd opendrive-bridge
+$EDITOR data/.env         # two lines: ODB_USERNAME=… and ODB_PASSWORD=…
+sudo chown -R 65532:65532 data            # the image runs as uid 65532
 
+export ODB_API_KEY="$(openssl rand -hex 32)"   # keep it: odctl needs it too
 docker run -d --name opendrive-bridge \
   -p 127.0.0.1:9750:9750 \
-  -e ODB_API_KEY="$(openssl rand -hex 32)" \
-  -v "$PWD/.env:/data/.env" \
-  -v odb-state:/data/jobs \
-  ghcr.io/echotreez/opendrive-bridge:1.1.0
+  -e ODB_API_KEY \
+  -e ODB_CACHE_DIR=/data/cache \
+  -v "$PWD/data:/data" \
+  ghcr.io/echotreez/opendrive-bridge:1.2
 ```
 
-The first start rewrites `.env` encrypted and creates `.env.key` beside it, on
-your host, through the mount. After that both files are yours to back up.
+The first start rewrites `data/.env` encrypted and creates `data/.env.key` beside
+it, on your host. Transfer state goes in `data/jobs`, the cache in `data/cache`.
+Leave out `ODB_CACHE_DIR` and the cache stays off.
 
 `deploy/docker/docker-compose.yaml` is the same thing written down, with a
-healthcheck and `.env.key` mounted read-only.
+healthcheck.
 
-Four things worth getting right:
+Things worth getting right:
 
-- **`.env` must be mounted writable.** The first run rewrites it, and so does
-  every token rotation. Mounted `:ro` the bridge works until the first refresh
-  and then starts failing in a way that looks like an OpenDrive outage. `.env.key`
-  is only ever read, so that one can be `:ro`.
+- **Mount the folder, not the files.** `-v "$PWD/.env:/data/.env"` does not work,
+  and until 1.2 this page said to do exactly that. The bridge replaces `.env`
+  atomically — a new file renamed over the old one — and a file that is itself a
+  mount point cannot be renamed over, so the first run could not encrypt it: the
+  password stayed on disk in the clear. Mounting `.env.key` on its own is worse
+  before the first run, because Docker creates a *directory* of that name when the
+  file does not exist yet. The daemon now refuses to start in both cases and says
+  which one, rather than running with the password unencrypted.
+- **The folder has to belong to uid 65532.** Skip the `chown` and the daemon
+  refuses to start, naming the folder. After the first run `.env` and `.env.key`
+  are mode 0600 and owned by that uid, so reading them for a backup needs `sudo`.
 - **Back up `.env` and `.env.key` together.** Either alone is useless.
-- **Keep the `/data/jobs` volume** if you care about resuming interrupted
-  transfers across restarts.
 - **`ODB_API_KEY` is required here.** The image binds `0.0.0.0`, because inside a
   container loopback means "nothing outside can reach it" — and since that is not
   loopback, the daemon insists on a key. On a host install it generates one into
   `.env` itself and you never see it. Publish the port to `127.0.0.1` as above so
   only your machine can reach it.
+- **Docker Desktop for Mac or Windows** is unmeasured for bind mounts: whether
+  fsync crosses its file-sharing layer has not been checked. Put the cache on a
+  named volume there (`-v odb-cache:/data/cache` after the folder mount), and check
+  whether your setup needs the `chown`.
 
 ---
 

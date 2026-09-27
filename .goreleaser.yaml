@@ -204,10 +204,8 @@ release:
     docker pull ghcr.io/echotreez/opendrive-bridge:{{ .Tag }}
     ```
 
-    The container takes the same two files as a host install: mount `.env`
-    writable and `.env.key` read-only. Neither is in the image.
-
-    If you turn the cache on, put it outside the container — a host directory
-    (`chown 65532` it first) or, on Docker Desktop, a named volume. A cache inside
-    the container is deleted with it, unsent files included.
+    Put `.env` in a folder, `chown -R 65532:65532` it, and mount **the folder** at
+    `/data` — not `.env` on its own, which cannot be encrypted in place and which
+    the daemon now refuses. `.env.key`, transfer state and the cache (if you turn
+    it on) all end up in that folder. Nothing is in the image.
     `docs/first-run.md` has the commands.
