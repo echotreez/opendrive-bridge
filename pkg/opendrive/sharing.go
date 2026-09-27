@@ -1,9 +1,13 @@
 package opendrive
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 )
 
 // SharingService binds the upstream sharing module (PDF §9, live spec
@@ -174,16 +178,60 @@ func (s *SharingService) ListSharedFolders(ctx context.Context, sharingID string
 // ListSharedUsers lists the users who have shared something with this account.
 //
 // GET /sharing/listsharedusers.json/{session_id}.
+//
+// With nothing shared, upstream answers 200 with a folder-listing-shaped object,
+// {"DirUpdateTime":…,"ResponseType":1}, rather than an empty array (D48) — while
+// its sibling listusers.json answers the same "nobody" with []. That object is
+// read as an empty list. Any other object is reported as an invalid response
+// naming its keys, not guessed at: the non-empty shape has still never been
+// seen on the wire.
 func (s *SharingService) ListSharedUsers(ctx context.Context) ([]SharedUser, error) {
-	var out []SharedUser
+	var raw json.RawMessage
 	if err := s.c.Do(ctx, Request{
 		Method:           http.MethodGet,
 		Path:             EndpointSharingListUsers,
 		SessionPlacement: SessionInPath,
-	}, &out); err != nil {
+	}, &raw); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return decodeSharedUsers(raw)
+}
+
+// emptyListingKeys are the only keys of D48's "nothing shared" object.
+var emptyListingKeys = map[string]bool{"DirUpdateTime": true, "ResponseType": true}
+
+func decodeSharedUsers(raw json.RawMessage) ([]SharedUser, error) {
+	op := "GET " + EndpointSharingListUsers
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return []SharedUser{}, nil
+	}
+	if trimmed[0] == '[' {
+		var out []SharedUser
+		if err := json.Unmarshal(trimmed, &out); err != nil {
+			return nil, &APIError{Kind: KindInvalidResponse, Op: op, Err: err}
+		}
+		return out, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return nil, &APIError{Kind: KindInvalidResponse, Op: op, Err: err}
+	}
+	keys := make([]string, 0, len(obj))
+	unknown := false
+	for k := range obj {
+		keys = append(keys, k)
+		if !emptyListingKeys[k] {
+			unknown = true
+		}
+	}
+	if !unknown {
+		return []SharedUser{}, nil
+	}
+	sort.Strings(keys)
+	return nil, &APIError{Kind: KindInvalidResponse, Op: op,
+		UpstreamMsg: "an object with keys " + strings.Join(keys, ", ") +
+			" where a list of shared users was expected; this shape is unrecorded (docs/discrepancies.md D48)"}
 }
 
 // ListFolderUsers lists the users a particular folder is shared with.

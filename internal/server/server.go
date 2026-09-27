@@ -236,7 +236,6 @@ func (s *Server) routes(keyRequired bool) chi.Router {
 		r.Get("/jobs/{id}", s.handleJobGet)
 		r.Delete("/jobs/{id}", s.handleJobCancel)
 
-		// Sharing (§4.4).
 		// The caching gateway (§4.4.1). Present whether or not it is enabled, so
 		// that a client can ask and get a plain answer rather than a 404.
 		r.Route("/cache", func(r chi.Router) {
@@ -247,6 +246,7 @@ func (s *Server) routes(keyRequired bool) chi.Router {
 			r.Delete("/", s.handleCacheClear)
 		})
 
+		// Sharing (§4.4).
 		r.Post("/share/link", s.handleShareCreate)
 		r.Get("/share/list", s.handleShareList)
 		r.Delete("/share", s.handleShareRevoke)

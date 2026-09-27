@@ -9,3 +9,12 @@ The success shapes in this directory are therefore **constructed** from the
 Swagger declaration and the PDF rather than recorded, and the tests that use
 them say so. They must be re-recorded against an account-owner login before the
 sharing bindings can be called verified.
+
+## Recorded from an owner login (2026-09-27)
+
+- `listsharedusers_empty.json` — `listsharedusers.json` with nothing shared: an
+  object, not `[]` (docs/discrepancies.md D48).
+- `listusers_empty.json` — `listusers.json` for an unshared folder: `[]`.
+
+The non-empty shapes (`listsharedusers.json` above among them) are still
+constructed; recording them needs a second account to share with.

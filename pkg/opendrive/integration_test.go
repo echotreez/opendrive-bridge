@@ -971,6 +971,20 @@ func TestSandboxSharing(t *testing.T) {
 
 	// From here on the account owns itself, so the real lifecycle runs.
 	scratch := fileScratch(t, ctx, c)
+
+	// The two listings need nobody else, so an owner login verifies them live
+	// even without a second account (D48: the two say "nobody" differently).
+	if users, err := sharing.ListSharedUsers(ctx); err != nil {
+		t.Errorf("owner ListSharedUsers: %v", err)
+	} else {
+		t.Logf("owner ListSharedUsers: %d users", len(users))
+	}
+	if users, err := sharing.ListFolderUsers(ctx, scratch); err != nil {
+		t.Errorf("owner ListFolderUsers on an unshared folder: %v", err)
+	} else if len(users) != 0 {
+		t.Errorf("an unshared scratch folder lists %d users", len(users))
+	}
+
 	peer := os.Getenv("ODB_TEST_SHARE_USER")
 	if peer == "" {
 		t.Skip("set ODB_TEST_SHARE_USER to a second OpenDrive account to test sharing")
