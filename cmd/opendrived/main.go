@@ -163,8 +163,19 @@ func run() error {
 	// daemon has to be reachable precisely when something is wrong with its
 	// credentials — that is when somebody runs `odctl status`.
 	if err := auth.EnsureFresh(context.Background()); err != nil {
-		log.Warn("could not resume the stored session; /v1/auth/status has the detail",
-			slog.String("error", opendrive.RedactString(err.Error())))
+		switch {
+		case errors.Is(err, opendrive.ErrNoCredentials) || auth.AuthState() == opendrive.StateNotConfigured:
+			// Nobody has signed in yet. That is the normal first start (1.3), not a
+			// fault, and the log is where a container user looks first — so it says
+			// what to do rather than sounding like something broke.
+			log.Info("not signed in yet: open the web page at /ui and sign in, or run `odctl login <username>`")
+		case auth.AuthState() == opendrive.StateReauthRequired:
+			log.Warn("OpenDrive no longer accepts the saved password: sign in again on the web page at /ui, " +
+				"or run `odctl login <username>`")
+		default:
+			log.Warn("could not resume the stored session; /v1/auth/status has the detail",
+				slog.String("error", opendrive.RedactString(err.Error())))
+		}
 	}
 
 	// The caching gateway (§3.5), when a directory was given. It is opened before
