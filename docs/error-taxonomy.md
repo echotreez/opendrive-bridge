@@ -324,6 +324,15 @@ hands back an empty archive is worse than no feature.
 delay wins over the computed backoff. This is the only form where the status code
 alone is trustworthy.
 
+Upstream's own `429` does not always send the header. The concurrent-download
+limit (D50) answers `429 "Too many downloads from same IP"` with no
+`Retry-After`; it is still `rate_limited` and retryable, and the computed backoff
+applies. Because that limit counts connections rather than requests over time,
+waiting only helps once one of the other six has finished — a retry that fires
+into a still-full budget is refused again, which is the argument for the
+bridge-wide `max_download_connections` cap in whitepaper §10.2(c) rather than a
+longer backoff.
+
 ---
 
 ## Retry policy, decided in one place

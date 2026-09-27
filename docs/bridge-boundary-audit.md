@@ -1,4 +1,4 @@
-# Boundary audit — all 48 discrepancies against the Bridge API
+# Boundary audit — all 51 discrepancies against the Bridge API
 
 P4's central obligation is one sentence: **none of the recorded upstream
 discrepancies may reach a user.** This is the line-by-line check of it, done
@@ -52,6 +52,9 @@ Nothing is allowed to be "known but unhandled".
 | D46 | upstream trims whitespace off the ends of a name, silently | the Bridge's `normalisePath` and `joinPath` trim each segment before the traversal check, so `" .. "` is refused and `"/a "` resolves to `a` |
 | D47 | an owner's `AccessUserID` is `"0"` | **stops at the SDK.** `IsAccountUser()` reads `"0"` as absent; the Bridge exposes no account-type decision |
 | D48 | `listsharedusers` says "nobody" with an object, `listusers` with `[]` | **stops at the SDK.** User-to-user sharing is not on the Bridge (`/v1/share/*` is public links, D31); the SDK reads the recorded object as empty and refuses any unrecorded shape by name |
+| D49 | one `TempLocation` has one write cursor; concurrent chunks succeed only by luck | **nothing to stop — the bridge never sends them.** The upload pipeline is sequential per file, and `parallel_chunks` has been removed from the design rather than left as a setting |
+| D50 | six concurrent downloads per IP; the seventh is a `429` without `Retry-After` | classified `rate_limited`, retryable (T15), so a transfer that meets it is retried rather than failed. The default of four job workers stays under the limit, but nothing yet caps the bridge-wide total — `max_download_connections` (§10.2(c)) is the planned fix, and until it lands a caller running more than six downloads will see slow ones, and a failed one only if the budget stays full for the whole retry allowance |
+| D51 | the plan's speed limit is per connection | not a boundary matter: it sets no error. It informs defaults (job workers, flush workers, `parallel_ranges`) |
 
 ## Disclosed in the OpenAPI document
 
