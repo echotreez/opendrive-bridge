@@ -20,11 +20,20 @@ import (
 func TestSandboxAmbiguousPermissionRefusal(t *testing.T) {
 	c, ctx := newSandboxClient(t)
 
-	_, err := c.Folders().Create(ctx, opendrive.CreateFolderParams{
+	created, err := c.Folders().Create(ctx, opendrive.CreateFolderParams{
 		Name:     fmt.Sprintf("odb-test-denied-%d", time.Now().Unix()),
 		ParentID: "0", // the account root, where this login has no rights
 	})
 	if err == nil {
+		// An owner login is allowed, so the attempt made a real folder. It has to
+		// go before the skip: this test once left one behind on every owner run.
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		id := created.FolderID.String()
+		_ = c.Folders().Trash(cleanupCtx, []string{id})
+		if rmErr := c.Folders().Remove(cleanupCtx, []string{id}, "", ""); rmErr != nil {
+			t.Errorf("the root was writable and the folder it made could not be removed: %v", rmErr)
+		}
 		t.Skip("this account can write to the account root, so there is no denial to classify")
 	}
 

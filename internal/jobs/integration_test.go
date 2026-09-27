@@ -409,9 +409,10 @@ func TestSandboxJobsReportTheClassifiersVerdict(t *testing.T) {
 
 	// The account root is the one place this login genuinely may not write.
 	src, data := payload(t, 4096)
+	name := fmt.Sprintf("odb-denied-%d.bin", time.Now().Unix())
 	job, err := e.Submit(jobs.Spec{
 		Kind: jobs.KindUpload, LocalPath: src, FolderID: "0",
-		Name: fmt.Sprintf("odb-denied-%d.bin", time.Now().Unix()), Size: int64(len(data)),
+		Name: name, Size: int64(len(data)),
 	})
 	if err != nil {
 		t.Fatalf("submit: %v", err)
@@ -419,6 +420,9 @@ func TestSandboxJobsReportTheClassifiersVerdict(t *testing.T) {
 
 	done := waitTerminal(t, e, job.ID, 3*time.Minute)
 	if done.State == jobs.StateSucceeded {
+		// An owner login is allowed, so the upload stored a real file in the root.
+		// Remove it before skipping: this test once left one behind every owner run.
+		removeRootFileNamed(t, c, name)
 		t.Skip("this account can write to the account root, so there is no denial to report")
 	}
 	if done.Error == nil {
@@ -444,4 +448,34 @@ func TestSandboxJobsReportTheClassifiersVerdict(t *testing.T) {
 			t.Logf("could not confirm the record is gone: %v", err)
 		}
 	}
+}
+
+// removeRootFileNamed deletes a file the test made in the account root by
+// accident of running as an owner. It finds it by name because a succeeded job
+// no longer carries the upstream id of what it made.
+func removeRootFileNamed(t *testing.T, c *opendrive.Client, name string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	// D44: a just-stored file can be missing from a listing for a little while.
+	for attempt := 0; attempt < 6; attempt++ {
+		if attempt > 0 {
+			time.Sleep(4 * time.Second)
+		}
+		root, err := c.Folders().List(ctx, "0", opendrive.ListOptions{})
+		if err != nil {
+			continue
+		}
+		for _, f := range root.Files {
+			if f.Name == name {
+				id := f.FileID.String()
+				_ = c.Files().Trash(ctx, []string{id})
+				if err := c.Files().Remove(ctx, []string{id}, "", ""); err != nil {
+					t.Errorf("the root was writable and %s could not be removed: %v", name, err)
+				}
+				return
+			}
+		}
+	}
+	t.Errorf("the upload succeeded but %s never appeared in the root listing; it may remain", name)
 }
