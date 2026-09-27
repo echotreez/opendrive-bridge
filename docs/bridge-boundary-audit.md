@@ -1,4 +1,4 @@
-# Boundary audit — all 52 discrepancies against the Bridge API
+# Boundary audit — all 53 discrepancies against the Bridge API
 
 P4's central obligation is one sentence: **none of the recorded upstream
 discrepancies may reach a user.** This is the line-by-line check of it, done
@@ -56,6 +56,7 @@ Nothing is allowed to be "known but unhandled".
 | D50 | six concurrent downloads per IP; the seventh is a `429` without `Retry-After` | classified `rate_limited`, retryable (T15), so a transfer that meets it is retried rather than failed. The default of four job workers stays under the limit, but nothing yet caps the bridge-wide total — `max_download_connections` (§10.2(c)) is the planned fix, and until it lands a caller running more than six downloads will see slow ones, and a failed one only if the budget stays full for the whole retry allowance |
 | D51 | the plan's speed limit is per connection | not a boundary matter: it sets no error. It informs defaults (job workers, flush workers, `parallel_ranges`) |
 | D52 | an upload record has no size and no hash until it is closed | **stopped in the job engine.** `reclaim` deletes only a record `file/info` shows to be empty, so an upload that finished just before a crash, a cancel or a failed D44 wait is kept — and recovery reports it as succeeded — instead of being deleted without a trash step |
+| D53 | a listing refused as "Permission denied" once, under load | **not stopped yet.** Classified `upstream_error`, not retryable, so `/v1/ls` would report a transient refusal as a denial. Seen once and not reproduced; recorded, with an open task, rather than guessed at |
 
 ## Disclosed in the OpenAPI document
 

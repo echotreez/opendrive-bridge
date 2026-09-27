@@ -1341,3 +1341,26 @@ with the expected size (and hash, when the job knows it) is the finished file, a
 recovery records the job as succeeded; anything else, or a record it cannot check,
 is kept. Covered by `internal/jobs/durability_test.go`, and on the wire by
 `TestSandboxAnUnclosedRecordHasNoSizeOrHash`, which keeps the premise honest.
+
+## D53 — a listing refused with "Permission denied", once, under load {#d53}
+
+**Where:** `GET /folder/list.json` on a folder the login had just created and written to.
+**Seen:** once, 2026-09-27, in a full live-suite run under the read-only-root
+account user; `TestSandboxJobsStopReclaimsInFlightRecords` failed on it after
+125 s. Not reproduced: the same test passed alone three times in a row, taking
+about 1.3 s each.
+
+```
+GET /folder/list.json → 403 "List subdir failed. Permission denied"
+```
+
+It is the D39/D40 shape — a refusal worded as a permission problem for something
+the login is allowed to do — on a **read**, which neither of those covered. The
+classifier reports it as `upstream_error`, not retryable, which is right for a
+real denial and wrong for this. The test's own cleanup met the same window, and
+left its (empty) scratch folder behind; it was removed by hand.
+
+**Not yet settled:** whether a listing refusal can be told apart from a real one
+the way D40's write probe does it, and what caused the 125 s before the refusal.
+Recorded so the next occurrence has something to be compared with, rather than
+being re-run until it passes.
