@@ -182,8 +182,9 @@ release:
 
     ### No longer supported
 
-    - **Windows.** 1.2 ships for macOS (Apple silicon and Intel) and Linux
-      (x86-64 and ARM64) only. On Windows, run the container.
+    - **Windows.** 1.2 ships for macOS on Apple silicon and for Linux (x86-64
+      and ARM64). On Windows, run the container. There is no Intel Mac archive
+      either, as in 1.1; `go build ./cmd/...` works there.
   footer: |
     ### Checking what you downloaded
 
