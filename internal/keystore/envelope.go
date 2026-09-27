@@ -15,11 +15,11 @@ import (
 	"strings"
 )
 
-// The encrypted .env is written in OpenSSL's own `enc` format so that a user can
+// The credentials are written in OpenSSL's own `enc` format so that a user can
 // read their credentials back without this program:
 //
 //	openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -a \
-//	  -pass file:.env.key -in .env
+//	  -pass file:<the key line of credentials.key>
 //
 // That property is the point of the format choice, and it cost something. The
 // whitepaper asked for AES-256-GCM *and* for the file to be readable by
@@ -42,7 +42,7 @@ const (
 	// shippedIterations is deliberately far above OpenSSL's default of 10000.
 	// The cost is paid once per daemon start, and the key file is 32 random
 	// bytes rather than a human passphrase, so this is belt and braces — but a
-	// user who copies a weak passphrase into .env.key gets the benefit.
+	// weak key would still get the benefit.
 	//
 	// It has to be passed to openssl explicitly (-iter 600000). Documented
 	// everywhere the command appears.
@@ -66,7 +66,7 @@ var pbkdf2Iterations = shippedIterations
 var errNotEncrypted = errors.New("keystore: this is not an encrypted file")
 
 // seal encrypts plaintext exactly as `openssl enc -aes-256-cbc -pbkdf2 -a` does,
-// and returns the base64 armoured form. Armoured because .env is a file people
+// and returns the base64 armoured form. Armoured because credentials.key is a file people
 // open in editors and paste into issues; raw ciphertext invites a text editor to
 // corrupt it silently.
 func seal(plain, password []byte) ([]byte, error) {
@@ -129,7 +129,7 @@ func open(armoured, password []byte) ([]byte, error) {
 }
 
 // isEncrypted reports whether content is the armoured form. It is how the first
-// run tells a freshly copied .env.example from a file this program has already
+// import tells a plaintext 1.2 .env from a file this program has already
 // sealed.
 func isEncrypted(content []byte) bool {
 	raw, err := base64.StdEncoding.DecodeString(stripSpace(string(content)))

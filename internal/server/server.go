@@ -134,18 +134,9 @@ func WithDataCache(dc *datacache.DataCache) Option {
 
 // New builds the daemon.
 //
-// It refuses to start a non-loopback listener unless the user configured an API
-// key. That refusal is the point: a bridge holds a password that unlocks
-// somebody's entire cloud storage, and a daemon that binds 0.0.0.0 hands the
-// address to the network. Failing to start is recoverable in a way that a silent
-// exposure is not.
-//
-// A key the daemon generated does not satisfy it. It would be no weaker
-// cryptographically, and it would be worse for the person: the key lives
-// encrypted inside .env, nothing prints it (§9.4 forbids logging it), and the
-// result is a service reachable from the network that answers only to a secret
-// its owner has to go and decrypt. Exposing the bridge should be a thing
-// somebody did on purpose, with a key they chose.
+// A non-loopback listener without an API key starts, with a warning in the log
+// that says what is exposed and how to close it (1.3; see Config.APIKeyConfigured
+// for why the refusal it replaced was dropped).
 func New(cfg Config, auth Auth, opts ...Option) (*Server, error) {
 	if auth == nil {
 		return nil, errors.New("the bridge needs an authenticator")

@@ -56,10 +56,15 @@ paths:
       operationId: login
       summary: Sign in and store the credentials.
       description: |
-        The credential store is checked before the password is: signing in
-        against a store that cannot hold the result would look like success and
-        then forget everything on restart. When the store is unreadable this
-        answers `keystore_unavailable` and makes no request to OpenDrive at all.
+        This is how the bridge gets its account: there is nothing to prepare
+        beforehand. On success the daemon writes the credentials, encrypted, to
+        credentials.key and keeps itself signed in across restarts. It is also
+        the way back when OpenDrive stops accepting the saved password
+        (`reauth_required`), and it replaces an unreadable credentials.key.
+
+        A sign-in that succeeded upstream but could not be saved answers
+        `keystore_unavailable` (503) rather than 200: it would otherwise look
+        fine now and be gone after the next restart.
       requestBody:
         required: true
         content:
@@ -716,9 +721,11 @@ components:
       type: http
       scheme: bearer
       description: |
-        Optional on loopback, where the operating system already decides who may
-        connect. Mandatory on any other address — the daemon refuses to start
-        without one.
+        Optional (1.3). When the daemon is started with an API key (--api-key or
+        ODB_API_KEY), every request must carry it, loopback included. Without
+        one the API answers whatever can reach the listen address — loopback by
+        default, and a port published to 127.0.0.1 in the container — and the
+        daemon logs a warning if it listens beyond loopback.
 
   parameters:
     Path:

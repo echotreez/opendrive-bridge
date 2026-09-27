@@ -147,7 +147,7 @@ func NewRootCommand(opts *Options) *cobra.Command {
 		"print raw JSON instead of a table")
 	root.PersistentFlags().BoolVar(&opts.Direct, "direct", false,
 		"run the bridge inside this command instead of talking to a daemon; "+
-			"uses the credentials already in your keychain")
+			"uses the sign-in already saved in credentials.key")
 
 	root.AddCommand(
 		newLoginCommand(opts),

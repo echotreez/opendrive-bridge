@@ -89,11 +89,11 @@ func Open(cfg Config) (*DataCache, error) {
 	// that just created it. 0700 is the tightest mode a usable directory has, and
 	// it is the same mode §9.2.2 uses for the credential file's directory.
 	if err := os.Chmod(cfg.Dir, 0o700); err != nil {
-		// The usual cause is a directory owned by somebody else — most often a host
-		// directory bind-mounted into a container without being chowned first,
-		// because the image runs as uid 65532 and the host created the folder as
-		// the host user or as root. "operation not permitted" is accurate and gives
-		// the reader nothing to do, so the fix goes in the message.
+		// The usual cause is a directory owned by somebody else, which a bridge not
+		// running as root cannot re-mode. (Until 1.3 the image ran as uid 65532 and
+		// this was every unchowned bind mount; it runs as root now.) "operation not
+		// permitted" is accurate and gives the reader nothing to do, so the fix goes
+		// in the message.
 		if errors.Is(err, os.ErrPermission) {
 			return nil, fmt.Errorf("datacache: cannot use %s: the bridge runs as uid %d and has to "+
 				"own its cache directory, but this one belongs to someone else. On the host, "+

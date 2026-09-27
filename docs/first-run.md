@@ -9,38 +9,31 @@ server that runs on your own machine and talks to OpenDrive for you; `odctl` is
 the command you type. They run from wherever you unpack them — nothing is
 installed system-wide, and nothing on this page needs `sudo`.
 
-**How signing in works.** You write your OpenDrive username and password into a
-file called `.env`, once, in the clear. The first time you start the daemon it
-encrypts that file, puts the key in `.env.key` beside it, and the plaintext is
-gone. After that the bridge keeps itself signed in and you never type the
-password again.
+**How signing in works.** There is nothing to prepare. Start the bridge, then sign
+in once — on its web page at `http://127.0.0.1:9750/ui`, or with
+`odctl login you@example.com`. The bridge encrypts what you typed into one file,
+`credentials.key`, beside the programs, and keeps itself signed in from then on:
+restarting it asks for nothing. If you change your OpenDrive password, the bridge
+notices that OpenDrive no longer accepts the old one and asks you to sign in again
+— on the page or with `odctl login` — without a restart.
 
-**What that protects you from, and what it does not.** It protects you from
-committing your password to git, from syncing it to a cloud backup in the clear,
-from someone reading it over your shoulder, and from it turning up in a log or a
-process listing. It does **not** protect you from someone who can already read
-your files as you — `.env.key` sits next to `.env`, so they would get both. That
-is the price of a daemon that restarts by itself without anybody typing a
-passphrase. On a shared machine, use full-disk encryption and a separate account
-rather than relying on this.
+**What that protects you from, and what it does not.** The password in
+`credentials.key` is encrypted, so it is not readable over your shoulder, in git,
+in a cloud backup's plain text, in a log or in a process listing. The key that
+decrypts it is in the same file, because a bridge that restarts by itself cannot
+ask anybody for a passphrase — so it does **not** protect you from someone who can
+already read your files as you. On a shared machine, use full-disk encryption and
+a separate account rather than relying on this.
 
-Back up `.env` and `.env.key` together, or neither is any use.
+Back up `credentials.key` if you do not want to sign in again after restoring.
+Losing it costs nothing else: sign in again.
 
 Pick your section:
 
 - [macOS](#macos) — **read the quarantine part first, it will stop you otherwise**
 - [Linux](#linux)
-- [The cache](#the-cache-if-you-turn-it-on) — optional, and off until you ask for it
-- [Docker](#docker) — the same two files, mounted in
-
-Once it is running, `http://127.0.0.1:9750/ui` shows the same things `odctl` does in
-a browser: the account, the transfers in progress, and the cache if you have turned
-it on. It is part of the daemon; there is nothing to install and it fetches nothing
-from the internet.
-
-There is also a [local cache](#the-cache-if-you-turn-it-on) you can switch on later.
-It is **off** unless you ask for it, so you can ignore it today — but read that
-section before you turn it on, because it changes what a finished upload means.
+- [Docker](#docker) — `docker compose up -d`, then sign in
+- [The cache](#the-cache-if-you-turn-it-on) — optional, and off on a host until you ask for it
 
 For running it permanently in the background, see
 [deployment.md](./deployment.md). This page is only about the first five
@@ -60,7 +53,7 @@ sign that anything is wrong with the file. macOS marks *everything* downloaded
 from the internet and refuses anything not signed with a paid Apple certificate.
 
 ```bash
-# 1. Download the darwin_arm64 archive (Apple Silicon) from
+# 1. Download the darwin_arm64 archive (Apple silicon) from
 #    https://github.com/echotreez/opendrive-bridge/releases
 
 # 2. Check it is the file we published, before you trust it:
@@ -68,7 +61,7 @@ shasum -a 256 -c opendrive-bridge_*_SHA256SUMS --ignore-missing
 # expect: opendrive-bridge_<version>_darwin_arm64.tar.gz: OK
 
 # 3. Unpack. This creates a folder called opendrive-bridge/ — keep it
-#    somewhere permanent, because your credentials will live in it.
+#    somewhere permanent, because your sign-in will be kept in it.
 tar xzf opendrive-bridge_*_darwin_arm64.tar.gz
 cd opendrive-bridge
 
@@ -77,16 +70,9 @@ xattr -d com.apple.quarantine ./opendrived ./odctl
 ```
 
 If step 4 says `No such xattr`, the mark was not there and everything is fine.
+Intel Macs are not supported.
 
-Releases built when a signing certificate was available are signed and notarised
-and need none of this.
-
-### Then: sign in and upload something
-
-```bash
-cp .env.example .env
-$EDITOR .env          # put your OpenDrive username and password in
-```
+### Then: start it, sign in, and upload something
 
 Start the daemon. Leave this window open:
 
@@ -94,17 +80,15 @@ Start the daemon. Leave this window open:
 ./opendrived
 ```
 
-That first start encrypts `.env`, creates `.env.key` beside it, and generates the
-bridge's own API key. Your password is no longer readable on disk.
-
-In a second terminal, in the same folder:
+Open `http://127.0.0.1:9750/ui` and sign in — or, in a second terminal in the same
+folder:
 
 ```bash
+./odctl login you@example.com    # asks for the password; it stays out of your shell history
 ./odctl status                   # Signed in as you@example.com.
 ./odctl ls /                     # your OpenDrive, from the top
 echo "hello from my Mac" > hello.txt
-./odctl up hello.txt /hello.txt
-./odctl ls /
+./odctl up hello.txt /hello.txt  # Uploaded to /hello.txt. It is on OpenDrive.
 ./odctl down /hello.txt back.txt
 ```
 
@@ -134,21 +118,14 @@ for you if you pass `--modify-shell-profile`.
 sha256sum --check --ignore-missing opendrive-bridge_*_SHA256SUMS
 tar xzf opendrive-bridge_*_linux_*.tar.gz
 cd opendrive-bridge
-
-cp .env.example .env
-$EDITOR .env          # put your OpenDrive username and password in
-```
-
-Start it once, in one terminal:
-
-```bash
 ./opendrived
 ```
 
-And in another, in the same folder:
+Then open `http://127.0.0.1:9750/ui` and sign in, or in another terminal, in the
+same folder:
 
 ```bash
-./odctl status
+./odctl login you@example.com
 ./odctl ls /
 echo "hello from Linux" > hello.txt
 ./odctl up hello.txt /hello.txt
@@ -172,11 +149,75 @@ sudo loginctl enable-linger $USER
 
 ---
 
+## Docker
+
+Put `deploy/docker/docker-compose.yaml` (from the archive, or the repository) in a
+folder of its own, and:
+
+```bash
+docker compose up -d
+```
+
+Then open `http://127.0.0.1:9750/ui` and sign in. That is all — there is no file to
+create, no folder to prepare, no `chown` and no key to generate. Docker creates
+`./data` beside the compose file on the first start; the bridge keeps everything in
+it — `credentials.key`, transfer state in `jobs/`, and the cache in `cache/` — so it
+survives `docker compose down`, image upgrades and new containers.
+
+If you change your OpenDrive password, the page asks you to sign in again. Nothing
+needs restarting or recreating.
+
+From the terminal instead of the page:
+
+```bash
+docker compose exec opendrive-bridge odctl login you@example.com
+docker compose exec opendrive-bridge odctl status
+```
+
+A few things worth knowing:
+
+- **The port is published to `127.0.0.1` only**, so only this machine can reach the
+  bridge, and it asks for no API key. If you publish it more widely, set
+  `ODB_API_KEY` in the compose file so that every caller must send it; the bridge
+  logs a warning when it listens beyond loopback without one.
+- **The cache is on, in write-back mode.** An upload made through the bridge's API is
+  answered as soon as the file is in `./data/cache`, and sent to OpenDrive in the
+  background. For that while `./data` is the only copy — which is why it is on
+  the host and not in the container. Before you stop the container or move `./data`:
+
+  ```bash
+  docker compose exec opendrive-bridge odctl cache status
+  ```
+
+  The last line says whether it is safe. `docker compose stop` gives the bridge
+  five minutes to finish on its own, and names anything it could not.
+- **The container runs as root**, as containers ordinarily do, so on Linux the files
+  in `./data` belong to root; reading them for a backup takes `sudo`.
+- **One bridge per `./data`.** On one Linux machine a second container on the same
+  folder refuses to start. Where each container is its own virtual machine — Apple's
+  `container`, and possibly Docker Desktop — that lock does not reach across, and
+  running one per folder is up to you.
+- **`odctl up` and `odctl down` cannot move files through a bridge in a container**:
+  they hand it a path on your machine, which the container cannot see. Use the API's
+  `PUT /v1/upload/stream` and `GET /v1/download/stream` for now.
+- **On Docker Desktop**, whether fsync crosses into the host through a bind mount
+  has not been measured, and the cache's guarantees rest on it. The compose file
+  has a commented line that keeps the cache on a named volume instead.
+- **On a Mac with Apple's `container`** (measured with 1.2.0): an upload accepted by
+  the cache, followed at once by `container kill --signal KILL`, was sent after the
+  next start and arrived byte for byte.
+
+Is it safe to stop? `docker compose exec opendrive-bridge odctl cache status`. If
+something is still waiting, `... odctl cache flush --wait` sends it now.
+
+---
+
 ## The cache, if you turn it on
 
-You do not need this today. It is off unless you give the daemon a directory for it,
-and everything above works without it. Read this before you switch it on, though,
-because it changes what a finished upload means.
+On a host the cache is off unless you give the daemon a directory for it, and
+everything above works without it. (The Docker compose file turns it on, into
+`./data/cache`.) Read this before you switch it on, because it changes what a
+finished upload means.
 
 ```bash
 ./opendrived --cache-dir ./cache
@@ -227,165 +268,36 @@ Three more things worth knowing:
 - **It never throws away a file to make room.** If it runs out of space for things it
   has not uploaded yet, it refuses new writes and says so, rather than discarding
   something OpenDrive does not have.
-- **Nothing in the cache directory is encrypted.** `.env` is; this is not. It holds
-  your files exactly as they are, protected by the directory's permissions (the
-  bridge sets it so only your account can read it) and by whatever your disk
+- **Nothing in the cache directory is encrypted.** `credentials.key` is; this is not.
+  It holds your files exactly as they are, protected by the directory's permissions
+  (the bridge sets it so only its own account can read it) and by whatever your disk
   provides. If that is not enough for what you work with, leave the cache off or put
   it on an encrypted volume.
-- **In a container, put it outside the container** — a host directory, or a named
-  volume on Docker Desktop. See the warning at the top of the Docker section below;
-  this is the one place where getting it wrong loses data.
+- **In a container, keep it outside the container** — the compose file puts it in
+  `./data/cache` on the host. This is the one place where getting it wrong loses
+  data.
 
 If you would rather keep the faster reads and none of the above,
-`--cache-write-back=false` sends writes straight to OpenDrive as they always were.
+`--cache-write-back=false` (or `ODB_CACHE_WRITE_BACK=false`) sends writes straight
+to OpenDrive as they always were.
 
 [deployment.md](./deployment.md#5-the-local-cache) has the rest.
-
----
-
-## Docker
-
-> ### Read this first: where the cache lives
->
-> If you turn the cache on (`ODB_CACHE_DIR`) **and leave write-back on**, the
-> bridge answers an upload as soon as the file is on its own disk, and uploads it
-> to OpenDrive in the background. For those few seconds or minutes, **the bridge
-> is the only place that file exists.**
->
-> A container's own filesystem is thrown away when the container is. `docker rm`,
-> `docker compose down`, upgrading the image — all routine, and all of them would
-> take unsent files with them, after you had been told they were stored.
->
-> So: **put the cache in a directory on the host**, mounted into the container,
-> as the command below and `deploy/docker/docker-compose.yaml` both do — it is
-> `data/cache`, inside the one folder the container keeps everything in. If the
-> container dies part-way, starting it again replays the cache's journal from
-> that directory and sends whatever had not gone up. Docker's own clean-up
-> commands (`docker compose down -v`, `docker volume prune`) cannot touch it, and
-> you can see what is in it.
->
-> On **Docker Desktop for Mac or Windows**, use a named volume
-> (`-v odb-cache:/data/cache`) instead for now: a host directory there goes through
-> the VM's file-sharing layer, and whether that honours fsync has not been measured.
->
-> If you would rather not think about it, set `ODB_CACHE_WRITE_BACK=false`.
-> Uploads then wait for OpenDrive, as they always did, and nothing is ever held
-> here that OpenDrive does not have.
-
-The container keeps **everything in one folder**, the same as a host install:
-`.env`, the `.env.key` the first run makes, transfer state and the cache. You
-prepare `.env` exactly as you would on a laptop, put it in that folder, and mount
-**the folder** — never `.env` on its own.
-
-```bash
-mkdir -p opendrive-bridge/data/cache && cd opendrive-bridge
-$EDITOR data/.env     # two lines: ODB_USERNAME=you@example.com and ODB_PASSWORD=…
-
-# The folder has to belong to the user the image runs as (uid 65532).
-sudo chown -R 65532:65532 data
-
-# The key odctl will need to talk to it. Keep this terminal, or keep the value.
-export ODB_API_KEY="$(openssl rand -hex 32)"
-
-docker run -d --name opendrive-bridge \
-  -p 127.0.0.1:9750:9750 \
-  -e ODB_API_KEY \
-  -e ODB_CACHE_DIR=/data/cache \
-  -v "$PWD/data:/data" \
-  ghcr.io/echotreez/opendrive-bridge:1.2
-```
-
-The first start rewrites `data/.env` encrypted and creates `data/.env.key` beside
-it — on your machine, through the mount. Nothing is baked into the image. Leave
-out `ODB_CACHE_DIR` and the cache stays off.
-
-On Docker Desktop, put the cache on a named volume instead by adding
-`-v odb-cache:/data/cache` after the folder mount (see the box above).
-
-**On a Mac with Apple's `container`** (measured with 1.2.0): the same command works
-with `container run` in place of `docker run`, and **without** the `sudo chown` —
-the files the bridge writes appear on the Mac as yours. An upload accepted with a
-202, followed at once by `container kill --signal KILL`, was re-sent after
-`container start` and arrived byte for byte. Two limits, both measured:
-
-- `odctl up` and `odctl down` cannot move files through a bridge in a container:
-  they hand the bridge a path on your Mac, which it cannot see. Use the REST
-  endpoints `PUT /v1/upload/stream` and `GET /v1/download/stream` for now.
-- **The one-bridge-per-folder lock does not work across containers here.** Each
-  container is its own virtual machine with its own kernel, and a second
-  container on the same folder started as if the first were not there. Run one
-  container per folder, and check with `container ls` before starting another.
-
-`deploy/docker/docker-compose.yaml` is the same thing written down, with a
-healthcheck.
-
-Things to get right:
-
-- **Mount the folder, not the file.** `-v "$PWD/.env:/data/.env"` looks like it
-  should work and does not: the bridge replaces `.env` with an encrypted copy,
-  and a file that is mounted on its own cannot be replaced. Earlier versions of
-  this page said to do it that way, and the result was a container that ran with
-  your password still unencrypted on disk. The bridge now refuses to start
-  instead, and says so.
-- **Skip the `chown` and the bridge refuses to start**, naming the folder. It
-  will not quietly run without somewhere to keep its credentials or its cache.
-- **`ODB_API_KEY` is required here** and only here. The image listens on
-  `0.0.0.0`, because inside a container loopback means "nothing can reach it", and
-  a non-loopback address makes the daemon insist on a key. On your own machine it
-  generates one into `.env` and you never see it.
-- **Back up `data/.env` and `data/.env.key` together.** Either one alone is
-  useless. After the first run they belong to uid 65532, so copying them takes
-  `sudo`.
-- **One bridge per folder.** The bridge locks its cache directory, so a second
-  container — or a bridge on the host — pointed at the same folder refuses to
-  start, rather than two of them writing one journal and losing files between
-  them. The lock is released when the holder exits, however it exits, so a crash
-  never leaves the directory stuck. It works between processes that share a
-  kernel — containers and the host on one Linux machine — and **not** between
-  containers that are each their own virtual machine (Apple's `container`, and
-  possibly Docker Desktop), where making sure only one runs is up to you.
-- **The cache is not encrypted.** `.env` is; `data/cache` is not. It holds your
-  files exactly as they are, protected only by the directory's permissions and by
-  whatever the disk underneath gives you. The bridge sets the directory to 0700 —
-  readable by nobody but the account it runs as — and that is the whole of it.
-
-### Is it safe to stop the container?
-
-```bash
-docker exec opendrive-bridge /usr/local/bin/odctl cache status
-```
-
-The last line answers it in words. If something is still waiting:
-
-```bash
-docker exec opendrive-bridge /usr/local/bin/odctl cache flush --wait
-```
-
-`docker stop` sends SIGTERM, and the daemon uses it to finish uploading before it
-exits. If it runs out of time it writes one log line per file it could not
-finish, naming each one, so nothing disappears quietly.
-
-Then, from your own machine:
-
-```bash
-export ODB_ADDR=127.0.0.1:9750
-odctl ls /            # ODB_API_KEY is already set in this terminal
-```
 
 ---
 
 ## When something goes wrong
 
 `odctl status` answers without touching the network, so it works even when
-OpenDrive does not, and it will say which situation you are in:
+OpenDrive does not, and it will say which situation you are in. The web page says
+the same things next to its sign-in form.
 
 | what it says | what to do |
 |---|---|
-| Not signed in yet | put your username and password in `.env` and start the daemon once |
+| Not signed in yet | sign in: on the web page, or `odctl login you@example.com` |
 | Signed in as … | nothing; it is working |
-| Your saved password is no longer accepted | you changed it on the website; put the new one in `.env` and restart |
+| Your saved password is no longer accepted | you changed it on the website; sign in again with the new one |
 | OpenDrive is asking for a captcha | sign in once at opendrive.com in a browser, then retry |
-| The bridge cannot reach its credential store | `.env.key` is missing, or `.env` cannot be decrypted with it |
+| The bridge cannot read its saved sign-in | `credentials.key` is damaged or unreadable; sign in again to replace it |
 
 A transfer that exits **7** was refused by OpenDrive for good — most often an
 account that is not allowed to write where it was asked to. Retrying will not
@@ -395,9 +307,10 @@ help; the account's administrator controls it.
 listening somewhere other than where `odctl` is looking — check `--addr` and
 `ODB_ADDR`.
 
-**If you lose `.env.key`**, the credentials in `.env` cannot be read back. It is
-not a password you can reset. Delete both files, copy `.env.example` to `.env`
-again and sign in once more; nothing in your OpenDrive account is affected.
+**Coming from 1.1 or 1.2?** Nothing to do. If the folder still has the `.env` (and
+`.env.key`) those versions used, the first start reads them into `credentials.key`
+and says so in its log. The old files are then unused; delete them when you are
+satisfied.
 
 Every message this program prints is meant to tell you what to do next. If one
 does not, that is a bug worth reporting.
@@ -405,7 +318,6 @@ does not, that is a bug worth reporting.
 ## Where to go next
 
 - [deployment.md](./deployment.md) — running it in the background permanently, on
-  macOS and Linux and in containers, what the two credential files are, and the
-  cache in full
+  macOS and Linux and in containers, and the cache in full
 - [bridge-openapi.yaml](./bridge-openapi.yaml) — the HTTP API, if you want to
   drive it from your own programs rather than from `odctl`

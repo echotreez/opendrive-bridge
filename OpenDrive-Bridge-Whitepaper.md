@@ -315,7 +315,7 @@ opendrive-bridge/
 listen: 127.0.0.1:9750        # 默认只绑 loopback
 auth_mode: oauth2             # oauth2 | session
 persist_password: true        # v1.1: 默认存密码以实现永久无缝(§2.2/§9.2)
-env_file: .env                # v1.2: 唯一凭证来源;密钥在 .env.key
+credentials_file: credentials.key  # v1.3: 登录时由服务自己写入;无需预先准备
 upstream_base: https://dev.opendrive.com/api/v1
 transfers:
   chunk_size_mb: 50           # 官方样本值;可调 8–100
@@ -624,58 +624,47 @@ Go 代码仍然可以交叉编译到 Windows——只是不再构建、不再测
 
 ### 8.2 主机部署 Host Deployment(v1.2 改为原地运行)
 
-**不再复制二进制到 `/usr/local/bin`。** 程序就留在用户解包出来的 `opendrive-bridge/` 目录里运行,原因有三:免 sudo、卸载即删目录、`.env` 与二进制同目录便于用户自行维护和备份。
+**不再复制二进制到 `/usr/local/bin`。** 程序就留在用户解包出来的 `opendrive-bridge/` 目录里运行,原因有三:免 sudo、卸载即删目录、凭证文件 `credentials.key` 与二进制同目录便于用户备份。
 
-> **本节只约束主机部署(Linux / macOS),不约束容器。** 容器的情形恰好相反:镜像本身就是不可变的部署单元,由 Dockerfile 一次构建、随时可丢弃重建,既没有 sudo 顾虑也没有"卸载残留"问题。因此容器内**仍按 FHS 把二进制放在 `/usr/local/bin`**,结构更清晰;唯独 `.env` 与 `.env.key` 例外——它们是运行时挂载进来的用户数据,绝不进镜像。详见 §8.3。
+> **本节只约束主机部署(Linux / macOS),不约束容器。** 容器的情形恰好相反:镜像本身就是不可变的部署单元,由 Dockerfile 一次构建、随时可丢弃重建,既没有 sudo 顾虑也没有"卸载残留"问题。因此容器内**仍按 FHS 把二进制放在 `/usr/local/bin`**,结构更清晰;唯独 `/data` 例外——凭证、传输状态与缓存都在这里,是运行时挂载进来的用户数据,绝不进镜像。详见 §8.3。
 
 `odctl daemon install` 的行为改为:
 
 1. 以**解包目录的绝对路径**写服务单元(systemd / launchd)。服务管理器不读 shell 配置,因此单元里必须是绝对路径,不能依赖 PATH。
 2. 打印一行 `export PATH="$PATH:<解包目录>"` 供用户加入 `~/.zshrc` 或 `~/.bashrc`;**默认只打印不写入**,加 `--modify-shell-profile` 才代写,并在写入前备份、写入内容用标记块包裹以便 `daemon uninstall` 精确移除。理由:擅自改用户的 shell 配置是侵入行为,而且写错会让用户开不了新终端。
-3. `daemon uninstall` 卸载服务单元、移除标记块,但**不删除 `.env` 与 `.env.key`**——凭证的删除必须是用户显式动作(`odctl logout` 或手工删文件)。
+3. `daemon uninstall` 卸载服务单元、移除标记块,但**不删除 `credentials.key`**——凭证的删除必须是用户显式动作(`odctl logout` 或手工删文件)。
 
-- **Linux**: `deploy/systemd/opendrived.service`,用户级 (`systemctl --user`) 为默认,含 `ProtectSystem=strict`、`NoNewPrivileges=yes` 等硬化指令。注意 `DynamicUser=yes` 与"读取用户目录下的 `.env`"不兼容,v1.2 起改为以调用用户身份运行。
+- **Linux**: `deploy/systemd/opendrived.service`,用户级 (`systemctl --user`) 为默认,含 `ProtectSystem=strict`、`NoNewPrivileges=yes` 等硬化指令。注意 `DynamicUser=yes` 与"写入用户目录下的 `credentials.key`"不兼容,v1.2 起改为以调用用户身份运行。
 - **macOS**: launchd plist 装载到 `~/Library/LaunchAgents`。
 - 两平台统一由 `odctl daemon start|stop|status` 管理,屏蔽差异。
 
-### 8.3 Docker 部署
+### 8.3 Docker 部署(v1.3 重写——`docker compose up -d` 即可)
 
-`deploy/docker/Dockerfile`:multi-stage,builder 用官方 golang 镜像,runtime 用 `gcr.io/distroless/static`(或 `scratch` + CA 证书),非 root 用户运行,最终镜像 < 25 MB。
+`deploy/docker/Dockerfile`:multi-stage,builder 用官方 golang 镜像,runtime 用 `gcr.io/distroless/static`,**以 root 运行**(v1.3),最终镜像 < 25 MB。
+
+**用户侧只有一步:**
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/opendrive-bridge:1.0.0 --push .
-docker run -d -p 127.0.0.1:9750:9750 \
-  -v odb-state:/data -e ODB_LISTEN=0.0.0.0:9750 \
-  <registry>/opendrive-bridge:1.0.0
+docker compose up -d          # 使用 deploy/docker/docker-compose.yaml
 ```
 
-容器与主机走**同一条**凭证路径(§9.2 的加密 `.env`),不再有"容器专用后端"这个概念。
-
-**但容器不遵循 §8.2 的"原地运行"约定(v1.2 明确)**。两者的差异是本质的:
+然后打开 `http://127.0.0.1:9750/ui` 登录(或 `docker compose exec opendrive-bridge odctl login <用户名>`)。**不需要**事先建 `.env`、建目录、`chown`、生成 API key。Docker 在首次启动时自动创建 compose 文件旁的 `./data`,服务把一切都放在里面:登录后写入的 `credentials.key`、`jobs/` 传输状态、`cache/` 缓存。`docker compose down`、镜像升级、重建容器后依然保持登录;OpenDrive 密码变更时网页会要求重新登录,无需重启或重建容器。
 
 | | 主机安装 | 容器 |
 |---|---|---|
 | 部署单元 | 用户解压的一个目录 | 镜像本身 |
-| 为什么原地运行 | 免 sudo、卸载即删目录、便于用户维护备份 | 三条理由都不成立:镜像不可变、丢弃重建即"卸载" |
-| 二进制位置 | 解包目录 | **`/usr/local/bin`(FHS,结构更清晰)** |
-| 凭证位置 | 解包目录内的 `.env` / `.env.key` | `/data/.env` / `/data/.env.key`,**挂载整个目录**(见下) |
-| 缓存位置 | 解包目录内的 `./cache` | `/data/cache`,**必须是持久卷**,见 §8.3.1 |
+| 二进制位置 | 解包目录 | `/usr/local/bin`(FHS) |
+| 凭证位置 | 解包目录内的 `credentials.key` | `/data/credentials.key`(宿主 `./data`) |
+| 缓存位置 | 解包目录内的 `./cache` | `/data/cache`,**必须在宿主上**,见 §8.3.1 |
+| 用户 | 调用者本人 | root |
 
-```dockerfile
-COPY --from=builder /out/opendrived /usr/local/bin/opendrived
-COPY --from=builder /out/odctl     /usr/local/bin/odctl
-WORKDIR /data
-ENTRYPOINT ["/usr/local/bin/opendrived"]
-```
+**v1.3 为什么改成这样(Derek 决策)。** v1.1–v1.2 的容器部署要求用户依次:复制并编辑 `.env`、建数据目录、`chown -R 65532` 给镜像的非 root 用户、`openssl rand` 生成 API key 并导出、再运行容器。每一步都是用户必须事先知道的知识,漏掉任何一步容器就起不来或看似正常却不可用。v1.3 把它们全部删掉:
 
-```bash
-docker run -d -p 127.0.0.1:9750:9750 \
-  -e ODB_API_KEY -e ODB_CACHE_DIR=/data/cache \
-  -v $PWD/data:/data \
-  <registry>/opendrive-bridge:1.2
-```
+- **不再以非 root 运行。** 非 root 的唯一代价就是宿主目录必须 chown;按一般容器惯例以 root 运行,配合 distroless(无 shell、无包管理器)、compose 中的只读根文件系统与 `no-new-privileges` 作为补偿。代价是 Linux 上 `./data` 内的文件属于 root,备份需 `sudo`,文档写明。
+- **不再强制 API key。** compose 只把端口发布到 `127.0.0.1`,可达范围与主机版默认的 loopback 相同;非 loopback 监听且未设 key 时 daemon 记录一条警告(说明暴露了什么、如何关闭),不再拒绝启动。需要对外发布端口时设 `ODB_API_KEY`,此后所有请求都必须携带。
+- **不再有凭证准备步骤**,见 §9.2。
 
-**挂载整个目录,而不是 `.env`/`.env.key` 两个文件。** 本节原先规定的是单文件挂载。2026-09-27 在 CI 里照做实测,两处同时失败:`.env` 的写入是原子替换(写临时文件再 rename 覆盖),而一个本身就是挂载点的文件不能被 rename 覆盖(`EBUSY`),于是首次运行无法加密,**明文密码留在宿主机上,容器却显示运行正常**;另一边,`.env.key` 在首次运行前还不存在,Docker 会在宿主机上替它建一个 root 所有的**目录**。按 CLAUDE.md 第 0 条,这是设计本身写错了,所以改的是设计:目录归镜像用户 uid 65532 所有(`chown -R`),`.env`、`.env.key`、`jobs/`、`cache/` 都在里面,与主机安装"所有东西都在一个文件夹里"一致。同时 daemon 启动时先完成首次加密(`keystore.Seal`),**加密失败即拒绝启动**并说明是哪一种情况——宁可起不来,也不能带着明文密码运行。`.env` 仍须可写(token 轮换要落盘)。镜像里绝不包含任何凭证文件,`.dockerignore` 必须覆盖 `.env` 与 `.env.key`。提供 `docker-compose.yaml` 样例与 healthcheck(`GET /v1/auth/status`)。
+2026-09-27 的教训仍然保留在设计里:**只能挂载目录**,不能单独挂载凭证文件——凭证文件以原子替换写入,单文件挂载点无法被 rename 覆盖(`EBUSY`),daemon 会明确报错而不是悄悄丢失登录。镜像里绝不包含任何凭证文件,`.dockerignore` 覆盖 `credentials.key`、`.env`、`.env.key`,CI 每次检查。CI 以发布出去的 compose 文件原样运行:什么都不准备 → `up -d` → 经 API 登录 → `restart` 仍登录 → `down`/`up` 新容器仍登录 → 同一 `./data` 上第二个容器被拒绝。
 
 #### 8.3.1 容器 × write-back 缓存:本次改造最锋利的一条边(v1.2 新增)
 
@@ -703,54 +692,53 @@ docker run -d -p 127.0.0.1:9750:9750 \
 
 Bridge 持有能完全控制用户云盘的 token,运行在用户主机上。主要威胁:token 泄漏(日志/磁盘/进程列表)、本机其他进程滥用 Bridge API、中间人攻击、恶意文件名/路径注入、供应链攻击。
 
-### 9.2 凭证与 Token 管理(v1.2 重写——单一加密 `.env`)
+### 9.2 凭证与 Token 管理(v1.3 重写——登录即保存,无需准备)
 
-**CredentialStore**(`internal/keystore`)统一保存五类凭证:username、password、OAuth token(access+refresh)、SessionID、Bridge API key。
+**CredentialStore**(`internal/keystore`)统一保存四类凭证:username、password、OAuth token(access+refresh)、SessionID。Bridge API key 不再由它生成或保存(v1.3,见 §9.3)。
 
 **凭证永远只存在用户本机**:Bridge 是纯本地软件,没有云端组件,凭证仅在调用 OpenDrive 官方 API 时经 HTTPS 发往上游,绝不发往任何第三方。
 
-#### 9.2.1 为什么放弃 OS keyring(v1.2 决策)
+#### 9.2.1 为什么是一个由服务自己写入的文件(v1.2 与 v1.3 决策)
 
-v1.1 用三套平台原生凭证库(macOS Keychain / Windows Credential Manager / Linux Secret Service),各自一条代码路径、一套 CI 真机测试。实际部署暴露三个问题:
+v1.1 之前用三套平台原生凭证库(macOS Keychain / Windows Credential Manager / Linux Secret Service)。v1.2 因其"并非人人都有、部署步骤因平台而异、耦合 OS 供应商行为"统一为加密 `.env`,但保留了一个**准备步骤**:用户要把 `.env.example` 复制成 `.env`、以明文填入账号密码,由首次启动加密。
 
-1. **并非人人都有**。headless Linux、容器、精简发行版没有 Secret Service,这些环境本来就要退回加密文件——等于始终维护两条路径。
-2. **部署步骤因平台而异**,文档和排障各写三遍,用户体验不统一。
-3. **耦合了会变的东西**。凭证存储方式绑定 OS 供应商的行为,官方认证方式一旦变化,要在三个后端同步改。
-
-v1.2 统一为**唯一后端:AES-256-GCM 加密的 `.env` 文件**。这不是新代码——原 `BackendFile` 已经在 Docker 路径上服役,现在升为唯一实现;keyring / credman / secret-service 三条路径连同其测试一并删除(约 1000 行)。
+v1.3(Derek 试用后提出)删除这一步:**服务启动时若没有凭证,或 OpenDrive 拒绝已保存的凭证(例如用户在网站上改了密码),就进入"请登录"状态;用户在网页或用 `odctl login` 输入一次,服务自己加密并保存。** 用户从不创建、编辑、复制任何凭证文件,也不执行任何加密命令。这同时消除了 v1.2 的一整类故障:明文 `.env` 在加密前就留在磁盘上、单文件挂载导致首次加密失败等。
 
 #### 9.2.2 文件布局与密钥
 
-| 文件 | 内容 | 权限 |
-|---|---|---|
-| `.env.example` | 模板,随发布包分发,进版本库 | 0644 |
-| `.env` | 用户凭证与 API key,**加密后**存放 | 0600 |
-| `.env.key` | 32 字节随机数据密钥,首次运行自动生成 | 0600 |
+**一个文件** `credentials.key`,在主机上位于解包目录(二进制旁),在容器中位于 `/data`,权限 0600:
 
-- 部署前:`cp .env.example .env`,填入 OpenDrive 用户名与密码(此刻为明文)。
-- 首次运行:daemon 生成 `.env.key`,生成随机 Bridge API key,把全部凭证加密写回 `.env`(明文密码在此刻消失)。用户**从不需要**手动输入或管理 API key。
-- 此后所有读取凭证与 API key 的操作一律经 CredentialStore 从 `.env` 解密读取,没有第二条路径。
-- 加密格式采用 openssl 兼容封装(`Salted__` + PBKDF2 + AES-256-GCM),用户可用标准 `openssl enc -d` 自行查验,不被 Bridge 绑架。
-- `.env` 与 `.env.key` 必须在 `.gitignore` 内,且发布包与容器镜像都不得包含它们。
+```
+# opendrive-bridge credentials. Written by the bridge when you sign in; do not edit.
+# (…此处写着如何用 openssl 手工解密的命令…)
+<一行:32 字节随机密钥的 base64>
+<其余:OpenSSL enc 格式(Salted__ + PBKDF2-SHA256 600000 次 + AES-256-CBC)的凭证密文>
+```
+
+- 登录成功时由服务写入;token 轮换时原子重写;`odctl logout` 删除该文件。
+- 文件头注释中的恢复命令在测试中**按原文**用真实 openssl 执行,保证"不被 Bridge 绑架"的承诺。
+- 选择 CBC 而非 GCM 的理由不变:`openssl enc` 不支持 AEAD;完整性由明文内的校验和保证。
+- 从 v1.1/v1.2 升级:若 `credentials.key` 不存在而旁边有旧的 `.env`(加密的配合 `.env.key`,或未加密的),首次启动读入一次并写成 `credentials.key`;未填写的 `.env.example` 模板不视为账号;旧文件保留,由用户自行删除。
+- `credentials.key`、`.env`、`.env.key` 都在 `.gitignore` 与 `.dockerignore` 内,发布包与容器镜像均由 CI 检查不含它们。
 
 #### 9.2.3 这个方案防住了什么,没防住什么(诚实边界)
 
-密钥文件与密文同在一台机器上,是"无缝静默运行"这条硬需求(§2.2)的直接后果:任何需要开机输入口令的方案都会让 daemon 无法自启和崩溃自恢复。因此:
+密钥与密文在同一个文件里,与 v1.2 的"两个文件并排放"安全性完全相同——这是"无缝静默运行"(§2.2)的直接后果:任何需要开机输入口令的方案都会让 daemon 无法自启和崩溃自恢复。因此:
 
-- **防住**:误提交进 git、备份/网盘同步泄漏、录屏与旁人看屏、明文出现在日志或进程参数、随手 `cat .env`。
-- **防不住**:已能以该用户身份读取文件的攻击者——他同时拿得到密钥文件。相较 OS keyring 的"锁屏即不可读",这是一次**有意识的安全性让步**,换取跨平台一致性与部署简化。
-- 对单用户本地工具而言这个权衡是合理的;若部署在多用户主机或高敏感环境,应改用系统级手段(全盘加密、专用服务账户、最小权限)补足,文档须写明这一点。
+- **防住**:误提交进 git、备份/网盘同步中的明文泄漏、录屏与旁人看屏、明文出现在日志或进程参数、随手 `cat`。
+- **防不住**:已能以该用户身份读取文件的攻击者。这是有意识的让步,文档必须写明。
+- 多用户主机或高敏感环境应改用系统级手段(全盘加密、专用服务账户、最小权限)。
 
-#### 9.2.4 不变的约束
+#### 9.2.4 不变的约束与修订
 
-- **密码持久化仍是有意的设计偏离**:官方 OAuth2 条款要求应用不存储密码,但 refresh_token 仅 30 天且只在使用时滚动,无法满足"初始设定后永久无缝"(§2.2)。`persist_password: false` 逃生口保留(代价:长期停机后需重新登录,status 标记 `seamless:false`)。
-- **密码与密钥永不入日志**:§9.4 脱敏正则覆盖 `passwd`/`password`;CredentialStore 的调试输出只打印字段存在性。
-- **原子写**:refresh_token 滚动更新与静默重登取得的新 token 必须原子落盘(先写成功再作废旧副本),防止刷新中途崩溃导致永久掉登录。
-- **"无持久化 = 配置错误"门禁保留**:`.env` 不可读、`.env.key` 缺失或解密失败时进入 `keystore_unavailable`(§4.5),**不发起任何上游请求**,后台低频重试;报错必须一句话说清缺什么、怎么补。`--ephemeral` 内存模式仅供测试,绝不静默成为默认。
+- **密码持久化仍是有意的设计偏离**(理由同前:refresh_token 仅 30 天);`persist_password: false` 逃生口保留。
+- **密码与密钥永不入日志**(§9.4)。
+- **原子写**:凭证文件一律"写临时文件 → fsync → rename → fsync 目录"。
+- **"无持久化 = 配置错误"改为"保存失败必须说出来"**(v1.3):没有凭证文件是正常的初始状态,服务照常启动并等待登录;凭证文件损坏或不可读时,`/v1/auth/status` 报 `keystore_unavailable` 且不发起上游请求,**但登录不被拒绝**——重新登录就是覆盖损坏文件的方式。若登录在上游成功、写盘失败,登录接口返回 `keystore_unavailable`(503)而不是 200,因为否则重启后会悄悄丢失登录。`--ephemeral` 内存模式仅供测试,绝不静默成为默认。
 
 ### 9.3 Bridge API 自身防护
 
-- 默认只监听 `127.0.0.1`;监听非 loopback 地址时**强制**要求配置 Bridge API key(`Authorization: Bearer`),并在文档中要求配合 TLS 反代。
+- 默认只监听 `127.0.0.1`。Bridge API key **可选**(v1.3):设置后(`--api-key` / `ODB_API_KEY`)所有请求都必须携带,loopback 亦然;未设置时 API 对能到达监听地址者开放。非 loopback 监听且未设 key 时记录警告而不拒绝启动(容器通过把端口发布到 `127.0.0.1` 保持与主机默认相同的可达范围)。对外发布时须设 key 并配合 TLS 反代,文档写明。
 - 所有输入严格校验:路径规范化后必须仍在预期命名空间内(防 `../` 遍历,本地下载落盘路径同样校验);文件名按 upstream 规则白名单校验。
 - CORS 默认关闭;无 cookie、无隐式凭证。
 - 对 upstream 只走 HTTPS,启用证书校验(禁止 InsecureSkipVerify),可选 pin OpenDrive 证书链。
@@ -935,6 +923,13 @@ odctl share /Finance/2026/report.xlsx --expires 7d --max-uses 10
 5. 所有公开函数写 godoc;错误信息面向使用者,不泄漏内部路径与 token。
 
 ### E. 修订记录 Changelog
+
+**白皮书 v1.4 (2026-09-27)——对应产品 v1.3** — 去掉所有准备步骤(Derek 试用后提出):
+
+1. **§9.2 重写:登录即保存。** 删除"复制 `.env.example` → 填明文 → 首次启动加密"的准备步骤。服务没有凭证或凭证被 OpenDrive 拒绝时进入"请登录"状态,用户在网页或 `odctl login` 输入一次,服务自己加密保存为单一文件 `credentials.key`(密钥与密文同文件,安全性与 v1.2 的两文件方案相同)。v1.1/v1.2 的 `.env` 自动导入一次。
+2. **§8.3 重写:`docker compose up -d` 即可。** 镜像改为以 root 运行(不再需要 chown 65532),不再强制 API key(端口只发布到 127.0.0.1),数据目录由 Docker 自动创建。CI 以原样的 compose 文件验证"零准备 → 登录 → 重启 → 重建容器仍登录"。
+3. **§9.3:API key 改为可选。** 设了就处处强制;没设时非 loopback 监听只记警告。
+4. **§9.2.4:"无持久化 = 配置错误"改为"保存失败必须说出来"。** 没有凭证文件是正常初始状态;凭证文件损坏时登录不被拒绝(登录即覆盖),但写盘失败的登录返回 503 而非 200。
 
 **白皮书 v1.3 (2026-09-20)——对应产品 v1.2** — 缓存网关、Web GUI、平台收窄(Derek 试用后提出):
 

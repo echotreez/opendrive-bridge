@@ -2,17 +2,14 @@
 // after its initial setup: username, password, OAuth tokens and session id
 // (whitepaper §9.2, the four credential kinds of the CredentialStore).
 //
-// There is one real backend: an encrypted .env file beside the programs, with
-// its key in .env.key next to it (§9.2.2). Until v1.1 there were four — the
-// three OS vaults and this — and the three were removed because two of them were
-// unavailable on the machines where the bridge most often runs, so this path had
-// to exist anyway and was being maintained as the second-class one. §9.2.1 has
-// the full reasoning, and §9.2.3 is honest about what the change costs.
+// There is one real backend: credentials.key beside the programs, written by the
+// daemon when somebody signs in (§9.2.2 as revised for 1.3). Until v1.1 there were
+// four — the three OS vaults and an encrypted .env — and 1.1 and 1.2 had the user
+// prepare that .env by hand. §9.2.1 has the reasoning for one file, and §9.2.3 is
+// honest about what it protects.
 //
-// Open refuses to hand back a store that forgets everything on restart unless
-// the caller asks for that in so many words: a bridge that looks configured and
-// then loses its credentials on reboot is worse than one that never started
-// (§9.2, "no persistence = configuration error").
+// Open never hands back a store that forgets everything on restart unless the
+// caller asks for that in so many words (--ephemeral).
 package keystore
 
 import (

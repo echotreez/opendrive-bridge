@@ -9,7 +9,7 @@ body:
         [Report a vulnerability](https://github.com/echotreez/opendrive-bridge/security/advisories/new)
         instead, which is private. See [SECURITY.md](../blob/main/SECURITY.md).
 
-        **Never paste `.env`, `.env.key`, or an API key.** The bridge redacts
+        **Never paste `credentials.key`, `.env`, `.env.key`, or an API key.** The bridge redacts
         credentials from its own output, but a file you paste by hand is not
         covered by that.
 

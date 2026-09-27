@@ -20,9 +20,10 @@ func newLoginCommand(o *Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login <username>",
 		Short: "Sign in and let the bridge remember it",
-		Long: "Signs in once and hands the credentials to your system keychain, after\n" +
-			"which the bridge keeps itself signed in. You will only be asked again if\n" +
-			"you change your OpenDrive password.",
+		Long: "Signs in once. The bridge encrypts the credentials into credentials.key\n" +
+			"beside itself and keeps itself signed in from then on. You will only be asked\n" +
+			"again if you change your OpenDrive password. The password is prompted for\n" +
+			"when --password is left out, which keeps it out of your shell history.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pw := password
