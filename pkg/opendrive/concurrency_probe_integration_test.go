@@ -147,165 +147,13 @@ func report(t *testing.T, title string, lines ...string) {
 
 // ---------------------------------------------------------------- (b) upload
 
-// probeChunkOutcome is one concurrent chunk's fate.
-type probeChunkOutcome struct {
-	seq      int   // the order this chunk was fired in
-	offset   int64 // the offset it claimed
-	size     int
-	written  int64
-	err      error
-	duration time.Duration
-}
-
-// TestProbeConcurrentChunksToOneTempLocation answers §10.2(b).
-//
-// The existing evidence says this will be refused: D37 shows upstream comparing
-// the requested chunk_offset against the number of bytes it has already received
-// ("uploaded=0, chunk_offset=999999"), and D35 shows TotalWritten reporting the
-// current chunk rather than a running total. Both describe a single linear write
-// cursor per TempLocation. If that is right, only one of a set of concurrent
-// out-of-order chunks can be at the cursor, and the rest must fail.
-//
-// Being fairly sure is not the same as knowing, which is why §10.2 asks for this
-// rather than letting someone delete the option on the strength of an inference.
-func TestProbeConcurrentChunksToOneTempLocation(t *testing.T) {
-	c, ctx := probeClient(t)
-	folder := probeScratch(t, ctx, c)
-
-	const (
-		chunkSize = 256 << 10 // 256 KiB, small enough to be quick and big enough to be real
-		chunks    = 4
-	)
-	content := probePayload(chunkSize*chunks, "parallel-chunks")
-	hash := probeMD5(content)
-
-	up := c.Uploads()
-	created, err := up.createFile(ctx, folder, UploadParams{
-		Name: fmt.Sprintf("odb-probe-parallel-%d.bin", time.Now().Unix()),
-		Size: int64(len(content)),
-		Hash: hash,
-	})
-	if err != nil {
-		t.Skipf("create_file refused, so there is nothing to probe: %v", err)
-	}
-	fileID := created.FileID.String()
-	// The record must not survive this test whatever happens next, filled or not.
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
-		if err := up.Reclaim(ctx, fileID, "", ""); err != nil {
-			t.Logf("cleanup: upstream record %s may remain: %v", fileID, err)
-		}
-	})
-
-	opened, err := up.openFile(ctx, fileID, UploadParams{Size: int64(len(content)), Hash: hash})
-	if err != nil {
-		t.Skipf("open_file_upload refused, so there is nothing to probe: %v", err)
-	}
-	temp := opened.TempLocation
-	if temp == "" {
-		t.Fatal("open_file_upload returned no temp_location; the probe cannot proceed")
-	}
-
-	// Deliberately scrambled: the last chunk first, then the second, the first,
-	// the third. If a linear cursor is what upstream keeps, exactly one of these
-	// (offset 0) can possibly succeed.
-	order := []int{3, 1, 0, 2}
-	outcomes := make([]probeChunkOutcome, len(order))
-
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	for i, idx := range order {
-		wg.Add(1)
-		go func(seq, idx int) {
-			defer wg.Done()
-			offset := int64(idx * chunkSize)
-			payload := content[offset : offset+chunkSize]
-			<-start // fire together, so the requests genuinely overlap
-			t0 := time.Now()
-			written, err := up.sendOneChunk(ctx, fileID, temp, offset, payload)
-			outcomes[seq] = probeChunkOutcome{
-				seq: seq, offset: offset, size: len(payload),
-				written: written, err: err, duration: time.Since(t0),
-			}
-		}(i, idx)
-	}
-	close(start)
-	wg.Wait()
-
-	lines := []string{
-		fmt.Sprintf("%d chunks of %d bytes fired simultaneously at one temp_location,", chunks, chunkSize),
-		"offsets presented out of order (3, 1, 0, 2):",
-		"",
-	}
-	accepted := 0
-	for _, o := range outcomes {
-		switch {
-		case o.err == nil:
-			accepted++
-			lines = append(lines, fmt.Sprintf("  offset %8d  ACCEPTED  written=%d  (%s)",
-				o.offset, o.written, o.duration.Round(time.Millisecond)))
-		default:
-			kind := "?"
-			var apiErr *APIError
-			if asAPIError(o.err, &apiErr) {
-				kind = string(apiErr.Kind)
-				if apiErr.UpstreamMsg != "" {
-					kind += ": " + apiErr.UpstreamMsg
-				}
-			} else {
-				kind = o.err.Error()
-			}
-			lines = append(lines, fmt.Sprintf("  offset %8d  REFUSED   %s  (%s)",
-				o.offset, kind, o.duration.Round(time.Millisecond)))
-		}
-	}
-	lines = append(lines, "", fmt.Sprintf("accepted %d of %d", accepted, len(outcomes)))
-	switch {
-	case accepted <= 1:
-		lines = append(lines,
-			"",
-			"CONCLUSION: one temp_location does not accept concurrent out-of-order",
-			"chunks, which matches D35 and D37 — the server keeps a single linear",
-			"write cursor. parallel_chunks cannot be implemented and must be removed",
-			"rather than left in the configuration describing something impossible.")
-	default:
-		lines = append(lines,
-			"",
-			"CONCLUSION: more than one concurrent chunk was accepted, which contradicts",
-			"the inference from D35/D37. Record the exact conditions before writing any",
-			"code: which offsets, in what order, and whether close_file_upload then",
-			"produced the right hash.")
-	}
-	report(t, "§10.2(b) concurrent out-of-order chunks to one temp_location", lines...)
-
-	// Whether the assembled file is correct is a separate question from whether
-	// the chunks were accepted, and it is the one that matters: upstream could
-	// accept everything and still produce rubbish. Only ask if it is worth asking.
-	if accepted == len(outcomes) {
-		closed, err := up.closeFile(ctx, fileID, temp, UploadParams{
-			Size: int64(len(content)), Hash: hash,
-		}, false)
-		if err != nil {
-			report(t, "§10.2(b) follow-up: close_file_upload after concurrent chunks",
-				fmt.Sprintf("every chunk was accepted but the close failed: %v", err),
-				"so the acceptances did not amount to a stored file.")
-			return
-		}
-		got := ""
-		if closed != nil {
-			got = closed.FileHash
-		}
-		report(t, "§10.2(b) follow-up: close_file_upload after concurrent chunks",
-			fmt.Sprintf("upstream hash: %s", got),
-			fmt.Sprintf("expected:      %s", hash),
-			fmt.Sprintf("match: %v", strings.EqualFold(got, hash)),
-			"",
-			"A mismatch here is the dangerous outcome: every chunk reported success",
-			"and the stored file is wrong. If that is what happened, parallel_chunks",
-			"must be removed even though the writes were accepted.")
-	}
-}
+// The first version of this probe fired four out-of-order chunks at once and
+// concluded from how many were accepted. On 2026-09-27 it saw 4 of 4 accepted
+// and a matching hash, and its conclusion branch said to go and implement
+// parallel_chunks. The next three runs showed why that was luck: the requests
+// had simply arrived in offset order. Acceptance depends on arrival order, so
+// counting acceptances measures the network, not upstream. TestProbeChunksReadBack
+// below asks the question in a form timing cannot answer for it.
 
 // ---------------------------------------------------------------- (c) download
 
@@ -462,7 +310,8 @@ func probeSegments(t *testing.T, ctx context.Context, c *Client, fileID string,
 		switch {
 		case o.err != nil:
 			failures++
-			lines = append(lines, fmt.Sprintf("  seg %2d [%8d-%8d]  FAILED  %v", i, o.from, o.to, o.err))
+			lines = append(lines, fmt.Sprintf("  seg %2d [%8d-%8d]  FAILED  %v  [retryable=%v retry-after=%s after %s]",
+				i, o.from, o.to, o.err, IsTemporary(o.err), RetryAfter(o.err), o.duration.Round(time.Millisecond)))
 		case len(o.body) != wantLen:
 			failures++
 			lines = append(lines, fmt.Sprintf("  seg %2d [%8d-%8d]  status %d, %d bytes, wanted %d",
@@ -504,4 +353,246 @@ func probeSegments(t *testing.T, ctx context.Context, c *Client, fileID string,
 			"largest n that worked and set parallel_ranges below it.")
 	}
 	report(t, fmt.Sprintf("§10.2(c) %d concurrent segments", n), append(append(head, lines...), tail...)...)
+}
+
+// ---------------------------------------------------------------- (b) verified
+
+// probeReadBack downloads what upstream actually stored. close_file_upload's
+// FileHash may be nothing more than the hash the client declared, and a 200 has
+// never been evidence of anything here (D42, D43), so the only proof that
+// concurrent chunks assembled correctly is the stored bytes. D44: a just-closed
+// file can be briefly undownloadable, so it waits.
+func probeReadBack(t *testing.T, ctx context.Context, c *Client, fileID string, size int64) []byte {
+	t.Helper()
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		out := fetchRange(ctx, c, fileID, 0, size-1)
+		if out.err == nil && int64(len(out.body)) == size {
+			return out.body
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("could not read the stored file back: status %d, %d bytes, %v",
+				out.status, len(out.body), out.err)
+		}
+		time.Sleep(3 * time.Second)
+	}
+}
+
+// probeUpload runs create/open, hands the temp location to send, closes and
+// reads back. It reports what upstream stored, not what it said.
+func probeUpload(t *testing.T, ctx context.Context, c *Client, folder, label string,
+	content []byte, send func(fileID, temp string) []string) {
+	t.Helper()
+	up := c.Uploads()
+	hash := probeMD5(content)
+	created, err := up.createFile(ctx, folder, UploadParams{
+		Name: fmt.Sprintf("odb-probe-%s-%d.bin", label, time.Now().UnixNano()),
+		Size: int64(len(content)), Hash: hash,
+	})
+	if err != nil {
+		t.Skipf("create_file refused: %v", err)
+	}
+	fileID := created.FileID.String()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if err := up.Reclaim(ctx, fileID, "", ""); err != nil {
+			t.Logf("cleanup: upstream record %s may remain: %v", fileID, err)
+		}
+	})
+	opened, err := up.openFile(ctx, fileID, UploadParams{Size: int64(len(content)), Hash: hash})
+	if err != nil || opened.TempLocation == "" {
+		t.Skipf("open_file_upload refused: %v", err)
+	}
+	lines := send(fileID, opened.TempLocation)
+
+	closed, err := up.closeFile(ctx, fileID, opened.TempLocation,
+		UploadParams{Size: int64(len(content)), Hash: hash}, false)
+	if err != nil {
+		lines = append(lines, "", fmt.Sprintf("close_file_upload FAILED: %v", err))
+		report(t, label, lines...)
+		return
+	}
+	said := ""
+	if closed != nil {
+		said = closed.FileHash
+	}
+	stored := probeReadBack(t, ctx, c, fileID, int64(len(content)))
+	got := probeMD5(stored)
+	lines = append(lines, "",
+		"close said:     "+said,
+		"stored bytes:   "+got,
+		"expected:       "+hash,
+		fmt.Sprintf("STORED CORRECTLY: %v", got == hash))
+	if got != hash {
+		first := -1
+		for i := range stored {
+			if stored[i] != content[i] {
+				first = i
+				break
+			}
+		}
+		lines = append(lines, fmt.Sprintf("first differing byte: %d", first))
+	}
+	report(t, label, lines...)
+}
+
+func chunkLine(offset int64, written int64, err error, d time.Duration) string {
+	if err != nil {
+		return fmt.Sprintf("  offset %8d  REFUSED  %v  (%s)", offset, err, d.Round(time.Millisecond))
+	}
+	return fmt.Sprintf("  offset %8d  accepted written=%d  (%s)", offset, written, d.Round(time.Millisecond))
+}
+
+// TestProbeChunksReadBack repeats (b) and then checks the stored bytes, and adds
+// the case that tells "random access" apart from "held until the cursor catches
+// up": chunks 3, 1, 2 are sent concurrently and must have *answered* before
+// chunk 0 is sent at all. A server that serialises on a cursor either refuses
+// them or makes them wait, and the timings show which.
+func TestProbeChunksReadBack(t *testing.T) {
+	c, ctx := probeClient(t)
+	folder := probeScratch(t, ctx, c)
+	const chunkSize = 256 << 10
+	up := c.Uploads()
+
+	concurrent := func(content []byte, order []int) func(string, string) []string {
+		return func(fileID, temp string) []string {
+			lines := make([]string, len(order))
+			var wg sync.WaitGroup
+			start := make(chan struct{})
+			for i, idx := range order {
+				wg.Add(1)
+				go func(i, idx int) {
+					defer wg.Done()
+					off := int64(idx * chunkSize)
+					<-start
+					t0 := time.Now()
+					w, err := up.sendOneChunk(ctx, fileID, temp, off, content[off:off+chunkSize])
+					lines[i] = chunkLine(off, w, err, time.Since(t0))
+				}(i, idx)
+			}
+			close(start)
+			wg.Wait()
+			return lines
+		}
+	}
+
+	t.Run("concurrent-3102", func(t *testing.T) {
+		content := probePayload(4*chunkSize, "rb-3102")
+		probeUpload(t, ctx, c, folder, "§10.2(b) 4 concurrent chunks (3,1,0,2), read back",
+			content, concurrent(content, []int{3, 1, 0, 2}))
+	})
+	t.Run("concurrent-8", func(t *testing.T) {
+		content := probePayload(8*chunkSize, "rb-8")
+		probeUpload(t, ctx, c, folder, "§10.2(b) 8 concurrent chunks (7..0), read back",
+			content, concurrent(content, []int{7, 6, 5, 4, 3, 2, 1, 0}))
+	})
+	t.Run("zero-last", func(t *testing.T) {
+		content := probePayload(4*chunkSize, "rb-zero-last")
+		probeUpload(t, ctx, c, folder, "§10.2(b) chunks 3,1,2 answered BEFORE chunk 0 is sent",
+			content, func(fileID, temp string) []string {
+				lines := []string{"phase 1: offsets 3,1,2 concurrently, no chunk 0 yet"}
+				lines = append(lines, concurrent(content, []int{3, 1, 2})(fileID, temp)...)
+				lines = append(lines, "phase 2: offset 0, alone, after the others answered")
+				t0 := time.Now()
+				w, err := up.sendOneChunk(ctx, fileID, temp, 0, content[:chunkSize])
+				return append(lines, chunkLine(0, w, err, time.Since(t0)))
+			})
+	})
+	t.Run("sequential-reverse", func(t *testing.T) {
+		content := probePayload(4*chunkSize, "rb-seq-rev")
+		probeUpload(t, ctx, c, folder, "§10.2(b) one at a time, last chunk first (3,2,1,0)",
+			content, func(fileID, temp string) []string {
+				var lines []string
+				for _, idx := range []int{3, 2, 1, 0} {
+					off := int64(idx * chunkSize)
+					t0 := time.Now()
+					w, err := up.sendOneChunk(ctx, fileID, temp, off, content[off:off+chunkSize])
+					lines = append(lines, chunkLine(off, w, err, time.Since(t0)))
+				}
+				return lines
+			})
+	})
+}
+
+// ---------------------------------------------------------------- (d) files
+
+// TestProbeConcurrentFileUploads measures what one TempLocation cannot give:
+// several whole files in flight at once. If each connection is throttled (the
+// range probe measured ~200 KB/s per stream), this is where upload throughput
+// comes from, and the question is how many upstream allows from one IP before
+// it refuses — the downloads stop at six (D49).
+func TestProbeConcurrentFileUploads(t *testing.T) {
+	c, ctx := probeClient(t)
+	folder := probeScratch(t, ctx, c)
+	const size = 512 << 10
+	for _, n := range []int{1, 4, 8, 12} {
+		type result struct {
+			err error
+			d   time.Duration
+		}
+		results := make([]result, n)
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		t0 := time.Now()
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				content := probePayload(size, fmt.Sprintf("files-%d-%d", n, i))
+				<-start
+				s := time.Now()
+				res, err := c.Uploads().Upload(ctx, bytes.NewReader(content), UploadParams{
+					FolderID: folder, Name: fmt.Sprintf("odb-probe-files-%d-%d.bin", n, i),
+					Size: size, Hash: probeMD5(content),
+				})
+				if err == nil && res != nil && res.File != nil {
+					fid := res.File.FileID.String()
+					t.Cleanup(func() {
+						ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+						defer cancel()
+						_ = c.Uploads().Reclaim(ctx, fid, "", "")
+					})
+				}
+				results[i] = result{err, time.Since(s)}
+			}(i)
+		}
+		t0 = time.Now()
+		close(start)
+		wg.Wait()
+		wall := time.Since(t0)
+		ok := 0
+		lines := []string{}
+		for i, r := range results {
+			if r.err == nil {
+				ok++
+				lines = append(lines, fmt.Sprintf("  file %2d  ok      (%s)", i, r.d.Round(time.Millisecond)))
+			} else {
+				lines = append(lines, fmt.Sprintf("  file %2d  FAILED  %v", i, r.err))
+			}
+		}
+		rate := float64(ok*size) / wall.Seconds() / 1024
+		lines = append(lines, "", fmt.Sprintf("%d of %d stored; wall %s; aggregate %.0f KB/s",
+			ok, n, wall.Round(time.Millisecond), rate))
+		report(t, fmt.Sprintf("§10.2(d) %d files of %d KiB uploaded at once", n, size>>10), lines...)
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// TestProbeAccountLimits records what the account says its limits are, so the
+// throughput the other probes measure can be read against the plan rather than
+// taken as a property of upstream in general.
+func TestProbeAccountLimits(t *testing.T) {
+	c, ctx := probeClient(t)
+	info, err := c.Users().Info(ctx)
+	if err != nil {
+		t.Fatalf("users info: %v", err)
+	}
+	report(t, "account limits the throughput probes ran under",
+		"plan:                 "+info.UserPlan,
+		fmt.Sprintf("UploadSpeedLimit:     %d", info.UploadSpeedLimit.Int64()),
+		fmt.Sprintf("DownloadSpeedLimit:   %d", info.DownloadSpeedLimit.Int64()),
+		fmt.Sprintf("BwMax / BwUsed:       %d / %d", info.BwMax.Int64(), info.BwUsed.Int64()),
+		fmt.Sprintf("MaxFileSize:          %d", info.MaxFileSize.Int64()),
+		fmt.Sprintf("account user:         %v", info.IsAccountUser()))
 }

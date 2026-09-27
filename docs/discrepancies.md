@@ -1215,3 +1215,96 @@ dropped users would be worse than a refusal that says what arrived.
 the test owner, then `ODB_TEST_SHARE_USER` set for `TestSandboxSharing`. The
 recorded fixtures are `testdata/fixtures/sharing/listsharedusers_empty.json` and
 `listusers_empty.json`; `listsharedusers.json` (non-empty) is still constructed.
+
+## D49 — one `TempLocation` has one write cursor; concurrent chunks succeed only by luck {#d49}
+
+**Where:** `POST /upload/upload_file_chunk2.json`, `POST /upload/close_file_upload.json`.
+**Found by:** the §10.2(b) probe (`TestProbeChunksReadBack`), 2026-09-27, owner
+login on the Basic Plan (D51). Four runs.
+
+A chunk is accepted when its `chunk_offset` equals the number of bytes the
+`TempLocation` has received **at the moment upstream checks it** — after the
+chunk's body has fully arrived — and refused otherwise with D37's message:
+
+| case | result |
+|---|---|
+| one at a time, last chunk first (3, 2, 1, 0) | 3, 2, 1 refused `uploaded=0`; 0 accepted; close: `File is corrupted (invalid checksum)` |
+| 3, 1, 2 concurrently, **answered before** 0 is sent | all three refused `uploaded=0` after ~1.4 s; nothing is held waiting for the cursor |
+| 4 concurrently in the order 3, 1, 0, 2 | 4 of 4 accepted in **three of four runs**, 2 of 4 in the other |
+| 8 concurrently in the order 7 … 0 | 4 or 6 accepted — always a prefix, `0 … k` — the rest refused (`uploaded=1572864, chunk_offset=1835008`) |
+
+Whenever every chunk was accepted, the file read back byte-identical, and the
+completion times sorted by offset. That is the tell: concurrent bodies arrive at
+about the same time, upstream checks them in whatever order it happens to, and a
+run "succeeds" when that order is offset order. Acceptance measures the scheduler
+and the network, not a capability.
+
+**This almost went the other way.** The first version of the probe counted
+acceptances. Its first live run saw 4 of 4 with a matching close hash, and its
+conclusion branch said concurrent chunks work. Had that been acted on,
+`parallel_chunks` would have shipped as a feature that corrupts some fraction of
+uploads — caught, at best, by close's checksum. The probe now asks the question
+in a form timing cannot answer for it (chunks 3, 1, 2 must be *answered* before
+0 is sent), and it checks stored bytes rather than close's word.
+
+**Also measured:** a refused chunk leaves the `TempLocation` usable — offset 0
+was accepted after three refusals — and a refused chunk's body is transmitted in
+full before the refusal, so a scheme that sprayed chunks and re-sent the refused
+ones would pay for every miss in bandwidth.
+
+**Consequence:** `parallel_chunks` is removed from the design (whitepaper §7,
+§10.2). Throughput comes from several files at once, which scales cleanly (D51).
+
+## D50 — six concurrent downloads per IP; the seventh is a `429` with no `Retry-After` {#d50}
+
+**Where:** `GET /download/file.json/{session}/{file_id}` with bounded `Range`.
+**Found by:** the §10.2(c) probe (`TestProbeConcurrentRangeDownloads`), 2026-09-27, three runs.
+
+- A **bounded** `Range: bytes=1024-2047` is honoured: `206`,
+  `Content-Range: bytes 1024-2047/6291456`, the right 1024 bytes. (D41 had only
+  settled the open-ended form.)
+- **4** concurrent ranges over a 6 MiB file: all `206`, reassembled MD5 matches.
+- **8** and **16** concurrent ranges: exactly **6** succeed every time; the rest are
+  refused within ~0.5–0.9 s with
+  `429 {"error":…"Too many downloads from same IP"}`. The limit is concurrent
+  connections, not a rate over time: 16 issued straight after 8 still got 6.
+- The `429` carries **no `Retry-After`**. T15 classifies it correctly
+  (`rate_limited`, retryable, replay-safe) and the retry falls back to the
+  computed backoff.
+
+The limit is **per IP**, so everything the bridge downloads — job workers,
+segmented ranges, the data cache's read-through — shares one budget of six with
+each other *and with every other OpenDrive client on the same network*.
+`parallel_ranges` is only safe inside a global download-connection cap; see
+whitepaper §10.2(c).
+
+**Not measured:** `BWExceeded` under concurrency. The account's daily allowance
+is 1024 MB (D45 units); reaching it deliberately would take ~14 minutes at the
+measured rate and then lock the test account for the rest of the day. T14
+already covers what an exhausted allowance looks like to a single stream.
+
+## D51 — the plan's speed limit is per connection, not per account {#d51}
+
+**Where:** `users/info.json` (`UploadSpeedLimit`, `DownloadSpeedLimit`) against
+measured throughput.
+**Found by:** `TestProbeAccountLimits` and `TestProbeConcurrentFileUploads`, 2026-09-27.
+
+The test owner's plan is "Basic Plan" with `UploadSpeedLimit` and
+`DownloadSpeedLimit` both `200000`. Measured:
+
+| | per connection | aggregate |
+|---|---|---|
+| 1 upload | ~210 KB/s | 210 KB/s |
+| 4 / 8 / 12 uploads of different files | ~200 KB/s each | ~0.7–0.8 / ~1.1–1.3 / ~1.7 MB/s |
+| 4 / 6 downloads (ranges) | ~200 KB/s each | ~0.8 / ~1.2 MB/s |
+
+So the documented limit throttles **each connection**, and concurrency multiplies
+it. Uploads met no concurrency limit up to 12 at once; downloads stop at six
+(D50). Whether a paid plan's limit behaves the same way is unmeasured — the
+field's value will differ, and whether it is per connection there too needs a
+paid login.
+
+**Consequence:** on this plan concurrency is the *only* way to go faster, which
+raises the value of the job engine's worker pool and of `parallel_ranges`, and
+makes the data cache's flush pool (`DefaultFlushWorkers = 2`) the ceiling on
+write-back throughput.
