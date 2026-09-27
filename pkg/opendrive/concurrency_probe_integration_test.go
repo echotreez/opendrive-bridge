@@ -534,7 +534,6 @@ func TestProbeConcurrentFileUploads(t *testing.T) {
 		results := make([]result, n)
 		var wg sync.WaitGroup
 		start := make(chan struct{})
-		t0 := time.Now()
 		for i := 0; i < n; i++ {
 			wg.Add(1)
 			go func(i int) {
@@ -557,7 +556,7 @@ func TestProbeConcurrentFileUploads(t *testing.T) {
 				results[i] = result{err, time.Since(s)}
 			}(i)
 		}
-		t0 = time.Now()
+		t0 := time.Now()
 		close(start)
 		wg.Wait()
 		wall := time.Since(t0)
