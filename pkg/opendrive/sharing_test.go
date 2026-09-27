@@ -3,6 +3,7 @@ package opendrive
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -196,5 +197,60 @@ func TestSharingInvalidatesTheFolderCache(t *testing.T) {
 func TestShareModeRendersAsADecimalString(t *testing.T) {
 	if ShareViewOnly.String() != "0" || ShareFullAccess.String() != "1" {
 		t.Fatalf("modes render as %q and %q", ShareViewOnly, ShareFullAccess)
+	}
+}
+
+// D48: with nothing shared, listsharedusers answers a folder-listing-shaped
+// object rather than []. Recorded from an owner login on 2026-09-27.
+func TestSharingListSharedUsersEmptyObjectIsAnEmptyList(t *testing.T) {
+	m, sharing := newSharingFixture(t)
+	m.push(200, moduleFixture(t, "sharing", "listsharedusers_empty.json"))
+	users, err := sharing.ListSharedUsers(context.Background())
+	if err != nil {
+		t.Fatalf("the recorded empty answer was refused: %v", err)
+	}
+	if users == nil || len(users) != 0 {
+		t.Fatalf("users = %#v, want an empty, non-nil list", users)
+	}
+}
+
+// The sibling endpoint says the same thing with a real empty array.
+func TestSharingListFolderUsersEmptyArray(t *testing.T) {
+	m, sharing := newSharingFixture(t)
+	m.push(200, moduleFixture(t, "sharing", "listusers_empty.json"))
+	users, err := sharing.ListFolderUsers(context.Background(), "FID")
+	if err != nil || len(users) != 0 {
+		t.Fatalf("users = %v, err = %v", users, err)
+	}
+}
+
+// Any other object is not guessed at: the non-empty shape has never been seen,
+// so an object carrying anything beyond D48's two keys is an invalid response
+// that names what it did carry.
+func TestSharingListSharedUsersUnknownObjectIsNotGuessed(t *testing.T) {
+	for _, body := range []string{
+		`{"DirUpdateTime":1,"ResponseType":1,"Users":[{"UserID":"1"}]}`,
+		`{"Something":"else"}`,
+	} {
+		m, sharing := newSharingFixture(t)
+		m.push(200, body)
+		_, err := sharing.ListSharedUsers(context.Background())
+		if ErrorKind(err) != KindInvalidResponse {
+			t.Errorf("%s: kind = %q, want invalid_response", body, ErrorKind(err))
+			continue
+		}
+		if !strings.Contains(err.Error(), "D48") {
+			t.Errorf("%s: the error does not point at D48: %v", body, err)
+		}
+	}
+	m, sharing := newSharingFixture(t)
+	m.push(200, `null`)
+	if users, err := sharing.ListSharedUsers(context.Background()); err != nil || len(users) != 0 {
+		t.Errorf("null: users = %v, err = %v", users, err)
+	}
+	m2, sharing2 := newSharingFixture(t)
+	m2.push(200, `not json`)
+	if _, err := sharing2.ListSharedUsers(context.Background()); ErrorKind(err) != KindInvalidResponse {
+		t.Errorf("garbage: kind = %q", ErrorKind(err))
 	}
 }

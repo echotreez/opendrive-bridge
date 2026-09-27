@@ -696,6 +696,11 @@ above and stops, and with an owner login it runs the full share, setmode,
 list, revoke cycle. So supplying owner credentials is the only step needed to
 turn the constructed fixtures into recorded ones.
 
+**Update, 2026-09-27:** an account-owner login now exists. It is answered
+normally — the two listings verified live, with D47 and D48 found on the way —
+and the account-user branch of the tests skips for it. The share, setmode and
+revoke cycle still needs a second account to share *with*; see D48.
+
 **Classification note:** the 403 maps to `upstream_error`, not to
 `reauth_required`. Mapping a permission refusal onto a credential error would
 send the silent re-login state machine chasing a password that was never the
@@ -1160,3 +1165,53 @@ Covered by `TestNormalizeFolderPathTrimsEachSegmentNotThePath`,
 `TestNormalizeFolderPathRefusesPaddedTraversal`,
 `TestValidateNameRejectsPaddedDotNames`, and the fuzz corpus entry that found
 the first of them.
+
+## D47 — an owner's `AccessUserID` is `"0"`, not its own `UserID` {#d47}
+
+**Where:** `GET /users/info.json`.
+**Found by:** the first account-owner login, 2026-09-27. Every login before it
+was an account user, so every recorded `AccessUserID` was a real id that
+differed from `UserID`.
+
+For an owner, `AccessUserID` is the string `"0"` — upstream's way of saying "no
+access user" — not a copy of `UserID`. `AccountInfo.IsAccountUser()` was written
+as "`AccessUserID` is set and differs from `UserID`", which is true for `"0"`, so
+the first owner that logged in was told it was an account user. The effect was
+that the D33 tests took the account-user branch, expected the account-user 403,
+and failed on an owner's perfectly good answer.
+
+`IsAccountUser()` now treats `"0"` as absent. Covered by
+`TestUsersOwnerWithAccessUserIDZeroIsNotAnAccountUser`; the earlier
+`TestUsersOwnerAccountIsNotAnAccountUser` (equal ids) is kept, because nobody
+has shown that shape never occurs.
+
+## D48 — `listsharedusers` says "nobody" with an object; its sibling uses `[]` {#d48}
+
+**Where:** `GET /sharing/listsharedusers.json/{session}` and
+`GET /sharing/listusers.json/{session}/{folder_id}`.
+**Found by:** the first owner login (D47), which is the first login the sharing
+module has ever answered with anything but D33's 403.
+
+Measured with nothing shared:
+
+```
+GET /sharing/listsharedusers.json/{session}         → 200 {"DirUpdateTime":<unix>,"ResponseType":1}
+GET /sharing/listusers.json/{session}/{new folder}  → 200 []
+```
+
+The first is shaped like a folder listing with the folder parts missing. The
+Swagger declaration gives neither endpoint a response type, so the SDK's array
+expectation was a guess, and it turned "nobody has shared anything with you"
+into an `invalid_response`.
+
+`ListSharedUsers` now reads that exact object — no keys but `DirUpdateTime` and
+`ResponseType` — as an empty list, and `null` or an empty body likewise. It does
+**not** guess at anything else: an object with any other key is an
+`invalid_response` that names the keys it carried and points here. The
+non-empty shape has still never been seen on the wire, and a guess that silently
+dropped users would be worse than a refusal that says what arrived.
+
+**What would settle the rest:** a second OpenDrive account sharing a folder with
+the test owner, then `ODB_TEST_SHARE_USER` set for `TestSandboxSharing`. The
+recorded fixtures are `testdata/fixtures/sharing/listsharedusers_empty.json` and
+`listusers_empty.json`; `listsharedusers.json` (non-empty) is still constructed.

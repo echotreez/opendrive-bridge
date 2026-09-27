@@ -1,4 +1,4 @@
-# Boundary audit — all 45 discrepancies against the Bridge API
+# Boundary audit — all 48 discrepancies against the Bridge API
 
 P4's central obligation is one sentence: **none of the recorded upstream
 discrepancies may reach a user.** This is the line-by-line check of it, done
@@ -49,6 +49,9 @@ Nothing is allowed to be "known but unhandled".
 | D43 | `filesettings` ignores an unknown parameter and answers 200 | the SDK sends the name that works; the live test asserts the effect, not the status |
 | D44 | a just-uploaded file is briefly not downloadable | the job engine waits for the `test=1` probe; a 404 is never made retryable, and the timeout reports *"the upload completed but…"* rather than "file does not exist" |
 | D45 | `users/info.json` mixes bytes and megabytes | `/v1/auth/status` normalises both limits to bytes |
+| D46 | upstream trims whitespace off the ends of a name, silently | the Bridge's `normalisePath` and `joinPath` trim each segment before the traversal check, so `" .. "` is refused and `"/a "` resolves to `a` |
+| D47 | an owner's `AccessUserID` is `"0"` | **stops at the SDK.** `IsAccountUser()` reads `"0"` as absent; the Bridge exposes no account-type decision |
+| D48 | `listsharedusers` says "nobody" with an object, `listusers` with `[]` | **stops at the SDK.** User-to-user sharing is not on the Bridge (`/v1/share/*` is public links, D31); the SDK reads the recorded object as empty and refuses any unrecorded shape by name |
 
 ## Disclosed in the OpenAPI document
 
