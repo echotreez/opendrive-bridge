@@ -612,6 +612,7 @@ Go 交叉编译,`CGO_ENABLED=0`(v1.2 起凭证只用加密 `.env`,不再有任�
 历次移除与理由:
 
 - v1.2 去掉 `darwin/amd64`(Intel Mac)与 `windows/arm64`——实际用户极少。
+- **1.2.1 起不再支持 Intel Mac**(Derek 决定):macOS 只做 Apple Silicon。`darwin/amd64` 不再发布、不再在 CI 中编译或 smoke 测试。
 - **v1.2 去掉 `windows/amd64`,即不再支持 Windows**。这不只是少发一个包:Windows 是唯一需要单独维护的平台分支——凭证文件要用 `icacls` 收 ACL(POSIX 模式位在 NTFS 上无效)、服务要走 Windows Service 而非用户级 systemd/launchd、归档要打 zip、签名要 Authenticode。删掉它就删掉了整条平行代码路径与其 CI 真机测试。v1.2 新增的缓存网关(§3.5)会再引入一批路径与文件锁语义的平台差异,此时收敛支持面比事后补救便宜得多。
 - 随之删除:`internal/keystore/perm_windows.go` 及其测试、`credman` 残留、`deploy/windows/`、CI 的 windows runner 与 crossbuild 组合、文档中的 Windows 章节。**CLAUDE.md 里"Windows 上用 icacls 收紧 ACL"那条规则同时作废**(§2.5:行为变了,随产物分发的文件和规则都要跟着变)。
 
@@ -948,6 +949,7 @@ odctl share /Finance/2026/report.xlsx --expires 7d --max-uses 10
 7. **§8.3.1 新增:容器 × write-back 缓存的风险。** 平台收窄只针对二进制发布矩阵,**Docker 镜像始终是一等交付物,不受影响**(交付物表 D3 已注明)。但缓存给容器带来一条新的锋利边缘:容器可写层是一次性的,而删容器重建是日常操作,若 `/data/cache` 不在持久卷上,一次 `docker rm` 就会销毁网关已用 202 确认过的数据。对策是三层——compose 默认带命名卷、daemon 启动自检并在 `/v1/cache/status` 暴露 `durable: false`、文档把它放在 Docker 一节最前面。检测不可能完全可靠,因此姿态是告警而非拒绝启动,但话要说死。
 8. **§10.2 探针结果(2026-09-27,D49–D51)。** (b) 不可行:一个 `TempLocation` 只有一个写入游标,并发块的"成功"只是到达顺序的运气,`parallel_chunks` 从配置中删除。(c) 可行:有界 `Range` 被正确执行,但上游按 IP 只允许 6 个并发下载,因此新增全局上限 `max_download_connections`(默认 5),`parallel_ranges` 从中取号。Basic Plan 的速度上限按连接计,并发线性叠加。探针第一版曾因一次运气好的实跑得出相反结论,这一点记在 §10.2(b) 里。
 9. **§8.3 容器凭证改为挂载整个目录。** 原设计的单文件挂载在实测中无法工作(`EBUSY` 导致明文密码无法加密;缺失的 `.env.key` 被 Docker 建成目录),而且失败时 daemon 仍照常运行。现改为挂载目录,并让 daemon 在首次加密失败时拒绝启动。
+10. **§8.1:1.2.1 起 macOS 只支持 Apple Silicon。** Intel Mac 此前已不发布安装包,但仍在 CI 中交叉编译并在 `macos-15-intel` 上跑 smoke;这两项一并删除,文档与发布说明不再提供"Intel Mac 可自行编译"的说法。
 
 
 

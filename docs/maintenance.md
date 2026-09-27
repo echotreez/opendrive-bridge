@@ -81,9 +81,9 @@ So when 1.1 ships, 1.0 gets security fixes and nothing else, and when 1.2 ships,
   users, not as a red build.
 - **Watch the runners.** GitHub retires runner images, and a job whose image no
   longer exists does not fail — it queues until the run times out, which reads as
-  a green tick beside a job that never ran. `macos-15-intel` is the last x86_64
-  macOS image and support ends in autumn 2027; when it goes, darwin/amd64 is
-  compiled but no longer smoke-tested.
+  a green tick beside a job that never ran. The macOS runner in use is
+  `macos-latest` (Apple silicon); Intel Macs are not supported, so no x86_64
+  macOS runner is needed.
 
 ## What is deliberately not automated
 

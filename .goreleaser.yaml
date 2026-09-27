@@ -6,7 +6,8 @@
 # traced back to the commit it was built from.
 #
 # v1.1 dropped darwin/amd64 and windows/arm64 from the *release matrix* only,
-# leaving them cross-compiling and covered by CI. v1.2 removes Windows
+# leaving them cross-compiling and covered by CI; 1.2.1 stops building and
+# smoking darwin/amd64 too — Intel Macs are not supported. v1.2 removes Windows
 # altogether, and that is a different kind of removal: it is the only platform
 # that needed a parallel implementation of things the others share — an icacls
 # ACL for the credential file because NTFS ignores the mode bits, a Windows
@@ -36,9 +37,9 @@ builds:
     env: [CGO_ENABLED=0]
     goos: [linux, darwin]
     goarch: [amd64, arm64]
-    # darwin/amd64 is the one remaining exclusion: Intel Macs, few enough of them
-    # to be worth one fewer archive. linux/arm64 stays because that is a Pi or a
-    # cheap VPS, which is exactly where a bridge like this ends up living.
+    # darwin/amd64 is excluded: Intel Macs are not supported (§8.1). linux/arm64
+    # stays because that is a Pi or a cheap VPS, which is exactly where a bridge
+    # like this ends up living.
     ignore:
       - { goos: darwin, goarch: amd64 }
     flags: [-trimpath]
@@ -55,9 +56,9 @@ builds:
     env: [CGO_ENABLED=0]
     goos: [linux, darwin]
     goarch: [amd64, arm64]
-    # darwin/amd64 is the one remaining exclusion: Intel Macs, few enough of them
-    # to be worth one fewer archive. linux/arm64 stays because that is a Pi or a
-    # cheap VPS, which is exactly where a bridge like this ends up living.
+    # darwin/amd64 is excluded: Intel Macs are not supported (§8.1). linux/arm64
+    # stays because that is a Pi or a cheap VPS, which is exactly where a bridge
+    # like this ends up living.
     ignore:
       - { goos: darwin, goarch: amd64 }
     flags: [-trimpath]
@@ -165,6 +166,21 @@ release:
     section for each platform, one for Docker and one for the cache.
     `docs/deployment.md` covers running it as a background service.
 
+    ### Fixed in 1.2.1 — upgrade if you use 1.2.0 or 1.0
+
+    - **An upload that had finished could be deleted from OpenDrive.** If the
+      bridge stopped — a crash, `kill -9`, a container removed — in the moment
+      after an upload completed, the next start could mistake the finished file
+      for an abandoned one and delete it, without the trash step. The same could
+      happen when a transfer was cancelled, or failed while waiting for OpenDrive
+      to show the new file. It now asks OpenDrive first and deletes only records
+      that are provably empty; a finished file is kept and its transfer is
+      reported as succeeded.
+    - **Apple's `container` on macOS** is now measured and documented: it needs no
+      `chown`, but the one-bridge-per-folder lock does not hold between
+      containers, so run one per folder.
+    - **Intel Macs are no longer supported**, not even from source.
+
     ### New in 1.2
 
     - **A local cache, off unless you turn it on.** With it on, the bridge keeps
@@ -184,9 +200,9 @@ release:
 
     ### No longer supported
 
-    - **Windows.** 1.2 ships for macOS on Apple silicon and for Linux (x86-64
-      and ARM64). On Windows, run the container. There is no Intel Mac archive;
-      build from source there (`go build ./cmd/...`).
+    - **Windows and Intel Macs.** 1.2 ships for macOS on Apple silicon and for
+      Linux (x86-64 and ARM64), and those are the platforms it supports. On
+      Windows, run the container.
   footer: |
     ### Checking what you downloaded
 

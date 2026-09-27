@@ -138,6 +138,9 @@ jobs:
       matrix:
         goos: [linux, darwin]
         goarch: [amd64, arm64]
+        # The shipped targets and no others: Intel Macs are not supported (§8.1).
+        exclude:
+          - { goos: darwin, goarch: amd64 }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -152,16 +155,13 @@ jobs:
   # one of the quieter benefits of dropping Windows (§8.1): there is no longer a
   # combination that is only ever cross-compiled and hoped about.
   #
-  # darwin/amd64 is built but not released, and still smoked here because the
-  # runner exists. It uses macos-15-intel. It was macos-13, which GitHub retired
-  # in December 2025; the job did not fail, it queued for a runner that no longer
-  # exists and would have sat there until the run timed out. A green tick on a
-  # job that never started is the same class of problem as a 200 that means
-  # nothing, so it is worth naming.
-  #
-  # macos-15-intel is the last x86_64 macOS image GitHub intends to offer, and
-  # support for it ends in autumn 2027. When it goes, darwin/amd64 becomes
-  # compiled-only unless Apple hardware is available to run it on.
+  # Intel Macs are not supported (§8.1, decided for 1.2.1), so darwin/amd64 is
+  # neither smoked nor built. It used to be smoked on macos-15-intel, and before
+  # that on macos-13 — which GitHub retired in December 2025, after which the job
+  # did not fail but queued for a runner that no longer existed until the run
+  # timed out. A green tick on a job that never started is the same class of
+  # problem as a 200 that means nothing; the lesson stands for the runners that
+  # remain.
   smoke:
     timeout-minutes: 15
     strategy:
@@ -170,7 +170,6 @@ jobs:
         include:
           - { os: ubuntu-latest, target: linux/amd64 }
           - { os: macos-latest, target: darwin/arm64 }
-          - { os: macos-15-intel, target: darwin/amd64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
