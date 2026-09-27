@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -203,6 +204,48 @@ func (s *envStore) APIKey(ctx context.Context) (string, error) {
 
 // ---------------------------------------------------------------- file access
 
+// Seal encrypts a plaintext .env now, and reports any reason it cannot.
+//
+// read() also seals on a first run, but read() is reached through Load, which
+// the daemon calls "best effort" so that it stays up to answer `odctl status`.
+// That was right for a credential that cannot be *used*, and wrong for one that
+// cannot be *sealed*: a failed seal leaves the password on disk in the clear
+// while the daemon runs and looks configured. It was found by running the
+// documented Docker command, which mounted .env as a single file — upstream of
+// every test, the rename that seals it failed with EBUSY, and the container
+// reported itself healthy with the plaintext password still on the host.
+//
+// So the daemon calls this before anything else, and a failure is a refusal to
+// start. A file that is already encrypted, or absent, or empty is not this
+// function's business: those are reported by /v1/auth/status as before.
+func Seal(ctx context.Context, st Store) error {
+	s, ok := st.(*envStore)
+	if !ok {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raw, err := os.ReadFile(s.path) // #nosec G304 -- the configured credential file
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("keystore: cannot read %s: %w", s.path, err)
+	}
+	if isEncrypted(raw) {
+		return nil
+	}
+	fields := parseEnv(raw)
+	if len(fields) == 0 {
+		return nil
+	}
+	if err := s.writeLocked(ctx, fields); err != nil {
+		return fmt.Errorf("%w. Your password is still in %s unencrypted; the bridge will "+
+			"not run with it like that", err, s.path)
+	}
+	return nil
+}
+
 // read returns the file's fields, decrypting it and, on a first run, sealing it.
 //
 // The first run is the only moment a plaintext credential exists on disk, and it
@@ -295,6 +338,15 @@ func (s *envStore) loadKey() ([]byte, error) {
 func (s *envStore) ensureKey() ([]byte, error) {
 	if key, err := s.loadKey(); err == nil {
 		return key, nil
+	}
+	// Docker, asked to bind-mount a file that does not exist yet, creates a
+	// directory of that name on the host instead — which is exactly what
+	// mounting .env.key on its own does before the first run has made it.
+	if fi, err := os.Stat(s.keyPath); err == nil && fi.IsDir() {
+		return nil, fmt.Errorf("keystore: %s is a directory, not a key file. Docker makes "+
+			"one when it is asked to mount a file that does not exist yet. Remove it, and "+
+			"mount the folder that holds %s instead of the files one by one",
+			s.keyPath, EnvFileName)
 	}
 	if len(s.key) > 0 {
 		return s.key, nil
@@ -557,6 +609,15 @@ func writeFileAtomic(path string, data []byte) error {
 		return fmt.Errorf("keystore: cannot close %s: %w", path, err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
+		// A file that is itself a mount point cannot be replaced, only written
+		// into, and the atomic replacement above is not negotiable (§9.2.4). The
+		// usual way to get here is `docker run -v ./.env:/data/.env`.
+		if errors.Is(err, syscall.EBUSY) {
+			return fmt.Errorf("keystore: cannot replace %s: it is mounted on its own, as a "+
+				"single file, and a mounted file cannot be swapped for a new one. Mount the "+
+				"folder that holds it instead (for Docker: -v \"$PWD:/data\", not "+
+				"-v \"$PWD/.env:/data/.env\")", filepath.Base(path))
+		}
 		return fmt.Errorf("keystore: cannot replace %s: %w", path, err)
 	}
 	// The mode is reasserted after the rename, in case an existing file was

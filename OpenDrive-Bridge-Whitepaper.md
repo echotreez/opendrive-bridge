@@ -657,7 +657,7 @@ docker run -d -p 127.0.0.1:9750:9750 \
 | 部署单元 | 用户解压的一个目录 | 镜像本身 |
 | 为什么原地运行 | 免 sudo、卸载即删目录、便于用户维护备份 | 三条理由都不成立:镜像不可变、丢弃重建即"卸载" |
 | 二进制位置 | 解包目录 | **`/usr/local/bin`(FHS,结构更清晰)** |
-| 凭证位置 | 解包目录内的 `.env` / `.env.key` | `/data/.env` / `/data/.env.key`,**运行时挂载** |
+| 凭证位置 | 解包目录内的 `.env` / `.env.key` | `/data/.env` / `/data/.env.key`,**挂载整个目录**(见下) |
 | 缓存位置 | 解包目录内的 `./cache` | `/data/cache`,**必须是持久卷**,见 §8.3.1 |
 
 ```dockerfile
@@ -669,12 +669,12 @@ ENTRYPOINT ["/usr/local/bin/opendrived"]
 
 ```bash
 docker run -d -p 127.0.0.1:9750:9750 \
-  -v $PWD/.env:/data/.env -v $PWD/.env.key:/data/.env.key \
-  -v odb-cache:/data/cache \
-  <registry>/opendrive-bridge:1.2.0
+  -e ODB_API_KEY -e ODB_CACHE_DIR=/data/cache \
+  -v $PWD/data:/data \
+  <registry>/opendrive-bridge:1.2
 ```
 
-`.env` 需要可写(首次运行要把加密结果写回,token 轮换也要落盘),因此**不能挂成 `:ro`**;`.env.key` 可以只读。镜像里绝不包含任何凭证文件,`.dockerignore` 必须覆盖 `.env` 与 `.env.key`。提供 `docker-compose.yaml` 样例与 healthcheck(`GET /v1/auth/status`)。
+**挂载整个目录,而不是 `.env`/`.env.key` 两个文件。** 本节原先规定的是单文件挂载。2026-09-27 在 CI 里照做实测,两处同时失败:`.env` 的写入是原子替换(写临时文件再 rename 覆盖),而一个本身就是挂载点的文件不能被 rename 覆盖(`EBUSY`),于是首次运行无法加密,**明文密码留在宿主机上,容器却显示运行正常**;另一边,`.env.key` 在首次运行前还不存在,Docker 会在宿主机上替它建一个 root 所有的**目录**。按 CLAUDE.md 第 0 条,这是设计本身写错了,所以改的是设计:目录归镜像用户 uid 65532 所有(`chown -R`),`.env`、`.env.key`、`jobs/`、`cache/` 都在里面,与主机安装"所有东西都在一个文件夹里"一致。同时 daemon 启动时先完成首次加密(`keystore.Seal`),**加密失败即拒绝启动**并说明是哪一种情况——宁可起不来,也不能带着明文密码运行。`.env` 仍须可写(token 轮换要落盘)。镜像里绝不包含任何凭证文件,`.dockerignore` 必须覆盖 `.env` 与 `.env.key`。提供 `docker-compose.yaml` 样例与 healthcheck(`GET /v1/auth/status`)。
 
 #### 8.3.1 容器 × write-back 缓存:本次改造最锋利的一条边(v1.2 新增)
 
@@ -947,6 +947,7 @@ odctl share /Finance/2026/report.xlsx --expires 7d --max-uses 10
 6. §3.2 仓库结构:新增 `internal/ui/` 与 `internal/datacache/`;后者与既有的 `internal/cache/`(元数据缓存)是**两件不同的事**,命名与配置项不得混用。
 7. **§8.3.1 新增:容器 × write-back 缓存的风险。** 平台收窄只针对二进制发布矩阵,**Docker 镜像始终是一等交付物,不受影响**(交付物表 D3 已注明)。但缓存给容器带来一条新的锋利边缘:容器可写层是一次性的,而删容器重建是日常操作,若 `/data/cache` 不在持久卷上,一次 `docker rm` 就会销毁网关已用 202 确认过的数据。对策是三层——compose 默认带命名卷、daemon 启动自检并在 `/v1/cache/status` 暴露 `durable: false`、文档把它放在 Docker 一节最前面。检测不可能完全可靠,因此姿态是告警而非拒绝启动,但话要说死。
 8. **§10.2 探针结果(2026-09-27,D49–D51)。** (b) 不可行:一个 `TempLocation` 只有一个写入游标,并发块的"成功"只是到达顺序的运气,`parallel_chunks` 从配置中删除。(c) 可行:有界 `Range` 被正确执行,但上游按 IP 只允许 6 个并发下载,因此新增全局上限 `max_download_connections`(默认 5),`parallel_ranges` 从中取号。Basic Plan 的速度上限按连接计,并发线性叠加。探针第一版曾因一次运气好的实跑得出相反结论,这一点记在 §10.2(b) 里。
+9. **§8.3 容器凭证改为挂载整个目录。** 原设计的单文件挂载在实测中无法工作(`EBUSY` 导致明文密码无法加密;缺失的 `.env.key` 被 Docker 建成目录),而且失败时 daemon 仍照常运行。现改为挂载目录,并让 daemon 在首次加密失败时拒绝启动。
 
 
 
