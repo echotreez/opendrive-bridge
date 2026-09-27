@@ -302,6 +302,20 @@ out `ODB_CACHE_DIR` and the cache stays off.
 On Docker Desktop, put the cache on a named volume instead by adding
 `-v odb-cache:/data/cache` after the folder mount (see the box above).
 
+**On a Mac with Apple's `container`** (measured with 1.2.0): the same command works
+with `container run` in place of `docker run`, and **without** the `sudo chown` —
+the files the bridge writes appear on the Mac as yours. An upload accepted with a
+202, followed at once by `container kill --signal KILL`, was re-sent after
+`container start` and arrived byte for byte. Two limits, both measured:
+
+- `odctl up` and `odctl down` cannot move files through a bridge in a container:
+  they hand the bridge a path on your Mac, which it cannot see. Use the REST
+  endpoints `PUT /v1/upload/stream` and `GET /v1/download/stream` for now.
+- **The one-bridge-per-folder lock does not work across containers here.** Each
+  container is its own virtual machine with its own kernel, and a second
+  container on the same folder started as if the first were not there. Run one
+  container per folder, and check with `container ls` before starting another.
+
 `deploy/docker/docker-compose.yaml` is the same thing written down, with a
 healthcheck.
 
@@ -326,7 +340,10 @@ Things to get right:
   container — or a bridge on the host — pointed at the same folder refuses to
   start, rather than two of them writing one journal and losing files between
   them. The lock is released when the holder exits, however it exits, so a crash
-  never leaves the directory stuck.
+  never leaves the directory stuck. It works between processes that share a
+  kernel — containers and the host on one Linux machine — and **not** between
+  containers that are each their own virtual machine (Apple's `container`, and
+  possibly Docker Desktop), where making sure only one runs is up to you.
 - **The cache is not encrypted.** `.env` is; `data/cache` is not. It holds your
   files exactly as they are, protected only by the directory's permissions and by
   whatever the disk underneath gives you. The bridge sets the directory to 0700 —
