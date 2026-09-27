@@ -1308,3 +1308,36 @@ paid login.
 raises the value of the job engine's worker pool and of `parallel_ranges`, and
 makes the data cache's flush pool (`DefaultFlushWorkers = 2`) the ceiling on
 write-back throughput.
+
+## D52 — an upload record has no size and no hash until it is closed {#d52}
+
+**Where:** `GET /file/info.json/{file_id}` on a record made by `upload/create_file.json`.
+**Found by:** chasing a flaky CI test into the job engine's crash recovery, 2026-09-27.
+
+Measured on the live API with a 512 KiB upload, reading `file/info` at each step:
+
+| after | `Size` | `FileHash` |
+|---|---|---|
+| `create_file` | 0 | empty |
+| `open_file_upload` | 0 | empty |
+| half the bytes | 0 | empty |
+| **every byte, not yet closed** | 0 | empty |
+| `close_file_upload` | 524288 (the declared size) | the content's MD5 |
+
+So an unclosed record is distinguishable from a finished file by `file/info`
+alone, and nothing about the bytes received shows until the close.
+
+**Why it matters:** the job engine deletes the record an interrupted upload leaves
+behind, with the no-trash `DELETE /file.json` (D29) — and "interrupted" was only
+the engine's belief. `finish()` made a success visible before saving it, and an
+upload spends the D44 wait after its close still marked running, so a crash in
+either gap left a finished file looking like an orphan, and recovery deleted it
+permanently. A user who had been told the upload succeeded and removed the local
+copy would have lost the file.
+
+**Consequence:** `finish()` saves before it publishes, and `reclaim` asks
+`file/info` first. It deletes only a record with no size and no hash; a record
+with the expected size (and hash, when the job knows it) is the finished file, and
+recovery records the job as succeeded; anything else, or a record it cannot check,
+is kept. Covered by `internal/jobs/durability_test.go`, and on the wire by
+`TestSandboxAnUnclosedRecordHasNoSizeOrHash`, which keeps the premise honest.

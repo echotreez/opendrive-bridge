@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -333,9 +334,27 @@ func (e *Engine) Recover(ctx context.Context) error {
 			continue
 		}
 
-		// Anything not terminal was interrupted.
+		// Anything not terminal was interrupted — unless upstream shows the upload
+		// had in fact finished, in which case it is recorded as what it was.
 		if j.Kind == KindUpload && j.UpstreamFileID != "" {
-			e.reclaim(ctx, j)
+			if e.reclaim(ctx, j) {
+				j.State = StateSucceeded
+				j.Speed = 0
+				j.Error = nil
+				if j.BytesTotal > 0 {
+					j.BytesDone = j.BytesTotal
+				}
+				j.UpstreamFileID, j.UpstreamTempLocation = "", ""
+				j.UpdatedAt = e.now()
+				if saveErr := e.store.Save(j); saveErr != nil {
+					e.log.Error("cannot persist a recovered job",
+						slog.String("job", j.ID), slog.String("error", saveErr.Error()))
+				}
+				e.mu.Lock()
+				e.jobs[j.ID] = j
+				e.mu.Unlock()
+				continue
+			}
 			j.UpstreamFileID, j.UpstreamTempLocation = "", ""
 			j.BytesDone = 0
 		}
@@ -641,19 +660,41 @@ func (e *Engine) progress(id string, done, total int64, tracker *speed) {
 	e.mu.Unlock()
 }
 
+// finish records a terminal state on disk first and only then makes it visible.
+//
+// The other order — visible, then saved — was measurable: a CI run read
+// "succeeded" from Get while the store still said "running", and a crash in that
+// gap would have left a job the user had been told was done looking interrupted
+// to Recover, which reclaims interrupted uploads. That is the order of operations
+// §3.5.2 rule 3 forbids for the cache ("nothing acknowledged before it is
+// durable"), and it applies to the job record for the same reason.
 func (e *Engine) finish(id string, state State, err error) {
 	e.mu.Lock()
-	if j, ok := e.jobs[id]; ok {
-		j.State = state
-		j.Speed = 0
-		j.Error = newError(err)
-		j.UpdatedAt = e.now()
-		if state == StateSucceeded && j.BytesTotal > 0 {
-			j.BytesDone = j.BytesTotal
-		}
+	j, ok := e.jobs[id]
+	if !ok {
+		e.mu.Unlock()
+		return
+	}
+	next := j.Clone()
+	e.mu.Unlock()
+
+	next.State = state
+	next.Speed = 0
+	next.Error = newError(err)
+	next.UpdatedAt = e.now()
+	if state == StateSucceeded && next.BytesTotal > 0 {
+		next.BytesDone = next.BytesTotal
+	}
+	if saveErr := e.store.Save(next); saveErr != nil {
+		e.log.Error("cannot persist job state",
+			slog.String("job", id), slog.String("error", saveErr.Error()))
+	}
+
+	e.mu.Lock()
+	if _, ok := e.jobs[id]; ok {
+		e.jobs[id] = next
 	}
 	e.mu.Unlock()
-	_ = e.persist(id)
 }
 
 func (e *Engine) cancelled(id string) bool {
@@ -705,12 +746,43 @@ func (e *Engine) reclaimByID(ctx context.Context, id string) {
 // retries and recovery — because that is the only way the guarantee holds. An
 // Overwrite job is exempt: create_file may have handed back a file that already
 // existed, which was never ours to delete.
-func (e *Engine) reclaim(ctx context.Context, j *Job) {
+// reclaim deletes the upstream record an interrupted upload left behind — but only
+// once upstream has shown it is an empty one. It reports whether the record turned
+// out to be a complete file instead.
+//
+// Reclaim deletes without a trash step (D29), so being wrong costs the user's file.
+// And "interrupted" is the engine's belief, not upstream's: close_file_upload can
+// succeed and the process die before the record says so, and a failure after the
+// transfer (the D44 wait timing out) arrives with the file already whole. D52 is
+// what makes the check possible: until it is closed, a record reports Size 0 and
+// no FileHash; after, it reports both. Anything that looks like a file is kept,
+// and anything that cannot be checked is kept too — an orphaned empty record is a
+// nuisance (D39), a deleted file is not recoverable.
+func (e *Engine) reclaim(ctx context.Context, j *Job) (complete bool) {
 	if j == nil || j.UpstreamFileID == "" || j.Spec.Overwrite {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
+
+	info, err := e.client.Files().Info(ctx, j.UpstreamFileID)
+	switch {
+	case opendrive.ErrorKind(err) == opendrive.KindNotFound:
+		return false // nothing there to reclaim
+	case err != nil:
+		e.log.Warn("kept an upload record that could not be checked; it may be left behind",
+			slog.String("job", j.ID), slog.String("file_id", j.UpstreamFileID),
+			slog.String("error", opendrive.RedactString(err.Error())))
+		return false
+	case recordIsWholeFile(info, j):
+		e.log.Info("kept an upload record that turned out to be the finished file",
+			slog.String("job", j.ID), slog.String("file_id", j.UpstreamFileID))
+		return true
+	case info.FileHash != "" || info.Size.Int64() != 0:
+		e.log.Warn("kept an upload record that is neither empty nor the expected file",
+			slog.String("job", j.ID), slog.String("file_id", j.UpstreamFileID))
+		return false
+	}
 
 	if err := e.client.Uploads().Reclaim(ctx, j.UpstreamFileID, "", ""); err != nil {
 		e.log.Warn("could not reclaim the record left by a stopped upload",
@@ -720,6 +792,27 @@ func (e *Engine) reclaim(ctx context.Context, j *Job) {
 	}
 	e.log.Debug("reclaimed the record left by a stopped upload",
 		slog.String("job", j.ID), slog.String("file_id", j.UpstreamFileID))
+	return false
+}
+
+// recordIsWholeFile reports whether file/info describes the file this job was
+// uploading, closed: a hash (absent until close, D52), the size the job declared,
+// and the job's hash when it knows one.
+func recordIsWholeFile(info *opendrive.FileInfo, j *Job) bool {
+	if info == nil || info.FileHash == "" {
+		return false
+	}
+	want := j.Spec.Size
+	if want <= 0 {
+		want = j.BytesTotal
+	}
+	if want > 0 && info.Size.Int64() != want {
+		return false
+	}
+	if j.Spec.Hash != "" && !strings.EqualFold(j.Spec.Hash, info.FileHash) {
+		return false
+	}
+	return true
 }
 
 // ---------------------------------------------------------------- small parts
