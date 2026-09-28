@@ -391,6 +391,72 @@ write-back 把 Bridge 从"从不持有用户数据"变成"在一段时间内是�
 - 缓存目录存放的是**用户明文数据**,与 `.env` 的加密不同——它的保护依赖文件系统权限(0700)与所在磁盘的加密。这一点必须写进用户文档,不能让人以为"Bridge 什么都加密"。
 - 元数据缓存(§10.3 的路径→ID 与目录列表)与本节的**数据缓存**是两回事,命名、配置项、失效逻辑都不得混用。
 
+## 3.6 S3 网关与挂载 S3 Gateway & Mount(1.0.0 新增)
+
+### 3.6.1 为什么这才是项目的主要目的(Derek,2026-09-27)
+
+Bridge 的主要价值不是一套自有的 REST API,而是作为**本地云存储网关**——与 S3 对象存储前面的网关同一个角色:
+
+- **备份软件**(目标:群晖 Hyper Backup、restic、Kopia、Arq、Duplicati)把 Bridge 当作一个 S3 兼容服务器,直接备份与恢复;写入先落本地缓存(§3.5)立即确认,后台由 Bridge 传到 OpenDrive。
+- **非备份软件**通过把 OpenDrive **挂载成本地目录**来使用,像操作本地硬盘一样;挂载层复用成熟的 `rclone mount`,由 `odctl mount` 一条命令包装。
+
+REST API(§4)保留,作为 `odctl` 与 Web GUI 的接口;S3 是面向第三方软件的接口。
+
+### 3.6.2 选型:`rclone/gofakes3` 作为 S3 协议层
+
+| 候选 | 结论 |
+|---|---|
+| **rclone/gofakes3**(MIT) | **采用**。rclone `serve s3` 即建立在它之上,经过大量实际使用;支持 SigV4;接口带 context;有可选的 `MultipartBackend`,**分片可流式直接写入后端**,不在内存里缓冲(原版 gofakes3 会把所有分片放在内存,对 GB 级备份不可用)。我们只需实现约 10 个方法的 `Backend` 接口,底层接 §3.5 的数据缓存与 SDK。 |
+| versitygw(Apache 2.0) | 不采用。功能最全,但它是一整套网关;接自定义后端要么用只在 Linux 可用的 Go plugin,要么把整套代码作为依赖引入,对本项目过重。 |
+| 自己实现 S3 协议 | 不采用。SigV4、XML 编码、分页、分片的边角极多,rclone 已踩过的坑没有理由再踩一遍。 |
+
+Backend 接口标注为"尚未稳定",所以依赖**钉死版本**,升级前跑完整 S3 测试套件。
+
+### 3.6.3 映射规则
+
+| S3 | OpenDrive | 说明 |
+|---|---|---|
+| bucket | 根目录下的顶层文件夹 | CreateBucket = 建顶层文件夹;DeleteBucket 仅限空文件夹。S3 客户端普遍要求 bucket 名全小写(restic 会拒绝 `Documents`),备份时应新建小写 bucket。 |
+| key 中的 `/` | 真实子文件夹 | `a/b/c.bin` 落在 `bucket/a/b/c.bin`;不存在的中间文件夹在写入时创建。以 `/` 结尾的零字节对象 = 建文件夹。 |
+| OpenDrive 不允许的字符 | 可逆替换 | `\ : * ? " < > \|` 等按 rclone 的做法替换成全角等价字符,读回时还原;D46(名字首尾空白会被上游静默去掉)同样做可逆编码。 |
+| ETag | OpenDrive 的 MD5(FileHash) | 与 S3 普通上传的 ETag 天然一致。分片上传的 ETag 在 Complete 时按 S3 规则返回(`md5-of-md5s-N`),之后列表里显示整个文件的 MD5——备份软件不比对二者,记为已知差异。 |
+| Last-Modified | OpenDrive DateModified | 缓存中尚未上传的对象用写入时间。 |
+| 删除 | **移到 OpenDrive 回收站**(Derek 决定) | 可配置 `s3.delete: trash | permanent`。默认可恢复:bridge 或备份软件出错时能从回收站找回;代价是空间要等回收站清空才释放,文档写明。 |
+| 版本、对象锁、自定义元数据、ACL、生命周期 | **不支持** | OpenDrive 无对应能力;四个目标软件均不需要。Veeam 等依赖对象锁的软件不在目标内。 |
+
+### 3.6.4 与缓存网关的关系——两条硬约束
+
+1. **刚写入、尚未传到 OpenDrive 的对象必须出现在 List/Head/Get 的结果里**(用缓存中的脏对象覆盖上游列表)。restic 等写完立刻列目录核对,看不到就会判定仓库损坏。D44(上游读后写不一致)同样由这层覆盖解决。
+2. **OpenDrive 暂时不可达时仍要接受写入**(原待办 #9)。现状是写入前先向上游解析父目录,上游一出问题所有写入都 502——而那恰恰是网关最该兜住的时刻。改为:父路径在元数据缓存中已知则直接接受;未知的中间文件夹记入 journal,由 flusher 在上游恢复后按序创建。**这是 S1 的前置条件(S0)**。
+
+分片上传:每个分片流式写入缓存目录下的暂存文件(fsync),Complete 时按序拼接成一个缓存对象(脏),遵守 §3.5.2 的全部规则;未完成的分片上传在 journal 中可见,可被 Abort,超过配置期限(默认 7 天)的自动清理并记日志。
+
+### 3.6.5 安全与网络
+
+- **独立端口**。REST API 仍只开放本机(9750);S3 使用新端口,**可对局域网开放**(NAS 上的 Hyper Backup 要连进来),因此 S3 **强制 SigV4 签名认证**,没有例外。
+- **访问密钥由 Bridge 自动生成**(首次启动),加密保存在 `credentials.key`;Web GUI 显示并可重置,`odctl s3 credentials` 可查询。用户不需要事先准备任何东西(延续 §9.2 的"零准备"原则)。
+- **HTTPS**:Hyper Backup 实测要求 TLS。S3 端口默认提供 HTTPS,首次启动自动生成自签名证书(存于数据目录);可换成用户自己的证书(例如群晖 DSM 的 Let's Encrypt 证书)。同时在本机回环上提供 HTTP,供 `rclone mount` 与同机的 restic 使用。**Hyper Backup 是否接受自签名证书必须在真机上实测**(S3 验收的第一项)。
+- 容器:compose 发布 S3 的 HTTPS 端口到所有接口(签名认证保护),REST 端口仍只发布到 127.0.0.1。
+
+### 3.6.6 挂载
+
+`odctl mount <目录>` 启动 `rclone mount`,指向本机 S3 回环端口,使用 Bridge 生成的密钥,`--vfs-cache-mode writes`(随机写需要)。需要用户安装 rclone,macOS 另需 macFUSE 或 FUSE-T;缺失时一句话说明装什么。Bridge 自身不实现文件系统:正确的挂载要处理随机写、重命名、锁、部分写入,且各平台一套——这正是 §8.1 去掉 Windows 时要避免的负担。内置挂载(如本地 NFS 服务)留作以后的选项。
+
+### 3.6.7 已知限制(写进用户文档)
+
+- 实际上传/下载速度受 OpenDrive 套餐约束(D50:每 IP 6 个并发下载;D51:Basic 套餐每连接 200 KB/s)。缓存让前台"快",改变不了到云端的速度。
+- 递归列表(无 delimiter)需要逐层列目录,大仓库首次列表较慢;依赖元数据缓存(§10.3)。
+- 挂载经过 rclone VFS 与 Bridge 数据缓存两层缓存,磁盘占用需预留。
+
+### 3.6.8 阶段与验收
+
+| 阶段 | 内容 | 验收(CI 自动,除非注明) |
+|---|---|---|
+| **S0** | 上游不可达时接受写入(#9);列表覆盖脏对象 | 断开 mock 上游后写入成功、恢复后送达并逐字节一致;写后立即列表可见 |
+| **S1** | S3 核心:bucket、ListObjects v1/v2(含 delimiter 与递归)、Head/Get(Range)/Put/Delete/DeleteMulti/Copy、流式分片、SigV4、自动密钥、HTTPS | **restic 完整流程**(init → backup → check → restore,逐字节比对)对 mock 上游跑通;aws-sdk / minio-go 协议测试;rclone check |
+| **S2** | `odctl mount`、Web GUI 的 S3 面板、文档、compose | 挂载后读写往返(Linux runner 上 FUSE) |
+| **S3** | 真账号验收 | restic、Kopia、rclone 对真账号(两个测试账号)跑通;**Derek 手工**:Hyper Backup(先测自签名证书)、Arq、Duplicati,按清单逐项;通过后发 1.0.0-rc.2 |
+
 ---
 
 ## 4. Bridge 对外接口设计
@@ -925,6 +991,8 @@ odctl share /Finance/2026/report.xlsx --expires 7d --max-uses 10
 5. 所有公开函数写 godoc;错误信息面向使用者,不泄漏内部路径与 token。
 
 ### E. 修订记录 Changelog
+
+**白皮书 v1.5 (2026-09-27)——S3 网关与挂载(并入 1.0.0)** — Derek 指出项目的主要目的:Bridge 作为本地云存储网关,备份软件通过 S3 直接使用,其他软件通过挂载目录使用。新增 §3.6:rclone/gofakes3 作为协议层、顶层文件夹 = bucket、独立的 S3 端口强制 SigV4、自动生成密钥与自签名 HTTPS、删除默认进回收站、挂载复用 rclone;阶段 S0–S3。1.0.0 正式版推迟到 S3 验收之后。
 
 **白皮书 v1.4.1 (2026-09-27)——版本号重置:本设计即产品 1.0.0** — 此前的产品版本全部作废,tag 与 Release 删除;从旧 `.env` 自动导入的功能随之删除(没有需要迁移的正式版本)。
 
