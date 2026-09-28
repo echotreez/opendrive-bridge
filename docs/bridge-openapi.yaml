@@ -372,6 +372,12 @@ paths:
         507 `cache_full` means the gateway is already holding as much unsent data
         as it is allowed to. Nothing was lost; nothing more can be accepted until
         some of it reaches OpenDrive.
+
+        When OpenDrive cannot be reached, a write with `overwrite=true` is still
+        answered 202: the bridge holds it and delivers it — creating any folders on
+        the path — once OpenDrive is back. Without `overwrite=true` it answers 503,
+        because whether something is already at the path cannot be checked. While
+        OpenDrive is reachable, a path whose folder does not exist is still a 404.
       parameters:
         - { $ref: "#/components/parameters/Path" }
         - name: overwrite
@@ -910,6 +916,13 @@ components:
         public: { type: boolean }
         children: { type: integer }
         link: { type: string }
+        pending:
+          type: boolean
+          description: |
+            True for something the bridge holds that has not reached OpenDrive
+            yet — a write-back upload, or a folder that exists only because such
+            an upload is waiting for it. Listed so that a client sees what it was
+            just told was stored.
 
     Listing:
       type: object

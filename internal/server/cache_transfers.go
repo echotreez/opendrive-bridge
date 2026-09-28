@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 	"io"
 	"log/slog"
 	"net/http"
@@ -57,6 +58,30 @@ const (
 )
 
 // writeBackEnabled reports whether a write should land in the cache.
+// uploadTargetOrDefer is uploadTarget for a write the gateway can hold. When
+// OpenDrive cannot be reached and write-back is on, a write that replaces what is
+// there is accepted with no folder id, and the flusher (or the job's direct
+// path) resolves — or creates — the folders once OpenDrive is back (§3.6.4).
+// "Do not overwrite" cannot be honoured blind, so that is refused in words.
+func (s *Server) uploadTargetOrDefer(r *http.Request, remote string, overwrite bool) (string, string, error) {
+	folderID, name, err := s.uploadTarget(r, remote, overwrite)
+	if err == nil || !opendrive.IsTemporary(err) || !s.writeBackEnabled() {
+		return folderID, name, err
+	}
+	if !overwrite {
+		return "", "", &RequestError{
+			Code: string(opendrive.KindUpstreamError), HTTP: http.StatusServiceUnavailable,
+			Message: "OpenDrive cannot be reached right now, so the bridge cannot check that " +
+				"nothing is at " + remote + " already. Send overwrite=true to store it anyway — " +
+				"it will be delivered when OpenDrive is back — or try again later.",
+		}
+	}
+	_, name = splitPath(remote)
+	s.log.Info("accepted a write while OpenDrive is unreachable; it will be delivered later",
+		slog.String("path", remote))
+	return "", name, nil
+}
+
 func (s *Server) writeBackEnabled() bool {
 	return s.datacache != nil && s.datacache.Status().WriteBack
 }
@@ -176,11 +201,18 @@ func (s *Server) handleUploadStreamCached(w http.ResponseWriter, r *http.Request
 	}
 	overwrite := r.URL.Query().Get("overwrite") == "true"
 
-	// The parent is still resolved upstream before a byte is accepted. It costs a
-	// metadata call the cache cannot avoid, and it buys the caller a refusal now
-	// rather than an object that sits dirty for ever because its folder does not
-	// exist. Failing fast on an impossible path is worth one round trip.
-	folderID, name, err := s.uploadTarget(r, remote, overwrite)
+	// The parent is resolved upstream first when upstream can be asked: a path
+	// whose folder does not exist is refused now, rather than becoming an object
+	// that would create folders nobody asked for.
+	//
+	// When OpenDrive cannot be reached, though, that question has no answer, and
+	// refusing is exactly wrong: the moment a client most needs the gateway to
+	// hold a write is the moment upstream is having a bad minute (§3.6.4, the
+	// old open question #9). So a temporary failure accepts the write with no
+	// folder id, and the flusher resolves — or creates — the path once it can.
+	// Only a write that replaces whatever is there may do this: "do not
+	// overwrite" is a promise about the destination that cannot be kept blind.
+	folderID, name, err := s.uploadTargetOrDefer(r, remote, overwrite)
 	if err != nil {
 		WriteError(w, r, err)
 		return

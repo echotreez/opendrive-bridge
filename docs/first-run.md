@@ -235,10 +235,12 @@ while — usually seconds — **the bridge is the only place that file exists.**
 
 That is a genuinely useful trade: once a file is in the cache, a network drop or a
 bad minute at OpenDrive no longer loses it — the bridge keeps trying, and picks up
-again after a restart. It does **not** yet help if OpenDrive is already unreachable
-when you start the upload: the bridge checks the destination folder with OpenDrive
-before it accepts a byte, so that upload fails as it would without the cache. And
-it means "the upload finished" and "OpenDrive has it" stop being the same sentence,
+again after a restart. It also helps if OpenDrive is already unreachable when you
+start: an upload that is allowed to replace what is there (`--overwrite`, and
+every S3 write) is accepted and held, shows in listings marked as pending, and is
+delivered — folders created as needed — once OpenDrive answers again. An upload
+that must *not* replace anything is refused with a sentence saying so, because
+nobody can check the destination while OpenDrive is away. And it means "the upload finished" and "OpenDrive has it" stop being the same sentence,
 so the bridge gives you a way to ask.
 
 `odctl up` does not leave you guessing: even with the cache on, it waits until the

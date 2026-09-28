@@ -64,7 +64,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	folderID, name, err := s.uploadTarget(r, remote, req.Overwrite)
+	folderID, name, err := s.uploadTargetOrDefer(r, remote, req.Overwrite)
 	if err != nil {
 		WriteError(w, r, err)
 		return

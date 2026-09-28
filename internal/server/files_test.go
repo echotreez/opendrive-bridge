@@ -27,6 +27,14 @@ type fakeUpstream struct {
 	files    map[string]int64
 	calls    []string
 	infoHits int
+	// down makes every request fail with a 503, as an outage would.
+	down bool
+}
+
+func (u *fakeUpstream) setDown(v bool) {
+	u.mu.Lock()
+	u.down = v
+	u.mu.Unlock()
 }
 
 func newFakeUpstream(t *testing.T) *fakeUpstream {
@@ -57,6 +65,15 @@ func (u *fakeUpstream) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(raw, &body)
 	}
 	path := r.URL.Path
+
+	u.mu.Lock()
+	down := u.down
+	u.mu.Unlock()
+	if down {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":{"code":503,"message":"Service Unavailable"}}`)
+		return
+	}
 
 	u.mu.Lock()
 	u.calls = append(u.calls, r.Method+" "+path)
@@ -169,6 +186,9 @@ func (u *fakeUpstream) server(t *testing.T) *Server {
 		opendrive.WithAuthenticator(stubAuth{}),
 		opendrive.WithAccessProbe(nil),
 		opendrive.WithPathCache(pc),
+		// No retries: an outage in these tests should be answered at once, not
+		// after a backoff ladder.
+		opendrive.WithRetryPolicy(opendrive.RetryPolicy{Max: 0}),
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"errors"
+	"github.com/echotreez/opendrive-bridge/internal/datacache"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
@@ -32,6 +34,13 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 	folderID, err := s.folderIDFor(r.Context(), p)
 	if err != nil {
+		// A folder that exists only because the bridge is holding writes for it
+		// — made by a write accepted during an outage, not yet created upstream —
+		// lists from the cache alone.
+		if pending := s.pendingListing(p); pending != nil && (isNotFound(err) || opendrive.IsTemporary(err)) {
+			writeJSON(w, r, http.StatusOK, pending)
+			return
+		}
 		WriteError(w, r, notFoundIfMissing(err, p))
 		return
 	}
@@ -73,7 +82,58 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		next := opts.Page.Offset + len(out.Entries)
 		out.NextOffset = &next
 	}
+	// Merged into the first page only: pending entries are few, and adding them
+	// to every page would list them once per page.
+	if opts.Page.Offset == 0 {
+		out.Entries = s.mergePending(p, out.Entries)
+	}
 	writeJSON(w, r, http.StatusOK, out)
+}
+
+// mergePending adds what the bridge holds for folder p and OpenDrive does not
+// have yet. An entry upstream already lists is marked pending (a newer version
+// is on its way) rather than listed twice.
+func (s *Server) mergePending(p string, entries []Entry) []Entry {
+	if s.datacache == nil {
+		return entries
+	}
+	files, folders := datacache.ChildrenOf(s.datacache.Unsent(), p)
+	if len(files) == 0 && len(folders) == 0 {
+		return entries
+	}
+	index := map[string]int{}
+	for i, e := range entries {
+		index[e.Name] = i
+	}
+	for _, name := range folders {
+		if _, ok := index[name]; !ok {
+			entries = append(entries, Entry{Name: name, Path: joinPath(p, name), Kind: kindFolder, Pending: true})
+		}
+	}
+	for _, o := range files {
+		_, name := splitPath(o.RemotePath)
+		modified := o.StoredAt.UTC().Format(time.RFC3339)
+		pe := Entry{Name: name, Path: o.RemotePath, Kind: kindFile, Size: o.Size, Modified: &modified, Pending: true}
+		if i, ok := index[name]; ok {
+			entries[i] = pe
+			continue
+		}
+		entries = append(entries, pe)
+	}
+	return entries
+}
+
+// pendingListing is the listing of a folder that exists only in the cache, or
+// nil when the cache holds nothing under it.
+func (s *Server) pendingListing(p string) *ListResponse {
+	if s.datacache == nil {
+		return nil
+	}
+	entries := s.mergePending(p, []Entry{})
+	if len(entries) == 0 {
+		return nil
+	}
+	return &ListResponse{Path: p, Entries: entries}
 }
 
 func (s *Server) handleStat(w http.ResponseWriter, r *http.Request) {
