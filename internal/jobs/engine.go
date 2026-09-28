@@ -508,6 +508,20 @@ func (e *Engine) runUpload(ctx context.Context, id string, spec Spec) error {
 		return err
 	}
 
+	// A job accepted while OpenDrive was unreachable carries a path and no
+	// folder id (§3.6.4). The gateway resolves that itself; this direct path
+	// must too, and must not pass the empty id on — to the SDK an empty folder id
+	// means the account root, so the file would land in the wrong place without
+	// a word.
+	if spec.FolderID == "" && spec.RemotePath != "" {
+		parent, _ := opendrive.ParentPath(spec.RemotePath)
+		folderID, err := e.client.Folders().EnsurePath(ctx, parent)
+		if err != nil {
+			return err
+		}
+		spec.FolderID = folderID
+	}
+
 	tracker := newSpeed(e.now)
 
 	_, err := e.client.Uploads().UploadFile(ctx, spec.LocalPath, opendrive.UploadParams{

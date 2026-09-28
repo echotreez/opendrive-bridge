@@ -27,6 +27,8 @@ type upstream struct {
 
 	mu        sync.Mutex
 	created   []string // file ids create_file handed out
+	createdIn []string // the folder_id each create_file named
+	resolved  []string // paths idbypath was asked for
 	reclaimed []string // file ids DELETE /file.json removed
 	content   []byte   // what a download serves
 	// failUploads makes close_file_upload fail with this status until it is
@@ -53,11 +55,27 @@ func newUpstream(t *testing.T) *upstream {
 	return u
 }
 
+// jsonBody decodes a JSON request body, for the few cases a test asserts on.
+func jsonBody(r *http.Request) map[string]any {
+	out := map[string]any{}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&out)
+	}
+	return out
+}
+
 func (u *upstream) serve(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
+	case strings.Contains(path, "folder/idbypath"):
+		u.mu.Lock()
+		u.resolved = append(u.resolved, fmt.Sprint(jsonBody(r)["path"]))
+		u.mu.Unlock()
+		_, _ = io.WriteString(w, `{"FolderId":"FRESOLVED"}`)
+
 	case strings.Contains(path, "create_file"):
 		u.mu.Lock()
+		u.createdIn = append(u.createdIn, fmt.Sprint(jsonBody(r)["folder_id"]))
 		id := fmt.Sprintf("F%d", len(u.created)+1)
 		u.created = append(u.created, id)
 		u.mu.Unlock()
@@ -690,5 +708,32 @@ func TestBackoffClimbsAndIsCapped(t *testing.T) {
 func TestNewRequiresAClient(t *testing.T) {
 	if _, err := New(nil); err == nil {
 		t.Fatal("want an error with no client")
+	}
+}
+
+// A job with a path and no folder id — accepted while OpenDrive was unreachable
+// (§3.6.4) — resolves its folder before a direct upload. An empty id passed on
+// would mean the account root to the SDK, and the file would land there.
+func TestADirectUploadWithNoFolderIDResolvesTheParent(t *testing.T) {
+	u := newUpstream(t)
+	e := newEngine(t, u)
+	e.Start(context.Background())
+
+	path := writeLocal(t, 4096)
+	job, err := e.Submit(Spec{Kind: KindUpload, LocalPath: path, RemotePath: "/backup/data/payload.bin",
+		Name: "payload.bin", Size: 4096, Overwrite: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := waitForState(t, e, job.ID, StateSucceeded); got == nil || got.State != StateSucceeded {
+		t.Fatalf("job = %+v", got)
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if len(u.resolved) == 0 || u.resolved[0] != "backup/data" {
+		t.Errorf("idbypath asked for %v, want the parent backup/data", u.resolved)
+	}
+	if len(u.createdIn) == 0 || u.createdIn[0] != "FRESOLVED" {
+		t.Errorf("create_file went to folder %v, want FRESOLVED — not the root", u.createdIn)
 	}
 }

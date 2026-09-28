@@ -172,6 +172,32 @@ else
 
   "$ODCTL" --addr "127.0.0.1:$PORT" cache status > "$WORK/cache2.txt" 2>&1
   grep -qi "NOT safe" "$WORK/cache2.txt" && { echo "    FAIL: still not safe after a flush"; FAIL=1; }
+
+  # §3.6.4: OpenDrive goes away, a write arrives anyway, and it is delivered —
+  # folders included — once OpenDrive is back. The mock is stopped for real and
+  # restarted on the same address, so this is the daemon, the journal and the
+  # flusher doing it, not a test double.
+  kill "$MPID" 2>/dev/null; wait "$MPID" 2>/dev/null
+  printf 'written while OpenDrive was away\n' > "$WORK/outage.txt"
+  code=$(curl -sS -o "$WORK/outageup.json" -w '%{http_code}' \
+    -X PUT --data-binary "@$WORK/outage.txt" \
+    "$API/upload/stream?path=/Smoke/outage/deep/while-away.txt&overwrite=true")
+  [ "$code" = "202" ]
+  check $? "a write while OpenDrive is unreachable is accepted (got $code)"
+  curl -sS "$API/ls?path=/Smoke/outage/deep" > "$WORK/outagels.json"
+  grep -q '"while-away.txt"' "$WORK/outagels.json" && grep -q '"pending":true' "$WORK/outagels.json"
+  check $? "it is listed, pending, under folders OpenDrive does not have yet"
+  "$ODCTL" --addr "127.0.0.1:$PORT" cache status > "$WORK/outagestat.txt" 2>&1
+  grep -qi "NOT safe" "$WORK/outagestat.txt"
+  check $? "the bridge says it is holding something OpenDrive does not have"
+
+  "$BIN_DIR/mockupstream" --addr "$UPSTREAM" --port-file "$WORK/upstream2.addr" &
+  MPID=$!
+  for _ in $(seq 1 50); do [ -s "$WORK/upstream2.addr" ] && break; sleep 0.2; done
+  "$ODCTL" --addr "127.0.0.1:$PORT" cache flush --wait > "$WORK/outageflush.txt" 2>&1
+  check $? "once OpenDrive is back, it is delivered (flush --wait returns)"
+  grep -qi "safe to stop the bridge" "$WORK/outageflush.txt" && ! grep -qi "NOT safe" "$WORK/outageflush.txt"
+  check $? "and nothing is left waiting"
   grep -q "1 file" "$WORK/cache2.txt" || true
 
   # A read of something that was never written is a MISS, and fills the cache, so

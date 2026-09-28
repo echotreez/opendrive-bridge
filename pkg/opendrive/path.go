@@ -153,6 +153,52 @@ func (s *FolderService) ResolvePath(ctx context.Context, p string) (string, erro
 	return id, nil
 }
 
+// EnsurePath resolves a folder path, creating every folder along it that does
+// not exist yet — mkdir -p (whitepaper §3.6.4).
+//
+// It exists for the caching gateway: a write accepted while OpenDrive was
+// unreachable, or an S3 key whose intermediate "directories" nobody created,
+// arrives at the flusher with a path and no folder id. Existing folders cost a
+// cached lookup; a missing one costs one idbypath miss and one create per level.
+//
+// Two flushers creating the same folder at once is survivable: a create that
+// fails is followed by one more lookup, and if the folder is there now it is
+// used.
+func (s *FolderService) EnsurePath(ctx context.Context, p string) (string, error) {
+	clean, err := NormalizeFolderPath(p)
+	if err != nil {
+		return "", err
+	}
+	id, err := s.ResolvePath(ctx, clean)
+	if err == nil {
+		return id, nil
+	}
+	if ErrorKind(err) != KindNotFound {
+		return "", err
+	}
+	parent, name := ParentPath(clean)
+	parentID, err := s.EnsurePath(ctx, parent)
+	if err != nil {
+		return "", err
+	}
+	created, err := s.Create(ctx, CreateFolderParams{Name: name, ParentID: parentID, Access: FolderPrivate})
+	if err != nil {
+		if again, rerr := s.ResolvePath(ctx, clean); rerr == nil {
+			return again, nil
+		}
+		return "", err
+	}
+	id = created.FolderID.String()
+	if id == "" {
+		return "", &APIError{Kind: KindInvalidResponse, Op: "POST " + EndpointFolder,
+			UpstreamMsg: "the new folder came back without an id"}
+	}
+	if cache := s.c.pathCache; cache != nil {
+		cache.Store(clean, id)
+	}
+	return id, nil
+}
+
 // ListPath is ResolvePath followed by List, which is the shape the Bridge's
 // /v1/ls endpoint needs (§4.2).
 //

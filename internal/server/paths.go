@@ -44,6 +44,10 @@ type Entry struct {
 	Children int64 `json:"children,omitempty"`
 	// Link is the public share link when there is one.
 	Link string `json:"link,omitempty"`
+	// Pending is true for something the bridge is holding that has not reached
+	// OpenDrive yet (§3.6.4): it is listed so that a client sees what it was
+	// just told was stored.
+	Pending bool `json:"pending,omitempty"`
 }
 
 // target is a resolved path: what it is, and the ids the SDK needs.

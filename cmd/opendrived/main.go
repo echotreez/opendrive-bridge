@@ -257,8 +257,16 @@ func newDataCache(o options, c *opendrive.Client, log *slog.Logger) (*datacache.
 		MaxDirtyBytes: o.cacheMaxDirty,
 		WriteBack:     o.cacheWriteBack,
 		DrainTimeout:  o.drainTimeout,
-		Upstream:      datacache.NewSDKUploader(c),
-		Logger:        log,
+		// An object can arrive with no folder id — written while OpenDrive was
+		// unreachable, or under folders nobody created yet — and the flusher
+		// makes the path when it can reach upstream (§3.6.4). Without this the
+		// object would sit dirty for ever.
+		Upstream: datacache.NewSDKUploader(c).WithFolderResolver(
+			func(ctx context.Context, remotePath string) (string, error) {
+				parent, _ := opendrive.ParentPath(remotePath)
+				return c.Folders().EnsurePath(ctx, parent)
+			}),
+		Logger: log,
 	})
 	if err != nil {
 		return nil, err

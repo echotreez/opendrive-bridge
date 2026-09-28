@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -738,6 +739,49 @@ func (c *DataCache) Status() Status {
 	}
 	st.Durable, st.DurabilityNote = c.durability()
 	return st
+}
+
+// Unsent lists the objects OpenDrive does not have yet — dirty or mid-upload —
+// sorted by path. Listings merge these in (§3.6.4): a client that has just been
+// told a write succeeded must see it when it lists the folder, before the flusher
+// has delivered it and whether or not OpenDrive is reachable.
+func (c *DataCache) Unsent() []*Object {
+	c.mu.Lock()
+	all := c.snapshotLocked()
+	c.mu.Unlock()
+	out := all[:0]
+	for _, o := range all {
+		if o.State != StateClean {
+			out = append(out, o)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].RemotePath < out[j].RemotePath })
+	return out
+}
+
+// ChildrenOf splits objects into the ones directly inside dir and the names of
+// the sub-folders of dir that hold the rest. dir is a normalised folder path.
+func ChildrenOf(objs []*Object, dir string) (files []*Object, folders []string) {
+	prefix := dir
+	if prefix != "/" {
+		prefix += "/"
+	}
+	seen := map[string]bool{}
+	for _, o := range objs {
+		if !strings.HasPrefix(o.RemotePath, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(o.RemotePath, prefix)
+		if i := strings.IndexByte(rest, '/'); i >= 0 {
+			if name := rest[:i]; !seen[name] {
+				seen[name] = true
+				folders = append(folders, name)
+			}
+			continue
+		}
+		files = append(files, o)
+	}
+	return files, folders
 }
 
 // Objects lists what is cached, newest access first, for /v1/cache/objects.
