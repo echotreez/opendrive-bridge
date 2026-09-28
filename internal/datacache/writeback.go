@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
@@ -178,7 +179,7 @@ func (c *DataCache) oldestUnsent(n int) []string {
 	defer c.mu.Unlock()
 	var out []*Object
 	for _, o := range c.objs {
-		if o.State.Unsent() && !c.inFlight[o.RemotePath] {
+		if o.State.Unsent() && c.inFlight[o.RemotePath] == nil {
 			out = append(out, o)
 		}
 	}
@@ -201,22 +202,34 @@ func (c *DataCache) oldestUnsent(n int) []string {
 func (c *DataCache) flushOne(ctx context.Context, remotePath string) {
 	c.mu.Lock()
 	o := c.objs[remotePath]
-	if o == nil || !o.State.Unsent() || c.inFlight[remotePath] || c.closed {
+	if o == nil || !o.State.Unsent() || c.inFlight[remotePath] != nil || c.closed {
 		c.mu.Unlock()
 		return
 	}
-	c.inFlight[remotePath] = true
+	ctx, cancel := context.WithCancel(ctx)
+	c.inFlight[remotePath] = cancel
 	obj := o.Clone()
 	c.mu.Unlock()
 
+	// The version being sent. Every state change below is recorded against it,
+	// so that an object rewritten while this upload runs is not marked clean
+	// when this — older — upload finishes.
+	of := obj.StoredAt.UnixNano()
+	superseded := false
 	defer func() {
+		cancel()
 		c.mu.Lock()
 		delete(c.inFlight, remotePath)
 		c.mu.Unlock()
+		if superseded {
+			// The newer version was queued while this one held the slot, and
+			// flushOne turned it away; send it now rather than at the next sweep.
+			c.enqueue(remotePath)
+		}
 		c.notifyWaiters()
 	}()
 
-	c.setState(remotePath, StateUploading, "", "", obj.FlushAttempts)
+	c.setState(remotePath, of, StateUploading, "", "", obj.FlushAttempts)
 
 	f, err := os.Open(filepath.Join(c.cfg.Dir, contentName(remotePath))) // #nosec G304 -- a file this cache wrote
 	if err != nil {
@@ -231,6 +244,11 @@ func (c *DataCache) flushOne(ctx context.Context, remotePath string) {
 	defer func() { _ = f.Close() }()
 
 	hash, err := c.cfg.Upstream.Upload(ctx, obj, f)
+	if err != nil && ctx.Err() != nil && c.flushCtx.Err() == nil {
+		// Stopped by Remove, not by a failure: the object is being deleted and
+		// this attempt is not news about OpenDrive.
+		return
+	}
 	if err != nil {
 		attempts := obj.FlushAttempts + 1
 		// The wording the user sees comes from the classifier, which is the only
@@ -244,7 +262,7 @@ func (c *DataCache) flushOne(ctx context.Context, remotePath string) {
 				reason = ae.UpstreamMsg
 			}
 		}
-		c.setState(remotePath, StateDirty, "", reason, attempts)
+		c.setState(remotePath, of, StateDirty, "", reason, attempts)
 
 		if opendrive.IsTemporary(err) {
 			c.log.Warn("an upload from the cache failed and will be retried; the data is still here",
@@ -267,7 +285,7 @@ func (c *DataCache) flushOne(ctx context.Context, remotePath string) {
 	if hash != "" && !equalFold(hash, obj.Hash) {
 		reason := fmt.Sprintf("OpenDrive stored something that hashes to %s where this file "+
 			"hashes to %s, so it has not been accepted as uploaded", hash, obj.Hash)
-		c.setState(remotePath, StateDirty, "", reason, obj.FlushAttempts+1)
+		c.setState(remotePath, of, StateDirty, "", reason, obj.FlushAttempts+1)
 		c.log.Error("an upload reported success with the wrong hash; the object stays dirty",
 			slog.String("datacache_path", remotePath),
 			slog.String("datacache_local_hash", obj.Hash),
@@ -275,7 +293,13 @@ func (c *DataCache) flushOne(ctx context.Context, remotePath string) {
 		return
 	}
 
-	c.setState(remotePath, StateClean, "", "", obj.FlushAttempts)
+	if !c.setState(remotePath, of, StateClean, "", "", obj.FlushAttempts) {
+		superseded = true
+		c.log.Info("an upload finished for a version that has since been replaced; "+
+			"the newer one is still waiting to be sent",
+			slog.String("datacache_path", remotePath))
+		return
+	}
 	c.log.Info("an object reached OpenDrive",
 		slog.String("datacache_path", remotePath),
 		slog.Int64("datacache_size", obj.Size))
@@ -285,10 +309,22 @@ func (c *DataCache) flushOne(ctx context.Context, remotePath string) {
 // setState records a lifecycle transition, journalled and flushed before the
 // in-memory index moves. The same order as a write, for the same reason: the
 // durable record is what recovery will believe.
-func (c *DataCache) setState(remotePath string, state State, fileID, lastErr string, attempts int) {
+//
+// of is the version the transition belongs to (the object's StoredAt). It
+// reports whether the transition applied: false means the object was replaced
+// or removed since that version was read, and the caller's news is about bytes
+// that are no longer the object. Keying this by path alone once marked a
+// never-uploaded rewrite clean.
+func (c *DataCache) setState(remotePath string, of int64, state State, fileID, lastErr string, attempts int) bool {
+	c.mu.Lock()
+	if o := c.objs[remotePath]; o == nil || o.StoredAt.UnixNano() != of {
+		c.mu.Unlock()
+		return false
+	}
+	c.mu.Unlock()
 	rec := journalRecord{
 		Op: opState, Path: remotePath, State: state, FileID: fileID,
-		Err: lastErr, Attempts: attempts, At: c.now().UnixNano(),
+		Err: lastErr, Attempts: attempts, At: c.now().UnixNano(), Of: of,
 	}
 	if err := c.jnl.append(rec, true); err != nil {
 		// The index is deliberately not updated when the journal write failed.
@@ -299,14 +335,16 @@ func (c *DataCache) setState(remotePath string, state State, fileID, lastErr str
 			slog.String("datacache_path", remotePath),
 			slog.String("datacache_state", string(state)),
 			slog.String("datacache_error", err.Error()))
-		return
+		return false
 	}
 
 	c.mu.Lock()
 	o := c.objs[remotePath]
-	if o == nil {
+	if o == nil || o.StoredAt.UnixNano() != of {
+		// Replaced between the check above and here. The journal record names
+		// its version, so replay ignores it just as this does.
 		c.mu.Unlock()
-		return
+		return false
 	}
 	wasUnsent := o.State.Unsent()
 	o.State = state
@@ -321,6 +359,7 @@ func (c *DataCache) setState(remotePath string, state State, fileID, lastErr str
 		c.dirty += o.Size
 	}
 	c.mu.Unlock()
+	return true
 }
 
 // ---------------------------------------------------------------- flush, wait
@@ -388,10 +427,17 @@ func (c *DataCache) settled(path string) bool {
 }
 
 func (c *DataCache) waiter() chan struct{} {
-	ch := make(chan struct{})
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.waiterLocked()
+}
+
+// waiterLocked registers a waiter under a lock the caller already holds, so the
+// condition it checked and the registration are one step and no notification
+// can fall between them.
+func (c *DataCache) waiterLocked() chan struct{} {
+	ch := make(chan struct{})
 	c.waiters = append(c.waiters, ch)
-	c.mu.Unlock()
 	return ch
 }
 
@@ -427,6 +473,78 @@ func (c *DataCache) Refresh(path string) error {
 	c.mu.Unlock()
 	c.forget(p, "refreshed at the caller's request")
 	return nil
+}
+
+// Remove drops an object whatever its state, for a delete the user asked for.
+//
+// It is the one place an unsent object may be discarded, and only because the
+// request is to make it not exist: keeping it would mean the flusher uploads a
+// file after the user deleted it, and a listing shows it as pending for ever.
+//
+// If the object is being uploaded right now, Remove stops that upload and waits
+// for it to return before dropping the object. Returning earlier would let the
+// caller delete the upstream copy and then have the upload put it back a moment
+// later; waiting for it to finish on its own would make a delete take as long as
+// the upload. An upload stopped at its very last step may still have landed,
+// which is why the caller deletes upstream after this, not before. The wait ends
+// with ctx.
+//
+// It reports whether anything was cached and whether that was unsent — for the
+// caller deciding whether "not found upstream" still means the delete worked.
+func (c *DataCache) Remove(ctx context.Context, remotePath string) (found, wasUnsent bool, err error) {
+	p := normalisePath(remotePath)
+	for {
+		c.mu.Lock()
+		o := c.objs[p]
+		if o == nil {
+			c.mu.Unlock()
+			return false, false, nil
+		}
+		stop := c.inFlight[p]
+		if stop == nil {
+			wasUnsent = o.State.Unsent()
+			c.mu.Unlock()
+			c.forget(p, "deleted at the caller's request")
+			return true, wasUnsent, nil
+		}
+		ch := c.waiterLocked()
+		c.mu.Unlock()
+		stop()
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return true, true, ctx.Err()
+		}
+	}
+}
+
+// RemoveTree is Remove for everything at or below a folder.
+// It returns how many objects were dropped.
+func (c *DataCache) RemoveTree(ctx context.Context, dir string) (int, error) {
+	d := normalisePath(dir)
+	prefix := d + "/"
+	if d == "/" {
+		prefix = "/"
+	}
+	c.mu.Lock()
+	var paths []string
+	for p := range c.objs {
+		if p == d || strings.HasPrefix(p, prefix) {
+			paths = append(paths, p)
+		}
+	}
+	c.mu.Unlock()
+	removed := 0
+	for _, p := range paths {
+		found, _, err := c.Remove(ctx, p)
+		if err != nil {
+			return removed, err
+		}
+		if found {
+			removed++
+		}
+	}
+	return removed, nil
 }
 
 // Clear drops every clean object. It refuses outright if anything is unsent,

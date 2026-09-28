@@ -44,11 +44,12 @@ type DataCache struct {
 
 	// flush plumbing, present only in write-back mode.
 	flushQueue chan string
-	inFlight   map[string]bool
-	waiters    []chan struct{}
-	workers    sync.WaitGroup
-	stop       chan struct{}
-	stopOnce   sync.Once
+	// inFlight holds, for each object being uploaded, the way to stop it.
+	inFlight map[string]context.CancelFunc
+	waiters  []chan struct{}
+	workers  sync.WaitGroup
+	stop     chan struct{}
+	stopOnce sync.Once
 	// flushCtx bounds the uploads in flight. Close cancels it, which is what lets
 	// a shutdown finish while an upload is stuck: the workers used to call Upload
 	// with context.Background(), so Close waited on a worker that could never
@@ -130,7 +131,7 @@ func Open(cfg Config) (*DataCache, error) {
 		cfg:      cfg,
 		log:      cfg.Logger,
 		objs:     replayed.objects,
-		inFlight: map[string]bool{},
+		inFlight: map[string]context.CancelFunc{},
 		stop:     make(chan struct{}),
 		now:      time.Now,
 	}

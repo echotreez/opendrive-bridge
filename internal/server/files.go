@@ -376,8 +376,33 @@ func (s *Server) handleRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The bridge's own copy goes first, whatever its state. An unsent object
+	// left behind would be uploaded by the flusher after this delete, putting
+	// back what the user removed; a clean one would keep being served. Remove
+	// waits out an upload in progress for the same reason.
+	held := 0
+	if s.datacache != nil {
+		n, err := s.datacache.RemoveTree(r.Context(), p)
+		if err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		held = n
+	}
+
 	t, err := s.resolve(r.Context(), p)
 	if err != nil {
+		if held > 0 && isNotFound(err) {
+			// It existed only on the bridge, waiting to be sent. Dropping it
+			// was the whole delete.
+			parentPath, _ := splitPath(p)
+			s.invalidateSubtree(p, parentPath)
+			writeJSON(w, r, http.StatusOK, map[string]any{
+				"path": p, "permanent": true,
+				"detail": "Removed from the bridge before it reached OpenDrive, so there was nothing to put in the trash.",
+			})
+			return
+		}
 		WriteError(w, r, err)
 		return
 	}
