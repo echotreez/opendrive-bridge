@@ -185,7 +185,8 @@ else
   [ "$code" = "202" ]
   check $? "a write while OpenDrive is unreachable is accepted (got $code)"
   curl -sS "$API/ls?path=/Smoke/outage/deep" > "$WORK/outagels.json"
-  grep -q '"while-away.txt"' "$WORK/outagels.json" && grep -q '"pending":true' "$WORK/outagels.json"
+  grep -q '"while-away.txt"' "$WORK/outagels.json" && grep -q '"pending":true' "$WORK/outagels.json" \
+    && grep -q '"partial":true' "$WORK/outagels.json"
   check $? "it is listed, pending, under folders OpenDrive does not have yet"
   "$ODCTL" --addr "127.0.0.1:$PORT" cache status > "$WORK/outagestat.txt" 2>&1
   grep -qi "NOT safe" "$WORK/outagestat.txt"

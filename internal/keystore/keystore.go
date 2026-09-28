@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
 )
@@ -85,6 +86,31 @@ type Store interface {
 	// file is not an error (nobody has signed in yet); a damaged one is, and the
 	// daemon surfaces it as keystore_unavailable without touching the network.
 	Available(ctx context.Context) error
+}
+
+// Secrets stores the bridge's own secrets — values it generated, such as S3
+// access keys — in the same encrypted file as the sign-in, under the same rules
+// (§9.2): nowhere else, never in a config file or a log. Both stores implement it.
+type Secrets interface {
+	// LoadSecret returns ErrNoSecret when the secret has never been saved.
+	LoadSecret(ctx context.Context, name string) (string, error)
+	// SaveSecret stores a secret; an empty value removes it.
+	SaveSecret(ctx context.Context, name, value string) error
+}
+
+// ErrNoSecret reports a secret that has not been saved.
+var ErrNoSecret = errors.New("keystore: no such secret")
+
+func validSecretName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // Open selects and prepares a credential store.
@@ -161,6 +187,8 @@ func defaultStateDir() string {
 // and is always available.
 type ephemeralStore struct {
 	*opendrive.MemoryTokenStore
+	smu     sync.Mutex
+	secrets map[string]string
 }
 
 func newEphemeral() *ephemeralStore {
@@ -169,3 +197,30 @@ func newEphemeral() *ephemeralStore {
 
 func (s *ephemeralStore) Backend() Backend                { return BackendEphemeral }
 func (s *ephemeralStore) Available(context.Context) error { return nil }
+
+func (s *ephemeralStore) LoadSecret(_ context.Context, name string) (string, error) {
+	s.smu.Lock()
+	defer s.smu.Unlock()
+	v, ok := s.secrets[name]
+	if !ok {
+		return "", ErrNoSecret
+	}
+	return v, nil
+}
+
+func (s *ephemeralStore) SaveSecret(_ context.Context, name, value string) error {
+	if !validSecretName(name) {
+		return fmt.Errorf("keystore: %q is not a usable secret name", name)
+	}
+	s.smu.Lock()
+	defer s.smu.Unlock()
+	if s.secrets == nil {
+		s.secrets = map[string]string{}
+	}
+	if value == "" {
+		delete(s.secrets, name)
+	} else {
+		s.secrets[name] = value
+	}
+	return nil
+}

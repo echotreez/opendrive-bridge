@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,7 +75,9 @@ func pathLine(dir string) string {
 func addToShellProfile(dir string) (path string, changed bool, err error) {
 	path = shellProfilePath()
 	if path == "" {
-		return "", false, fmt.Errorf("cannot work out which shell profile to edit; " +
+		// errors.New, not Errorf: the folder name is not a format string, and one
+		// containing "%" would come out garbled.
+		return "", false, errors.New("cannot work out which shell profile to edit; " +
 			"add this line to yours by hand:\n  " + pathLine(dir))
 	}
 

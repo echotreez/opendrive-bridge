@@ -113,6 +113,15 @@ func TestNonLoopbackWithoutAKeyStartsAndSaysWhatIsExposed(t *testing.T) {
 		}
 	}
 
+	// ":7777" is every interface too, not loopback.
+	logs.Reset()
+	if _, err := New(Config{Addr: ":7777", Logger: log}, &fakeAuth{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), "without an API key") {
+		t.Errorf("a listener on every interface (\":7777\") was not warned about:\n%s", logs.String())
+	}
+
 	// On loopback there is nothing to warn about.
 	logs.Reset()
 	if _, err := New(Config{Addr: "127.0.0.1:7777", Logger: log}, &fakeAuth{}); err != nil {

@@ -86,7 +86,9 @@ WORKDIR /data
 # without one. Set ODB_API_KEY to require one.
 ENV ODB_LISTEN=0.0.0.0:9750
 
-EXPOSE 9750
+# 9751 is S3 over HTTPS (§3.6). The plain-HTTP S3 listener stays on the
+# container's own loopback, where only something inside the container reaches it.
+EXPOSE 9750 9751
 
 # There is no shell in this image, so the healthcheck is the binary itself.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \

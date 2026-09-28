@@ -183,14 +183,20 @@ func presentedKey(r *http.Request) string {
 }
 
 // isLoopback reports whether an address binds only to the local machine.
+// isLoopback reports whether a listen address is reachable from this machine
+// only. An empty host (":9750") listens on every interface and is not: treating
+// it as loopback once let a keyless listener open to the network start without
+// its warning, and /v1/auth/status report it as loopback_only.
 func isLoopback(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr
 	}
 	switch host {
-	case "", "localhost":
+	case "localhost":
 		return true
+	case "":
+		return false
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()

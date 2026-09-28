@@ -338,6 +338,24 @@ func (c *DataCache) Get(remotePath string) (*Reader, error) {
 	return &Reader{File: f, Object: clone}, nil
 }
 
+// Lookup returns an object's metadata without counting a hit or a miss and
+// without opening its content — for HEAD requests and listings, which describe
+// an object rather than read it.
+func (c *DataCache) Lookup(remotePath string) (*Object, bool) {
+	p := normalisePath(remotePath)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	o := c.objs[p]
+	if o == nil {
+		return nil, false
+	}
+	return o.Clone(), true
+}
+
+// MaxDirtyBytes is the unsent allowance, for callers deciding whether a refused
+// write could ever fit.
+func (c *DataCache) MaxDirtyBytes() int64 { return c.cfg.MaxDirtyBytes }
+
 // Has reports whether an object is cached, without counting a hit or a miss. It
 // exists for the status and object-listing endpoints, which must not move the
 // numbers they are reporting.

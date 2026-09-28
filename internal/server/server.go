@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -96,8 +97,10 @@ type Server struct {
 	// they keep different names here as well as in their packages.
 	cache     opendrive.PathCache
 	datacache *datacache.DataCache
-	router    chi.Router
-	http      *http.Server
+	// s3 is the S3 gateway, once main has started one (§3.6).
+	s3     atomic.Pointer[S3Gateway]
+	router chi.Router
+	http   *http.Server
 }
 
 // Option configures a Server.
@@ -233,6 +236,10 @@ func (s *Server) routes(keyRequired bool) chi.Router {
 			r.Post("/refresh", s.handleCacheRefresh)
 			r.Delete("/", s.handleCacheClear)
 		})
+
+		// The S3 gateway (§3.6): where it listens and which key it takes.
+		r.Get("/s3", s.handleS3Status)
+		r.Post("/s3/credentials/reset", s.handleS3Reset)
 
 		// Sharing (§4.4).
 		r.Post("/share/link", s.handleShareCreate)

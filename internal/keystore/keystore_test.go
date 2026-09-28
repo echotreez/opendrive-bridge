@@ -236,6 +236,55 @@ func TestSigningOutRemovesTheFile(t *testing.T) {
 	}
 }
 
+// Signing out keeps the bridge's own secrets. The S3 keys a NAS was set up
+// with are not OpenDrive's to revoke, and switching accounts must not break
+// every backup pointed at the bridge.
+func TestSigningOutKeepsTheBridgesOwnSecrets(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.SaveSecret(ctx, "S3_KEY", "AKIDEXAMPLE"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(ctx, sampleCredentials()); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := s.LoadSecret(ctx, "S3_KEY"); err != nil || v != "AKIDEXAMPLE" {
+		t.Fatalf("after sign-in: %q, %v", v, err)
+	}
+	if err := s.Delete(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(ctx); !errors.Is(err, opendrive.ErrNoCredentials) {
+		t.Fatalf("still signed in after signing out: %v", err)
+	}
+	if v, err := s.LoadSecret(ctx, "S3_KEY"); err != nil || v != "AKIDEXAMPLE" {
+		t.Fatalf("the secret did not survive signing out: %q, %v", v, err)
+	}
+	raw, err := os.ReadFile(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "AKIDEXAMPLE") {
+		t.Fatal("the secret is in the file in the clear")
+	}
+	// Removing the last secret removes the file.
+	if err := s.SaveSecret(ctx, "S3_KEY", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(s.path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an empty file survived: %v", err)
+	}
+	if _, err := s.LoadSecret(ctx, "S3_KEY"); !errors.Is(err, ErrNoSecret) {
+		t.Fatalf("LoadSecret with no file = %v", err)
+	}
+	if err := s.SaveSecret(ctx, "bad name", "x"); err == nil {
+		t.Fatal("an unusable name was accepted")
+	}
+}
+
 func TestValuesSurviveTheirAwkwardCharacters(t *testing.T) {
 	s := newTestStore(t)
 	cred := sampleCredentials()

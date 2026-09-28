@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -54,6 +56,16 @@ type options struct {
 	cacheMaxDirty  int64
 	cacheWriteBack bool
 	drainTimeout   time.Duration
+
+	// The S3 gateway (§3.6). It runs whenever the caching gateway does, with
+	// write-back, unless switched off: it is the reason most people run this.
+	s3          bool
+	s3HTTPSAddr string
+	s3HTTPAddr  string
+	s3TLSCert   string
+	s3TLSKey    string
+	s3TLSHosts  string
+	s3Delete    string
 }
 
 func main() {
@@ -96,6 +108,20 @@ func run() error {
 		"accept writes into the cache and upload them in the background; false writes straight through")
 	fs.DurationVar(&o.drainTimeout, "cache-drain-timeout", 0,
 		"how long shutdown waits for the cache to finish uploading; 0 uses the default")
+	fs.BoolVar(&o.s3, "s3", envBool("ODB_S3", true),
+		"serve S3 when the caching gateway is on with write-back (or set ODB_S3)")
+	fs.StringVar(&o.s3HTTPSAddr, "s3-https-addr", envOr("ODB_S3_HTTPS_LISTEN", "0.0.0.0:9751"),
+		"S3 over HTTPS, reachable from the network; empty switches it off (or set ODB_S3_HTTPS_LISTEN)")
+	fs.StringVar(&o.s3HTTPAddr, "s3-http-addr", envOr("ODB_S3_HTTP_LISTEN", "127.0.0.1:9752"),
+		"S3 over plain HTTP, loopback only; empty switches it off (or set ODB_S3_HTTP_LISTEN)")
+	fs.StringVar(&o.s3TLSCert, "s3-tls-cert", os.Getenv("ODB_S3_TLS_CERT"),
+		"certificate for S3 HTTPS; unset makes and uses a self-signed one (or set ODB_S3_TLS_CERT)")
+	fs.StringVar(&o.s3TLSKey, "s3-tls-key", os.Getenv("ODB_S3_TLS_KEY"),
+		"private key for --s3-tls-cert (or set ODB_S3_TLS_KEY)")
+	fs.StringVar(&o.s3TLSHosts, "s3-tls-hosts", os.Getenv("ODB_S3_TLS_HOSTS"),
+		"extra names or addresses, comma separated, for the self-signed certificate (or set ODB_S3_TLS_HOSTS)")
+	fs.StringVar(&o.s3Delete, "s3-delete", envOr("ODB_S3_DELETE", "trash"),
+		"what an S3 delete does: trash (recoverable) or permanent (or set ODB_S3_DELETE)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
@@ -204,6 +230,10 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if err := startS3(ctx, o, store, dc, srv, log); err != nil {
+		return err
+	}
+
 	engine.Start(ctx)
 	// Anything caught mid-transfer by the last shutdown is requeued, and the
 	// upstream records those transfers left behind are reclaimed (D39).
@@ -280,6 +310,77 @@ func newDataCache(o options, c *opendrive.Client, log *slog.Logger) (*datacache.
 		slog.Int("datacache_objects", st.Objects),
 		slog.Int("datacache_dirty_objects", st.DirtyObjects))
 	return dc, nil
+}
+
+// startS3 starts the S3 gateway when it should run (§3.6). A misconfiguration
+// the user can fix — a certificate that will not load, an unknown delete mode —
+// stops the daemon with a sentence. A credential file that cannot be read does
+// not: the daemon must still start so that somebody can sign in again, and the
+// log and /v1/s3 say the gateway is off and why.
+func startS3(ctx context.Context, o options, store keystore.Store, dc *datacache.DataCache,
+	srv *server.Server, log *slog.Logger) error {
+	if !o.s3 {
+		return nil
+	}
+	if dc == nil || !dc.Status().WriteBack {
+		log.Info("the S3 gateway is off: it needs the caching gateway with write-back (--cache-dir)")
+		return nil
+	}
+	var permanent bool
+	switch o.s3Delete {
+	case "trash", "":
+	case "permanent":
+		permanent = true
+	default:
+		return fmt.Errorf("--s3-delete must be trash or permanent, not %q", o.s3Delete)
+	}
+	sec, ok := store.(keystore.Secrets)
+	if !ok {
+		log.Error("the S3 gateway is off: the credential store cannot hold its keys")
+		return nil
+	}
+	creds, created, err := server.LoadOrCreateS3Credentials(ctx, sec)
+	if err != nil {
+		log.Error("the S3 gateway is off: its keys could not be read or saved",
+			slog.String("error", err.Error()))
+		return nil
+	}
+	if created {
+		log.Info("made S3 access keys for this bridge; see them with `odctl s3` or on the web page")
+	}
+
+	// Everything the gateway keeps lives beside the cache: multipart uploads in
+	// progress and the certificate.
+	base := filepath.Dir(dc.Status().Dir)
+	var hosts []string
+	for _, h := range strings.Split(o.s3TLSHosts, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	var tlsCfg *tls.Config
+	var fingerprint string
+	var custom bool
+	if o.s3HTTPSAddr != "" {
+		tlsCfg, fingerprint, custom, err = server.S3TLS(base, o.s3TLSCert, o.s3TLSKey, hosts)
+		if err != nil {
+			return err
+		}
+	}
+	gw, err := srv.NewS3Gateway(server.S3Config{
+		PermanentDelete: permanent,
+		StagingDir:      filepath.Join(base, "s3-multipart"),
+	}, creds)
+	if err != nil {
+		return err
+	}
+	go func() {
+		if err := gw.Serve(ctx, o.s3HTTPSAddr, o.s3HTTPAddr, tlsCfg, fingerprint, custom); err != nil {
+			log.Error("the S3 gateway stopped; the rest of the bridge is still running",
+				slog.String("error", err.Error()))
+		}
+	}()
+	return nil
 }
 
 // envInt64 reads an integer from the environment, ignoring anything unparseable:
