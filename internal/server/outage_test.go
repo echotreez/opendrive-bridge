@@ -140,3 +140,29 @@ func TestAPendingOverwriteIsListedOnce(t *testing.T) {
 		t.Fatalf("report.pdf = %v; want the pending copy", e)
 	}
 }
+
+// A delete removes what the bridge is holding too. Before this, an unsent file
+// deleted through the API was still listed as pending and was uploaded by the
+// flusher afterwards — the delete undone without a word.
+func TestDeletingAPendingFileRemovesItFromTheBridge(t *testing.T) {
+	u := newFakeUpstream(t)
+	u.withTransfers(nil)
+	srv, _ := u.serverWithEngine(t)
+	dc, held := withCache(t, srv, true)
+	defer close(held.release)
+
+	if rec := putStream(srv, "/Docs/brand-new.bin", []byte("never sent"), true); rec.Code != http.StatusAccepted {
+		t.Fatalf("put = %d", rec.Code)
+	}
+	rec, body := do(t, srv, http.MethodPost, "/v1/rm", `{"path":"/Docs/brand-new.bin"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rm = %d: %v", rec.Code, body)
+	}
+	if dc.Has("/Docs/brand-new.bin") {
+		t.Fatal("still held by the bridge after the delete")
+	}
+	_, names := listNames(t, srv, "/Docs")
+	if _, ok := names["brand-new.bin"]; ok {
+		t.Fatal("still listed after the delete")
+	}
+}

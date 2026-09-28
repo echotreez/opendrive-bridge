@@ -92,6 +92,11 @@ type journalRecord struct {
 	Err string `json:"err,omitempty"`
 	// Attempts is the flush attempt count at the time of the record.
 	Attempts int `json:"attempts,omitempty"`
+	// Of names the version a state record belongs to — the StoredAt, in Unix
+	// nanoseconds, of the object that was being flushed. A record for a version
+	// that has since been replaced is ignored on replay, as it is live. Zero in
+	// records written before versions were recorded, which apply as they did.
+	Of int64 `json:"of,omitempty"`
 }
 
 // journalName is the log's filename inside the cache directory.
@@ -281,6 +286,10 @@ func applyRecord(objects map[string]*Object, rec journalRecord) {
 	case opState:
 		o := objects[rec.Path]
 		if o == nil {
+			return
+		}
+		if rec.Of != 0 && o.StoredAt.UnixNano() != rec.Of {
+			// About a version that was replaced after it was written.
 			return
 		}
 		if rec.State != "" {
