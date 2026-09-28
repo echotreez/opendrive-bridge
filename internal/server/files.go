@@ -24,6 +24,12 @@ type ListResponse struct {
 	DirUpdateTime int64 `json:"dir_update_time"`
 	// NextOffset is null when the listing is complete.
 	NextOffset *int `json:"next_offset"`
+	// Partial is true when the listing could not include what OpenDrive holds:
+	// OpenDrive was unreachable and this is only what the bridge is holding.
+	// Detail says so in words. A listing that silently left things out would
+	// tell a caller they had been lost.
+	Partial bool   `json:"partial,omitempty"`
+	Detail  string `json:"detail,omitempty"`
 }
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +44,11 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		// — made by a write accepted during an outage, not yet created upstream —
 		// lists from the cache alone.
 		if pending := s.pendingListing(p); pending != nil && (isNotFound(err) || opendrive.IsTemporary(err)) {
+			if opendrive.IsTemporary(err) {
+				pending.Partial = true
+				pending.Detail = "OpenDrive cannot be reached, so this lists only what the bridge is " +
+					"holding for this folder. Anything already on OpenDrive is left out until it answers again."
+			}
 			writeJSON(w, r, http.StatusOK, pending)
 			return
 		}

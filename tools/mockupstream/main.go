@@ -32,15 +32,25 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/echotreez/opendrive-bridge/internal/odfake"
 )
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:0", "listen address")
 	portFile := flag.String("port-file", "", "write the chosen address here")
+	stateful := flag.Bool("stateful", false,
+		"keep what is uploaded (internal/odfake), for driving an S3 client end to end")
 	flag.Parse()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handle)
+	if *stateful {
+		// The canned answers below cannot carry restic or rclone through a
+		// backup and a restore; this keeps folders and files for real.
+		mux.Handle("/", odfake.New().Handler())
+	} else {
+		mux.HandleFunc("/", handle)
+	}
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {

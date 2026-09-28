@@ -39,6 +39,11 @@ tags:
     description: |
       The caching gateway (§3.5). Not the metadata cache — this one holds file
       contents, and in write-back mode it holds bytes OpenDrive does not have yet.
+  - name: s3
+    description: |
+      The S3 gateway (§3.6). The S3 protocol itself is served on its own port and
+      is not described here; these operations say where it is and which key it
+      takes.
 
 paths:
   /v1/health:
@@ -667,6 +672,45 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
 
+  /v1/s3:
+    get:
+      tags: [s3]
+      operationId: s3Status
+      summary: Where the S3 gateway listens, and the key it accepts.
+      description: |
+        Includes the secret key. This is the only place anybody can read it — it
+        is never logged — and it is behind the same address and optional API key
+        as every operation that can read or delete the account's files.
+
+        `certificate_sha256` is the fingerprint of the HTTPS certificate, for a
+        person accepting a self-signed certificate on a NAS to check it is this
+        one. `enabled` is false, with `detail` saying why, when the gateway is off.
+      responses:
+        "200":
+          description: The gateway's state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/S3Status" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/s3/credentials/reset:
+    post:
+      tags: [s3]
+      operationId: s3ResetCredentials
+      summary: Replace the S3 access key.
+      description: |
+        The old key stops working at once: every client set up with it must be
+        given the new one. If the new key cannot be saved, nothing changes.
+      responses:
+        "200":
+          description: The new key and the gateway's state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/S3Status" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
   /v1/share/link:
     post:
       tags: [sharing]
@@ -837,6 +881,21 @@ components:
           type: string
           description: The same thing in a sentence, for a person reading a log.
 
+    S3Status:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+        detail: { type: string }
+        access_key_id: { type: string }
+        secret_access_key: { type: string }
+        https_addr: { type: string, description: "Where HTTPS is served; reachable from the network when it is not a loopback address." }
+        http_addr: { type: string, description: "Plain HTTP, on a loopback address only." }
+        certificate_sha256: { type: string }
+        custom_certificate: { type: boolean }
+        delete: { type: string, enum: [trash, permanent] }
+        region: { type: string }
+        path_style: { type: boolean }
     CacheStatus:
       type: object
       required: [enabled, safe_to_shut_down]
@@ -936,6 +995,13 @@ components:
           type: integer
           description: Echo this back with `offset` to fetch the next page.
         next_offset: { type: [integer, "null"] }
+        partial:
+          type: boolean
+          description: |
+            True when OpenDrive could not be reached and the listing holds only
+            what the bridge is keeping for this folder (§3.6.4). `detail` says so
+            in words. Absent on a complete listing.
+        detail: { type: string }
 
     Status:
       type: object

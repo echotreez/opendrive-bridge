@@ -66,6 +66,13 @@ func TestAWriteDuringAnOutageIsAcceptedAndListed(t *testing.T) {
 		t.Fatalf("reading it back during the outage = %d", get.Code)
 	}
 
+	// Said to be partial: OpenDrive's side of the folder is unknown.
+	lrec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(lrec, httptest.NewRequest(http.MethodGet, "/v1/ls?path=/Docs/new", nil))
+	if !strings.Contains(lrec.Body.String(), `"partial":true`) {
+		t.Errorf("a listing made without OpenDrive does not say it is partial: %s", lrec.Body.String())
+	}
+
 	// Listed, down the folders that do not exist upstream yet, marked pending.
 	for dir, name := range map[string]string{"/Docs/new": "deep", "/Docs/new/deep": "file.bin"} {
 		code, names := listNames(t, srv, dir)

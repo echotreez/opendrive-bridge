@@ -167,6 +167,7 @@ func NewRootCommand(opts *Options) *cobra.Command {
 		newShareCommand(opts),
 		newJobsCommand(opts),
 		newCacheCommand(opts),
+		newS3Command(opts),
 		newDaemonCommand(opts),
 	)
 	return root

@@ -46,11 +46,25 @@ services:
     # it stays that way; set ODB_API_KEY below if you publish it more widely.
     ports:
       - "127.0.0.1:9750:9750"
+      # S3 over HTTPS (§3.6), for backup software — a NAS included — so it is
+      # published to the network. Every request must be signed with the bridge's
+      # key (`docker compose exec opendrive-bridge odctl s3` shows it); nothing
+      # unsigned gets in. Change the left side to "127.0.0.1:9751" to keep it on
+      # this machine.
+      - "9751:9751"
 
     environment:
       ODB_CACHE_DIR: /data/cache
       ODB_CACHE_WRITE_BACK: "true"
       ODB_LOG_LEVEL: info
+      # The bridge makes its own certificate for S3, naming the addresses it can
+      # see — inside a container, not the host's. Put the name or address your
+      # backup program connects to here if it checks the name:
+      # ODB_S3_TLS_HOSTS: "nas-backup.local,192.168.1.20"
+      # Or use a certificate of your own (placed in ./data):
+      # ODB_S3_TLS_CERT: /data/my-cert.pem
+      # ODB_S3_TLS_KEY: /data/my-key.pem
+      # ODB_S3_DELETE: permanent   # default "trash": S3 deletes go to OpenDrive's trash
       # ODB_API_KEY: "choose-a-long-random-string"   # then every caller must send it
 
     volumes:

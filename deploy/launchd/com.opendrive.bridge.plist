@@ -92,6 +92,12 @@
              that the bridge is the only place it exists. `odctl cache status`
              says whether anything is outstanding. The cache directory is *not*
              encrypted, unlike credentials.key.
+
+             Turning the cache on also starts the S3 gateway for backup software
+             (docs/s3-gateway.md): HTTPS on port 9751, reachable from your network,
+             and every request must carry the bridge's key (`odctl s3`). Set
+             ODB_S3_HTTPS_LISTEN to 127.0.0.1:9751 to keep it on this Mac, or ODB_S3
+             to false to switch it off.
         <key>ODB_CACHE_DIR</key>
         <string>/path/to/opendrive-bridge/cache</string>
         -->

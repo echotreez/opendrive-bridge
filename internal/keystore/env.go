@@ -141,15 +141,90 @@ func (s *envStore) Save(ctx context.Context, cred *opendrive.StoredCredentials) 
 	return s.write(fields)
 }
 
-// Delete implements opendrive.CredentialStore: signing out removes the file.
+// Delete implements opendrive.CredentialStore: signing out removes the
+// OpenDrive sign-in.
+//
+// Only the sign-in. The same file holds the bridge's own secrets — the S3 access
+// keys a NAS was set up with — and they are not OpenDrive's to revoke: signing
+// out to switch accounts must not silently break every backup job pointed at the
+// bridge. When nothing else is in the file, the file goes.
 func (s *envStore) Delete(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	fields, err := s.read()
+	if err == nil {
+		for _, k := range signInFields {
+			delete(fields, k)
+		}
+		if hasSecrets(fields) {
+			return s.write(fields)
+		}
+	}
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("keystore: cannot remove %s: %w", s.path, err)
 	}
 	s.key = nil
 	return nil
+}
+
+// signInFields are the fields that describe the OpenDrive sign-in.
+var signInFields = []string{
+	envUsername, envPassword, envAuthMode, envAccessToken, envRefreshToken,
+	envTokenExpiry, envSessionID, envUserID, envAccType, envUpdatedAt,
+}
+
+// secretPrefix marks the bridge's own secrets in the file (SaveSecret).
+const secretPrefix = "ODB_SECRET_"
+
+func hasSecrets(fields map[string]string) bool {
+	for k := range fields {
+		if strings.HasPrefix(k, secretPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// LoadSecret implements Secrets.
+func (s *envStore) LoadSecret(ctx context.Context, name string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fields, err := s.read()
+	if errors.Is(err, opendrive.ErrNoCredentials) {
+		return "", ErrNoSecret
+	}
+	if err != nil {
+		return "", err
+	}
+	v, ok := fields[secretPrefix+name]
+	if !ok || v == "" {
+		return "", ErrNoSecret
+	}
+	return v, nil
+}
+
+// SaveSecret implements Secrets. It leaves the sign-in, if any, as it is.
+func (s *envStore) SaveSecret(ctx context.Context, name, value string) error {
+	if !validSecretName(name) {
+		return fmt.Errorf("keystore: %q is not a usable secret name", name)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fields, err := s.read()
+	if errors.Is(err, opendrive.ErrNoCredentials) {
+		fields, err = map[string]string{}, nil
+	}
+	if err != nil {
+		// Unlike Save, a damaged file is not replaced here: it may hold a
+		// sign-in the user has no other copy of, and a secret is not worth that.
+		return err
+	}
+	if value == "" {
+		delete(fields, secretPrefix+name)
+	} else {
+		fields[secretPrefix+name] = value
+	}
+	return s.write(fields)
 }
 
 // ---------------------------------------------------------------- file access

@@ -184,6 +184,41 @@ jobs:
         shell: bash
         run: ./scripts/smoke.sh smokebin
 
+  # The S3 gateway driven by real backup programs (§3.6, S1): restic runs a
+  # backup, a check that reads every byte, a restore and a prune; rclone copies
+  # with multipart and compares. Against an OpenDrive that keeps what it is given,
+  # so delivery from the cache is in the loop, and then again with the cache
+  # emptied so that every read comes from OpenDrive. Unit tests with an S3
+  # library prove the protocol; this proves the programs people actually use.
+  s3-e2e:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: 'stable' }
+      - name: Install restic and rclone
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq restic rclone
+          else
+            brew install restic rclone
+          fi
+          restic version && rclone version | head -1
+      - name: Build the binaries under test
+        shell: bash
+        run: |
+          mkdir -p e2ebin
+          go build -o e2ebin/ ./cmd/opendrived ./cmd/odctl ./tools/mockupstream
+      - name: S3 end to end
+        shell: bash
+        run: ./scripts/s3-e2e.sh e2ebin
+
   # The systemd unit, installed for real with `systemctl --user`.
   #
   # This job exists because the unit had been wrong for a release and nothing
