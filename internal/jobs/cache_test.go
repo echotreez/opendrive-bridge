@@ -37,9 +37,11 @@ type fakeCache struct {
 	// cached is the set of paths CopyTo will serve.
 	cached map[string][]byte
 
-	puts   []string
-	waits  []string
-	copies []string
+	puts []string
+	// overwrites is the overwrite wish each put carried, in order.
+	overwrites []bool
+	waits      []string
+	copies     []string
 }
 
 func newFakeCache() *fakeCache {
@@ -52,7 +54,7 @@ func newFakeCache() *fakeCache {
 
 func (f *fakeCache) WriteBack() bool { return f.writeBack }
 
-func (f *fakeCache) PutLocalFile(_ context.Context, remotePath, _, _, localPath string) (int64, error) {
+func (f *fakeCache) PutLocalFile(_ context.Context, remotePath, _, _, localPath string, overwrite bool) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.full {
@@ -66,6 +68,7 @@ func (f *fakeCache) PutLocalFile(_ context.Context, remotePath, _, _, localPath 
 		return 0, err
 	}
 	f.puts = append(f.puts, remotePath)
+	f.overwrites = append(f.overwrites, overwrite)
 	return info.Size(), nil
 }
 
@@ -391,5 +394,33 @@ func TestWithoutACacheTheEngineIsUnchanged(t *testing.T) {
 	// deployment without a cache.
 	if final.Phase != PhaseUploading {
 		t.Errorf("phase = %q, want %q", final.Phase, PhaseUploading)
+	}
+}
+
+// The caller's overwrite wish has to reach the gateway with the bytes. If the job
+// engine dropped it, the flusher would pick a default for a caller who had said
+// something specific, and the wrong default replaces a file.
+func TestTheOverwriteWishReachesTheGateway(t *testing.T) {
+	for _, overwrite := range []bool{false, true} {
+		up := newUpstream(t)
+		cache := newFakeCache()
+		e := startedEngine(t, up, WithCache(cache))
+
+		local := writeLocal(t, 1024)
+		if _, err := e.Submit(Spec{
+			Kind: KindUpload, LocalPath: local, FolderID: "FD1", Name: "a.bin",
+			RemotePath: "/Docs/a.bin", Size: 1024, Overwrite: overwrite,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "the file to be copied into the cache", func() bool { return cache.putCount() == 1 })
+
+		cache.mu.Lock()
+		got := append([]bool(nil), cache.overwrites...)
+		cache.mu.Unlock()
+		if len(got) != 1 || got[0] != overwrite {
+			t.Errorf("Spec.Overwrite=%v reached the gateway as %v", overwrite, got)
+		}
+		cache.release()
 	}
 }

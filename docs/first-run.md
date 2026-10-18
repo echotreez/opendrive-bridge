@@ -240,7 +240,11 @@ start: an upload that is allowed to replace what is there (`--overwrite`, and
 every S3 write) is accepted and held, shows in listings marked as pending, and is
 delivered — folders created as needed — once OpenDrive answers again. An upload
 that must *not* replace anything is refused with a sentence saying so, because
-nobody can check the destination while OpenDrive is away. And it means "the upload finished" and "OpenDrive has it" stop being the same sentence,
+nobody can check the destination while OpenDrive is away. The same goes for a
+name that was free when you uploaded and is taken by the time the bridge sends it:
+the upload fails with a sentence saying so, the file already there is left alone,
+and your copy stays on the bridge until you upload it again with `--overwrite` or
+somewhere else. And it means "the upload finished" and "OpenDrive has it" stop being the same sentence,
 so the bridge gives you a way to ask.
 
 `odctl up` does not leave you guessing: even with the cache on, it waits until the

@@ -25,6 +25,11 @@ type PutRequest struct {
 	// last element of RemotePath.
 	FolderID string
 	Name     string
+	// NoOverwrite asks that a file already at the destination be left alone. The
+	// flush is then refused by OpenDrive (a 409 that creates nothing, D54), which
+	// the classifier calls permanent: the object stays dirty with the reason and
+	// anything waiting for it is told.
+	NoOverwrite bool
 	// Size, when the caller knows it, is checked against the dirty allowance
 	// before any bytes are accepted. Zero means unknown, and the allowance is
 	// then enforced as the bytes arrive.
@@ -74,14 +79,15 @@ func (p *PutWriter) Commit() (*Object, error) {
 	c := p.w.c
 	now := c.now()
 	o := &Object{
-		RemotePath: p.req.RemotePath,
-		Size:       p.w.n,
-		Hash:       p.w.hashHex(),
-		State:      StateDirty,
-		FolderID:   p.req.FolderID,
-		Name:       p.req.Name,
-		StoredAt:   now,
-		LastAccess: now,
+		RemotePath:  p.req.RemotePath,
+		Size:        p.w.n,
+		Hash:        p.w.hashHex(),
+		State:       StateDirty,
+		FolderID:    p.req.FolderID,
+		Name:        p.req.Name,
+		NoOverwrite: p.req.NoOverwrite,
+		StoredAt:    now,
+		LastAccess:  now,
 	}
 	stored, err := p.w.commit(o)
 	if err != nil {
@@ -264,6 +270,9 @@ func (c *DataCache) flushOne(ctx context.Context, remotePath string) {
 		}
 		c.setState(remotePath, of, StateDirty, "", reason, attempts)
 
+		if !opendrive.IsTemporary(err) {
+			c.markRefused(remotePath, of, err)
+		}
 		if opendrive.IsTemporary(err) {
 			c.log.Warn("an upload from the cache failed and will be retried; the data is still here",
 				slog.String("datacache_path", remotePath),
@@ -286,6 +295,7 @@ func (c *DataCache) flushOne(ctx context.Context, remotePath string) {
 		reason := fmt.Sprintf("OpenDrive stored something that hashes to %s where this file "+
 			"hashes to %s, so it has not been accepted as uploaded", hash, obj.Hash)
 		c.setState(remotePath, of, StateDirty, "", reason, obj.FlushAttempts+1)
+		c.markRefused(remotePath, of, errors.New(reason))
 		c.log.Error("an upload reported success with the wrong hash; the object stays dirty",
 			slog.String("datacache_path", remotePath),
 			slog.String("datacache_local_hash", obj.Hash),
@@ -350,6 +360,7 @@ func (c *DataCache) setState(remotePath string, of int64, state State, fileID, l
 	o.State = state
 	o.LastError = lastErr
 	o.FlushAttempts = attempts
+	o.refusal = nil
 	if fileID != "" {
 		o.UpstreamFileID = fileID
 	}
@@ -360,6 +371,44 @@ func (c *DataCache) setState(remotePath string, of int64, state State, fileID, l
 	}
 	c.mu.Unlock()
 	return true
+}
+
+// RefusedError is what waiting for an object returns when OpenDrive has refused
+// it for good. The object is still here, unsent, with the reason in LastError;
+// this exists so that a caller waiting for it to arrive — a job's second leg, or
+// `cache flush --wait` for one path — is told it will not, instead of waiting for
+// ever. Err is the classifier's error unchanged, so errors.As finds the
+// *opendrive.APIError and the usual wording applies.
+type RefusedError struct {
+	Path string
+	Err  error
+}
+
+func (e *RefusedError) Error() string {
+	return e.Path + " was refused by OpenDrive and is still held here, unsent: " + e.Err.Error()
+}
+
+func (e *RefusedError) Unwrap() error { return e.Err }
+
+// markRefused records that this version of the object was refused for good.
+// Keyed by version like every other state change, so that a rewrite that arrived
+// meanwhile does not inherit the old object's refusal.
+func (c *DataCache) markRefused(remotePath string, of int64, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if o := c.objs[remotePath]; o != nil && o.StoredAt.UnixNano() == of && o.State == StateDirty {
+		o.refusal = err
+	}
+}
+
+// refusalOf returns the refusal recorded for one object, or nil.
+func (c *DataCache) refusalOf(path string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if o := c.objs[normalisePath(path)]; o != nil && o.State == StateDirty && o.refusal != nil {
+		return &RefusedError{Path: o.RemotePath, Err: o.refusal}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------- flush, wait
@@ -398,6 +447,11 @@ func (c *DataCache) waitUntilSent(ctx context.Context, path string) error {
 	for {
 		if c.settled(path) {
 			return nil
+		}
+		if path != "" {
+			if err := c.refusalOf(path); err != nil {
+				return err
+			}
 		}
 		ch := c.waiter()
 		select {
