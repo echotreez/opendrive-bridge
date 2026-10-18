@@ -58,6 +58,15 @@ per-file SHA256 checksums.
 | [D43](#d43) | confirmed, implemented | `filesettings` ignores an unknown parameter and answers 200 |
 | [D44](#d44) | confirmed, handled | a just-uploaded file is not downloadable straight away |
 | [D45](#d45) | **measured**, normalised at the Bridge | `users/info.json` mixes bytes and megabytes in one object |
+| [D46](#d46) | recorded | upstream trims whitespace off the ends of a name, silently |
+| [D47](#d47) | recorded | an owner's `AccessUserID` is `"0"`, not its own `UserID` |
+| [D48](#d48) | recorded | `listsharedusers` says "nobody" with an object; its sibling uses `[]` |
+| [D49](#d49) | recorded | one `TempLocation` has one write cursor; concurrent chunks succeed only by luck |
+| [D50](#d50) | recorded | six concurrent downloads per IP; the seventh is a `429` with no `Retry-After` |
+| [D51](#d51) | recorded | the plan's speed limit is per connection, not per account |
+| [D52](#d52) | recorded | an upload record has no size and no hash until it is closed |
+| [D53](#d53) | recorded | a listing refused with "Permission denied", once, under load |
+| [D54](#d54) | **measured** | `create_file` on a taken name: `open_if_exists=0` is a 409; `=1` stages a record that replaces the original on close |
 
 ---
 
@@ -1252,6 +1261,12 @@ was accepted after three refusals — and a refused chunk's body is transmitted 
 full before the refusal, so a scheme that sprayed chunks and re-sent the refused
 ones would pay for every miss in bandwidth.
 
+**Corroborated 2026-10-17** by an independent run (four 256 KiB chunks, released
+together in reverse order, against the owner login): only offset 0 was accepted,
+the rest were refused with D37's `uploaded=N` message, and `close_file_upload`
+answered `File is corrupted (invalid checksum)`. A sequential control of the same
+shape stored byte-identical content.
+
 **Consequence:** `parallel_chunks` is removed from the design (whitepaper §7,
 §10.2). Throughput comes from several files at once, which scales cleanly (D51).
 
@@ -1271,6 +1286,13 @@ ones would pay for every miss in bandwidth.
 - The `429` carries **no `Retry-After`**. T15 classifies it correctly
   (`rate_limited`, retryable, replay-safe) and the retry falls back to the
   computed backoff.
+
+**Corroborated 2026-10-17** (one sample per level, a 20 s pause between levels):
+2, 3 and 4 concurrent ranges all `206` and byte-identical on reassembly; 8 gave 6
+successes and 2 × `429 Too many downloads from same IP`, as above. A run at 6 saw
+four of the six fail with `dial tcp … i/o timeout` before any response, which this
+entry's "exactly 6 succeed" does not predict; the cause is unknown — it may well be
+the client's network rather than upstream, and no conclusion is drawn from it.
 
 The limit is **per IP**, so everything the bridge downloads — job workers,
 segmented ranges, the data cache's read-through — shares one budget of six with
@@ -1364,3 +1386,52 @@ left its (empty) scratch folder behind; it was removed by hand.
 the way D40's write probe does it, and what caused the 125 s before the refusal.
 Recorded so the next occurrence has something to be compared with, rather than
 being re-run until it passes.
+
+## D54 — `create_file` on a name that is already taken {#d54}
+
+**Where:** `POST /upload/create_file.json`, parameter `open_if_exists`.
+**Found by:** `TestProbeOpenIfExists` and `TestProbeOpenIfExistsAbandoned`,
+2026-10-17, owner login. Asked because the write-back flusher sends
+`open_if_exists=1` for every object (`internal/datacache/upstream.go`) and nothing
+recorded what that does when the name is taken, or what `=0` does.
+
+An existing file `X` (2048 bytes) in a folder, then `create_file` for the same
+name with different content (3072 bytes):
+
+| `open_if_exists` | result |
+|---|---|
+| `0` | **409** `File with such a name already exists`. No record is created. |
+| `1` | 200 with a **different** `FileId`. The folder listing still shows only `X`, at its old size. |
+
+Then the `=1` record was filled and closed:
+
+- the listing showed **one** file: the original id, the original name, **3072
+  bytes**;
+- downloading the original id returned the new content (status 200, 3072 bytes);
+- downloading the new id returned `404 File does not exist`.
+
+So `=1` does not "open the existing file" and does not make a copy: it stages a
+record whose content replaces the original's **on the original id** at
+`close_file_upload`. The id survives; the bytes do not.
+
+**An abandoned `=1` record** (created, never filled):
+
+- the listing did not show it;
+- `Reclaim` on it succeeded, and the original was untouched (status 200, md5
+  unchanged).
+
+**Consequences:**
+
+1. A caller who wants "do not replace" must send `open_if_exists=0` and handle the
+   409; there is no way to ask for it after the fact. A 409 at `create_file`
+   leaves nothing behind.
+2. The classifier already reads the 409 as `conflict`, which is permanent.
+3. `UploadService.reclaimOrphan` skips cleanup when `OpenIfExists` is set, on the
+   reasoning that the record "may have been an existing file". Measured, it never
+   is: `=1` always returns a new id, so a flush that fails between `create_file`
+   and `close_file_upload` leaves an invisible record, and the flusher retries
+   temporary failures. That is D39's failure mode, reachable from the data cache.
+   **Not fixed here**; it is an SDK change and is recorded so it is not rediscovered.
+4. The write-back flusher replaced files silently for callers who asked
+   `overwrite=false`, if the name appeared between the request and the flush. See
+   `internal/datacache`.
