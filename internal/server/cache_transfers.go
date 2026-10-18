@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/echotreez/opendrive-bridge/pkg/opendrive"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/echotreez/opendrive-bridge/internal/datacache"
 )
@@ -58,13 +60,37 @@ const (
 )
 
 // writeBackEnabled reports whether a write should land in the cache.
+// outagePrecheckBudget bounds how long the destination check may take before a
+// write the gateway could hold is deferred instead. A variable only so a test
+// can shorten it.
+//
+// The consequence to know about: an upstream that is merely slow — answering,
+// but not within the budget — is deferred too, so a path whose folder does not
+// exist is accepted and the flusher creates the folders (EnsurePath) when it
+// gets through, where an upstream that answered in time would have said 404.
+var outagePrecheckBudget = 8 * time.Second
+
 // uploadTargetOrDefer is uploadTarget for a write the gateway can hold. When
 // OpenDrive cannot be reached and write-back is on, a write that replaces what is
 // there is accepted with no folder id, and the flusher (or the job's direct
 // path) resolves — or creates — the folders once OpenDrive is back (§3.6.4).
 // "Do not overwrite" cannot be honoured blind, so that is refused in words.
 func (s *Server) uploadTargetOrDefer(r *http.Request, remote string, overwrite bool) (string, string, error) {
-	folderID, name, err := s.uploadTarget(r, remote, overwrite)
+	rr := r
+	if s.writeBackEnabled() {
+		// Without a bound the answer only comes after the SDK has spent its whole
+		// retry ladder (1s+2s+4s+8s+16s, with jitter), and an upstream that
+		// accepts connections and never replies adds the HTTP timeout to every
+		// rung. Measured against a real daemon: 27 s to accept a write while the
+		// mock was down, 20 s to refuse one, and no answer at all within 150 s for
+		// a blackhole. The SDK reports a deadline as a network error, which the
+		// classifier calls temporary — so a slow upstream is treated like an
+		// unreachable one, which is what it is to the client waiting.
+		ctx, cancel := context.WithTimeout(r.Context(), outagePrecheckBudget)
+		defer cancel()
+		rr = r.WithContext(ctx)
+	}
+	folderID, name, err := s.uploadTarget(rr, remote, overwrite)
 	if err == nil || !opendrive.IsTemporary(err) || !s.writeBackEnabled() {
 		return folderID, name, err
 	}

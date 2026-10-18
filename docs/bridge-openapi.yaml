@@ -378,6 +378,14 @@ paths:
         the path — once OpenDrive is back. Without `overwrite=true` it answers 503,
         because whether something is already at the path cannot be checked. While
         OpenDrive is reachable, a path whose folder does not exist is still a 404.
+
+        The destination check is given about 8 seconds. An OpenDrive that is down,
+        or that accepts the connection and never answers, is treated the same way
+        once that has passed: the write is held (202, `overwrite=true`) or refused
+        (503), rather than the client waiting out the retries. The same limit means
+        an OpenDrive that is only slow is treated as unreachable too, so a path whose
+        folder does not exist can be accepted and have its folders created later,
+        where a prompt answer would have been a 404.
       parameters:
         - { $ref: "#/components/parameters/Path" }
         - name: overwrite
