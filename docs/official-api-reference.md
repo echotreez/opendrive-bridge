@@ -32,7 +32,7 @@ If you have a copy, put it at `docs/OpenDrive_API_guide.pdf`. That path is in
 
 Not the PDF. In descending order of authority:
 
-1. **`docs/discrepancies.md`** — 46 places where this project measured the live
+1. **`docs/discrepancies.md`** — 54 places where this project measured the live
    API doing something other than what it was told. Several show the PDF is
    simply wrong: the breadcrumb endpoint is spelled correctly online and
    misspelled in the guide (D12), the file resource is `/file.json` and not

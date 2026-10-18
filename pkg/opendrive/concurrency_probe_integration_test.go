@@ -595,3 +595,144 @@ func TestProbeAccountLimits(t *testing.T) {
 		fmt.Sprintf("MaxFileSize:          %d", info.MaxFileSize.Int64()),
 		fmt.Sprintf("account user:         %v", info.IsAccountUser()))
 }
+
+// ---------------------------------------------------------------- name conflicts
+
+// TestProbeOpenIfExists settles what create_file does with a name that is already
+// taken, and — the part an earlier version of this probe left as inference — what
+// happens to the original when the second record is actually filled and closed.
+//
+// The write-back flusher needs it: it has to know whether sending
+// open_if_exists=1 replaces the file, duplicates it, or does something else, and
+// whether open_if_exists=0 leaves anything behind.
+func TestProbeOpenIfExists(t *testing.T) {
+	c, ctx := probeClient(t)
+	folder := probeScratch(t, ctx, c)
+	up := c.Uploads()
+
+	name := fmt.Sprintf("odb-probe-exists-%d.bin", time.Now().UnixNano())
+	first := probePayload(2048, "first-"+name)
+	second := probePayload(3072, "second-"+name)
+
+	res, err := up.Upload(ctx, bytes.NewReader(first), UploadParams{
+		FolderID: folder, Name: name, Size: int64(len(first)), Hash: probeMD5(first),
+	})
+	if err != nil || res.File == nil {
+		t.Skipf("could not create the original: %v", err)
+	}
+	origID := res.File.FileID.String()
+	var extra []string
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		for _, id := range append([]string{origID}, extra...) {
+			if err := up.Reclaim(ctx, id, "", ""); err != nil {
+				t.Logf("cleanup: record %s may remain (it may simply be gone): %v", id, err)
+			}
+		}
+	})
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("original: id %s, %d bytes, md5 %s", origID, len(first), probeMD5(first)))
+
+	// open_if_exists=0 on the taken name.
+	_, err0 := up.createFile(ctx, folder, UploadParams{
+		Name: name, Size: int64(len(second)), Hash: probeMD5(second), OpenIfExists: false,
+	})
+	lines = append(lines, fmt.Sprintf("open_if_exists=0 -> err: %v", err0))
+
+	// open_if_exists=1: take the record, fill it, close it.
+	created, err1 := up.createFile(ctx, folder, UploadParams{
+		Name: name, Size: int64(len(second)), Hash: probeMD5(second), OpenIfExists: true,
+	})
+	if err1 != nil {
+		report(t, "open_if_exists", append(lines, fmt.Sprintf("open_if_exists=1 -> err: %v", err1))...)
+		return
+	}
+	newID := created.FileID.String()
+	extra = append(extra, newID)
+	lines = append(lines, fmt.Sprintf("open_if_exists=1 -> id %s (same as original: %v)", newID, newID == origID))
+	lines = append(lines, "listing before the new record is filled: "+probeListing(ctx, c, folder))
+
+	opened, err := up.openFile(ctx, newID, UploadParams{Size: int64(len(second)), Hash: probeMD5(second)})
+	if err != nil || opened.TempLocation == "" {
+		report(t, "open_if_exists", append(lines, fmt.Sprintf("open_file_upload failed: %v", err))...)
+		return
+	}
+	if _, err := up.sendOneChunk(ctx, newID, opened.TempLocation, 0, second); err != nil {
+		report(t, "open_if_exists", append(lines, fmt.Sprintf("chunk failed: %v", err))...)
+		return
+	}
+	_, cerr := up.closeFile(ctx, newID, opened.TempLocation,
+		UploadParams{Size: int64(len(second)), Hash: probeMD5(second)}, false)
+	lines = append(lines, fmt.Sprintf("close of the new record -> err: %v", cerr))
+	lines = append(lines, "listing after the close: "+probeListing(ctx, c, folder))
+
+	for _, id := range []string{origID, newID} {
+		out := fetchRange(ctx, c, id, 0, 4095)
+		lines = append(lines, fmt.Sprintf("download %s -> status %d, %d bytes, err %v",
+			id, out.status, len(out.body), out.err))
+	}
+	report(t, "create_file on a taken name (open_if_exists 0 and 1)", lines...)
+}
+
+// TestProbeOpenIfExistsAbandoned is the failure half of the same question: the
+// flusher sends open_if_exists=1 and an upload can die after create_file. What
+// does an unfilled record look like, does it disturb the original, and can it be
+// reclaimed? (SDK's reclaimOrphan declines to try in this mode.)
+func TestProbeOpenIfExistsAbandoned(t *testing.T) {
+	c, ctx := probeClient(t)
+	folder := probeScratch(t, ctx, c)
+	up := c.Uploads()
+
+	name := fmt.Sprintf("odb-probe-abandon-%d.bin", time.Now().UnixNano())
+	first := probePayload(1024, "orig-"+name)
+	res, err := up.Upload(ctx, bytes.NewReader(first), UploadParams{
+		FolderID: folder, Name: name, Size: int64(len(first)), Hash: probeMD5(first),
+	})
+	if err != nil || res.File == nil {
+		t.Skipf("could not create the original: %v", err)
+	}
+	origID := res.File.FileID.String()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_ = up.Reclaim(ctx, origID, "", "")
+	})
+
+	second := probePayload(2048, "abandoned-"+name)
+	created, err := up.createFile(ctx, folder, UploadParams{
+		Name: name, Size: int64(len(second)), Hash: probeMD5(second), OpenIfExists: true,
+	})
+	if err != nil {
+		t.Skipf("create_file refused: %v", err)
+	}
+	newID := created.FileID.String()
+	lines := []string{
+		fmt.Sprintf("original %s; abandoned record %s (same: %v)", origID, newID, newID == origID),
+		"listing with the record left unfilled: " + probeListing(ctx, c, folder),
+	}
+	rerr := up.Reclaim(ctx, newID, "", "")
+	lines = append(lines,
+		fmt.Sprintf("Reclaim of the abandoned record -> err: %v", rerr),
+		"listing after Reclaim: "+probeListing(ctx, c, folder))
+	out := fetchRange(ctx, c, origID, 0, 4095)
+	lines = append(lines, fmt.Sprintf("original still downloads: status %d, %d bytes, md5 matches: %v, err %v",
+		out.status, len(out.body), probeMD5(out.body) == probeMD5(first), out.err))
+	report(t, "an abandoned open_if_exists=1 record", lines...)
+}
+
+func probeListing(ctx context.Context, c *Client, folder string) string {
+	l, err := c.Folders().List(ctx, folder, ListOptions{})
+	if err != nil {
+		return "list failed: " + err.Error()
+	}
+	var parts []string
+	for _, f := range l.Files {
+		parts = append(parts, fmt.Sprintf("%s=%q size %d", f.FileID, f.Name, f.Size.Int64()))
+	}
+	if len(parts) == 0 {
+		return "(no files)"
+	}
+	return strings.Join(parts, "; ")
+}
