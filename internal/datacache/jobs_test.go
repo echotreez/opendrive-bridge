@@ -309,7 +309,7 @@ func TestForJobsAdaptsTheGateway(t *testing.T) {
 	}
 
 	src := localFile(t, bytesOf(1024, 2))
-	size, err := jc.PutLocalFile(context.Background(), "/Docs/via-adapter.bin", "FD1", "", src)
+	size, err := jc.PutLocalFile(context.Background(), "/Docs/via-adapter.bin", "FD1", "", src, true)
 	if err != nil {
 		t.Fatalf("PutLocalFile: %v", err)
 	}

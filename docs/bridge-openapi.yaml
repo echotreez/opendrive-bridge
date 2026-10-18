@@ -378,6 +378,17 @@ paths:
         the path — once OpenDrive is back. Without `overwrite=true` it answers 503,
         because whether something is already at the path cannot be checked. While
         OpenDrive is reachable, a path whose folder does not exist is still a 404.
+
+        Your `overwrite` choice is kept with the file and honoured when it is
+        finally sent, however long that takes. With `overwrite=false` — the
+        default — a name that has been taken in the meantime (a file uploaded on
+        the web, another client winning the race) is refused by OpenDrive with a
+        409, and the existing file is not replaced. The file you sent stays on the
+        bridge, unsent, with the reason in `last_error` on `GET /v1/cache/objects`;
+        nothing retries a refusal like that. A job waiting for it fails with a
+        permanent `conflict` rather than waiting for ever, and so does
+        `POST /v1/cache/flush` with `wait: true` and a `path`. To resolve it, write
+        the same path again with `overwrite=true`, which replaces the held file.
       parameters:
         - { $ref: "#/components/parameters/Path" }
         - name: overwrite

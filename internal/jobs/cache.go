@@ -33,8 +33,13 @@ type Cache interface {
 	// PutLocalFile copies a local file into the cache as an unsent object. It
 	// returns an error satisfying IsCacheFull when the file does not fit the
 	// gateway's allowance for data OpenDrive does not have.
-	PutLocalFile(ctx context.Context, remotePath, folderID, name, localPath string) (size int64, err error)
-	// WaitUntilSent blocks until the object has reached OpenDrive.
+	// overwrite is the caller's wish; false means a file already at the destination
+	// must not be replaced when the object is eventually sent.
+	PutLocalFile(ctx context.Context, remotePath, folderID, name, localPath string, overwrite bool) (size int64, err error)
+	// WaitUntilSent blocks until the object has reached OpenDrive. It returns an
+	// error when OpenDrive refuses the object for good — a name that is taken for
+	// a caller who said not to overwrite, say — because otherwise the job would
+	// wait for something that will never happen.
 	WaitUntilSent(ctx context.Context, remotePath string) error
 	// CopyTo writes a cached object to a local file, reporting false on a miss.
 	CopyTo(ctx context.Context, remotePath, localPath string) (bool, error)
@@ -118,7 +123,7 @@ func (e *Engine) uploadThroughCache(ctx context.Context, id string, spec Spec) (
 	// a local file is quick — but it is the leg that can refuse, so it is worth
 	// being able to see.
 	e.setPhase(id, PhaseCaching)
-	size, err := e.cache.PutLocalFile(ctx, spec.RemotePath, spec.FolderID, spec.Name, spec.LocalPath)
+	size, err := e.cache.PutLocalFile(ctx, spec.RemotePath, spec.FolderID, spec.Name, spec.LocalPath, spec.Overwrite)
 	if err != nil {
 		if IsCacheFull(err) {
 			e.log.Info("the cache has no room for this file, so it goes straight to OpenDrive",

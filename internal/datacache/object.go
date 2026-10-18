@@ -57,6 +57,15 @@ type Object struct {
 	// it then.
 	FolderID string `json:"folder_id,omitempty"`
 	Name     string `json:"name,omitempty"`
+	// NoOverwrite is the caller's "do not replace a file that is already there".
+	// The zero value means replace, which is also what every journal written
+	// before this field existed meant, so an old journal replays unchanged.
+	//
+	// It is stored with the object because the flusher runs long after the
+	// request is gone. Without it the flusher cannot tell a caller who asked for a
+	// replacement from one who asked for a refusal, and the wrong guess silently
+	// destroys somebody's file (D54).
+	NoOverwrite bool `json:"no_overwrite,omitempty"`
 	// UpstreamFileID is filled in once upstream has a record for it. Persisted
 	// before any content moves, so a crash mid-flush can reclaim the record
 	// rather than leak it (D39).
@@ -72,6 +81,13 @@ type Object struct {
 	// as the wording meant for a person. Empty when the last attempt succeeded
 	// or none has been made.
 	LastError string `json:"last_error,omitempty"`
+
+	// refusal is the error from the last flush that OpenDrive refused for good, so
+	// that something waiting for this object to arrive can be told it will not,
+	// instead of waiting for ever. In memory only, by design: after a restart the
+	// flusher tries the object again and, if it is still refused, records this
+	// again. Cleared whenever the state changes.
+	refusal error
 }
 
 // key is the object's filename inside the cache directory.

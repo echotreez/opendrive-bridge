@@ -77,10 +77,13 @@ func (u *SDKUploader) Upload(ctx context.Context, obj *Object, content *os.File)
 		// situation where that is most likely to pay off, because the user may
 		// well have uploaded the same file from somewhere else in the meantime.
 		Hash: obj.Hash,
-		// A flush replaces whatever is at that path: the client wrote to it and
-		// was told the write was accepted, so refusing now over a name conflict
-		// would strand the object for ever.
-		OpenIfExists: true,
+		// A flush replaces whatever is at that path unless the caller asked it not
+		// to. Measured (D54): open_if_exists=0 on a taken name is a 409 that
+		// creates nothing, so a refused flush leaves no record behind; the
+		// classifier calls it a conflict, which is permanent, so the object stays
+		// dirty with that reason instead of being retried or dropped. With =1
+		// the content replaces the original on the original's id at close.
+		OpenIfExists: !obj.NoOverwrite,
 	})
 	if err != nil {
 		return "", err

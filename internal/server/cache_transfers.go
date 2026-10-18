@@ -220,6 +220,7 @@ func (s *Server) handleUploadStreamCached(w http.ResponseWriter, r *http.Request
 
 	pw, err := s.datacache.Put(datacache.PutRequest{
 		RemotePath: remote, FolderID: folderID, Name: name, Size: r.ContentLength,
+		NoOverwrite: !overwrite,
 	})
 	if err != nil {
 		WriteError(w, r, cacheError(err))

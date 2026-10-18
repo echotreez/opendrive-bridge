@@ -230,9 +230,10 @@ func ForJobs(c *DataCache) *JobCache {
 func (j *JobCache) WriteBack() bool { return j.c.cfg.WriteBack }
 
 // PutLocalFile copies a local file in and returns its size.
-func (j *JobCache) PutLocalFile(ctx context.Context, remotePath, folderID, name, localPath string) (int64, error) {
+func (j *JobCache) PutLocalFile(ctx context.Context, remotePath, folderID, name, localPath string,
+	overwrite bool) (int64, error) {
 	obj, err := j.c.PutLocalFile(ctx, PutRequest{
-		RemotePath: remotePath, FolderID: folderID, Name: name,
+		RemotePath: remotePath, FolderID: folderID, Name: name, NoOverwrite: !overwrite,
 	}, localPath)
 	if err != nil {
 		return 0, err
